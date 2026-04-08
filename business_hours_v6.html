@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>営業時間設定 - Salon Manager</title>
+<script>
+var SK='salon_db';
+function dbLoadRaw(){try{var r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch(e){return null;}}
+function dbSaveRaw(db){try{localStorage.setItem(SK,JSON.stringify(db));}catch(e){}}
+function dbGetSettings(){var db=dbLoadRaw();return(db&&db.settings)?db.settings:{openTime:'10:00',closeTime:'19:00',intervalMin:30,slotMin:30,closedDows:[2],weeklyClose:[],bookingWeeks:8,lastMin:'same1h',deadline:'前日24時まで'};}
+function dbSaveSettings(s){var db=dbLoadRaw()||{};db.settings=s;dbSaveRaw(db);}
+</script>
+<style>
+  :root{--accent:#b5845a;--accent-light:#f5ede4;--surface:#f5f4f0;--border:rgba(0,0,0,0.12);--text:#1a1a18;--muted:#73726c;--green:#7b9e87;--green-light:#e8f2eb;--red:#c47b7b;--red-light:#faeaea;--interval:#d4b483;--interval-light:#faf3e6;--blue:#7a8fbf;--blue-light:#eaeefc;--bg:#ffffff;color-scheme:light;}
+  *{box-sizing:border-box;margin:0;padding:0;color-scheme:light;}
+  body{font-family:'Georgia',serif;color:#1a1a18!important;background:#ffffff!important;}
+  input,select,textarea{background:#ffffff!important;color:#1a1a18!important;}
+  .layout{display:flex;height:100vh;min-height:600px;}
+  .sidebar{width:200px;min-width:200px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 0;}
+  .sidebar-logo{padding:0 16px 20px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600;color:var(--accent);}
+  .sidebar-logo span{display:block;font-size:10px;color:var(--muted);font-weight:400;margin-top:2px;}
+  .nav-item{display:flex;align-items:center;gap:8px;padding:10px 16px;font-size:12px;color:var(--muted);cursor:pointer;transition:all .15s;border-left:3px solid transparent;text-decoration:none;}
+  .nav-item:hover{color:var(--text);background:#eeede9;}
+  .nav-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light);font-weight:600;}
+  .main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border);}
+  .topbar-title{font-size:16px;font-weight:600;}.topbar-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+  .save-btn{padding:7px 20px;font-size:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-family:inherit;}
+  .save-btn:hover{opacity:.85;}
+  .content{flex:1;overflow-y:auto;padding:24px;}
+  .section{background:#fff;border:1px solid var(--border);border-radius:12px;margin-bottom:20px;overflow:hidden;}
+  .section-header{padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface);}
+  .section-title{font-size:14px;font-weight:600;}.section-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+  .section-body{padding:20px;}
+  .row-label{font-size:13px;font-weight:500;margin-bottom:4px;}.row-sub{font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6;}
+  .divider{border:none;border-top:1px solid var(--border);margin:20px 0;}
+  .hours-row{display:flex;align-items:center;gap:12px;}
+  .hours-row label{font-size:12px;color:var(--muted);min-width:48px;}
+  .time-input{padding:8px 12px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;width:110px;}
+  .time-input:focus{outline:none;border-color:var(--accent);}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:14px 0;border-top:1px solid var(--border);}
+  .toggle-label{font-size:13px;font-weight:500;}.toggle-sub{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.6;}
+  .tgl{position:relative;width:40px;height:22px;cursor:pointer;flex-shrink:0;}
+  .tgl input{opacity:0;width:0;height:0;position:absolute;}
+  .tgl-track{position:absolute;inset:0;background:var(--border);border-radius:11px;transition:background .2s;}
+  .tgl input:checked+.tgl-track{background:var(--green);}
+  .tgl-thumb{position:absolute;top:3px;left:3px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.15);}
+  .tgl input:checked~.tgl-thumb{transform:translateX(18px);}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;}
+  .chip{padding:7px 16px;border:1px solid var(--border);border-radius:20px;font-size:12px;cursor:pointer;user-select:none;white-space:nowrap;transition:all .15s;}
+  .chip:hover:not(.selected){border-color:var(--accent);color:var(--accent);}
+  .chip.selected.accent{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;}
+  .chip.selected.blue{background:var(--blue-light);border-color:var(--blue);color:#2c3a66;font-weight:600;}
+  .chip.selected.interval{background:var(--interval-light);border-color:var(--interval);color:#5a4010;font-weight:600;}
+  .chip.selected.green{background:var(--green-light);border-color:var(--green);color:#1e4d2b;font-weight:600;}
+  .setting-note{font-size:11px;color:var(--muted);margin-top:10px;padding:9px 12px;border-radius:8px;line-height:1.7;}
+  .setting-note.amber{background:var(--interval-light);border-left:3px solid var(--interval);}
+  .setting-note.blue{background:var(--blue-light);border-left:3px solid var(--blue);}
+  .setting-note.green{background:var(--green-light);border-left:3px solid var(--green);}
+  .interval-setting{display:flex;align-items:center;gap:12px;margin-bottom:10px;}
+  .interval-input{width:80px;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:14px;font-family:inherit;text-align:center;}
+  .interval-input:focus{outline:none;border-color:var(--interval);}
+  .dow-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:8px;margin-bottom:14px;}
+  .dow-chip{text-align:center;padding:10px 4px;border-radius:8px;border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:600;user-select:none;}
+  .dow-chip.sun{color:#c47b7b;}.dow-chip.sat{color:var(--accent);}
+  .dow-chip.closed{background:var(--red-light);border-color:var(--red);color:#7a2020;}
+  .dow-chip:hover:not(.closed){background:var(--accent-light);border-color:var(--accent);}
+  .dow-chip-label{font-size:9px;font-weight:400;color:var(--muted);margin-top:3px;}
+  .dow-chip.closed .dow-chip-label{color:#c47b7b;}
+  .weekly-close-list{display:flex;flex-direction:column;gap:8px;}
+  .wc-row{display:flex;align-items:center;gap:10px;padding:10px 14px;background:var(--surface);border-radius:8px;border:1px solid var(--border);}
+  .wc-time{display:flex;align-items:center;gap:6px;flex:1;}
+  .wc-time input{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;width:90px;}
+  .wc-del{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-size:12px;color:var(--muted);}
+  .wc-del:hover{border-color:var(--red);color:var(--red);}
+  .add-wc-btn{margin-top:8px;width:100%;padding:8px;border:1px dashed var(--border);border-radius:8px;background:none;cursor:pointer;font-size:12px;color:var(--muted);font-family:inherit;}
+  .add-wc-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .preview{background:var(--accent-light);border:1px solid var(--accent);border-radius:10px;padding:14px 18px;margin-top:16px;}
+  .preview-title{font-size:11px;font-weight:600;color:var(--accent);margin-bottom:8px;}
+  .preview-row{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px solid rgba(181,132,90,.15);}
+  .preview-row:last-child{border-bottom:none;}.preview-row span:last-child{font-weight:600;}
+  /* 予約受付期間プレビュー */
+  .booking-preview{background:var(--green-light);border:1px solid var(--green);border-radius:10px;padding:12px 16px;margin-top:12px;}
+  .booking-preview-title{font-size:10px;font-weight:600;color:#1e4d2b;letter-spacing:.06em;margin-bottom:6px;}
+  .booking-preview-dates{font-size:13px;font-weight:600;color:#1e4d2b;}
+  .booking-preview-sub{font-size:11px;color:#2e5c3a;margin-top:4px;}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#2e5c3a;color:#fff;font-size:12px;padding:9px 20px;border-radius:20px;opacity:0;transition:all .3s;z-index:200;white-space:nowrap;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-logo">Salon Manager<span>管理画面</span></div>
+    <div style="height:14px;"></div>
+    <a class="nav-item" href="salon_auth_v2.html">🏠 ダッシュボード</a>
+    <a class="nav-item" href="salon_calendar_v7.html">📅 カレンダー</a>
+    <a class="nav-item" href="customer_memo_v6.html">👤 顧客管理</a>
+    <a class="nav-item" href="menu_settings_v3.html">✦ メニュー設定</a>
+    <a class="nav-item active">🕐 営業時間</a>
+    <a class="nav-item" href="cancel_policy_v3.html">📋 キャンセル規定</a>
+    <a class="nav-item" href="stamp_settings.html">🎫 スタンプ設定</a>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div><div class="topbar-title">営業時間・定休日設定</div><div class="topbar-sub">変更はすぐに顧客の予約画面に反映されます</div></div>
+      <button class="save-btn" onclick="saveAll()">保存する</button>
+    </div>
+    <div class="content">
+
+      <!-- 予約受付期間 -->
+      <div class="section">
+        <div class="section-header">
+          <div class="section-title">予約受付期間</div>
+          <div class="section-sub">当日から何週間先まで予約を受け付けるか設定します</div>
+        </div>
+        <div class="section-body">
+          <div class="row-label">受付期間</div>
+          <div class="row-sub">選択した週数先まで顧客が日付を選べます。サロン側カレンダーにも反映されます。</div>
+          <div class="chips" id="bookingWeeksChips"></div>
+          <div class="booking-preview" id="bookingPreview">
+            <div class="booking-preview-title">現在の受付期間</div>
+            <div class="booking-preview-dates" id="bookingPreviewDates"></div>
+            <div class="booking-preview-sub" id="bookingPreviewSub"></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 開店・閉店時間 -->
+      <div class="section">
+        <div class="section-header"><div class="section-title">開店・閉店時間 / 予約設定</div></div>
+        <div class="section-body">
+          <div class="row-label">開店・閉店時間</div>
+          <div class="hours-row">
+            <label>開店</label><input type="time" class="time-input" id="openTime" oninput="updatePreview()">
+            <span style="font-size:14px;color:var(--muted);">〜</span>
+            <label>閉店</label><input type="time" class="time-input" id="closeTime" oninput="updatePreview()">
+          </div>
+          <hr class="divider">
+          <div class="row-label">インターバル（準備時間）</div>
+          <div class="row-sub">予約と予約の間に自動で入る準備時間です。</div>
+          <div class="interval-setting">
+            <input type="number" class="interval-input" id="intervalMin" min="0" max="120" step="5" oninput="syncIvChips();updatePreview();">
+            <span style="font-size:13px;color:var(--muted);">分</span>
+            <div class="chips" id="ivChips"></div>
+          </div>
+          <hr class="divider">
+          <div class="row-label">顧客の予約時間枠</div>
+          <div class="row-sub">顧客がアプリで選べる開始時間の刻みです。</div>
+          <div class="chips" id="slotChips"></div>
+          <div class="setting-note blue" id="slotNote"></div>
+          <hr class="divider">
+          <div class="row-label">直前予約の受付期限</div>
+          <div class="chips" id="lastMinChips"></div>
+          <div class="setting-note amber" id="lastMinNote"></div>
+          <hr class="divider">
+          <div class="toggle-row">
+            <div>
+              <div class="toggle-label">インターバルを閉店時間に含める</div>
+              <div class="toggle-sub">オン：最終受付 = 閉店時間 − メニュー時間 − インターバル時間</div>
+            </div>
+            <label class="tgl"><input type="checkbox" id="intervalToggle" onchange="updatePreview()"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>
+          </div>
+          <div class="preview">
+            <div class="preview-title">最終受付時間の例（90分メニューの場合）</div>
+            <div class="preview-row"><span>閉店時間</span><span id="prev-close"></span></div>
+            <div class="preview-row"><span>インターバルなし</span><span id="prev-no-iv"></span></div>
+            <div class="preview-row"><span>インターバルあり</span><span id="prev-with-iv"></span></div>
+            <div class="preview-row"><span>現在の設定での最終受付</span><span id="prev-current" style="color:var(--accent);"></span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 定休日 -->
+      <div class="section">
+        <div class="section-header"><div class="section-title">定休日（毎週）</div><div class="section-sub">タップで定休日に設定・解除できます</div></div>
+        <div class="section-body">
+          <div class="dow-grid" id="dowGrid"></div>
+          <div style="font-size:11px;color:var(--muted);">現在の定休日：<span id="closedDowLabel" style="font-weight:600;color:var(--red);"></span></div>
+        </div>
+      </div>
+
+      <!-- 曜日ごとクローズ -->
+      <div class="section">
+        <div class="section-header"><div class="section-title">曜日ごとの定期クローズ時間</div></div>
+        <div class="section-body">
+          <div class="weekly-close-list" id="wcList"></div>
+          <button class="add-wc-btn" onclick="addWcRow()">＋ 曜日クローズを追加</button>
+        </div>
+      </div>
+
+      <!-- キャンセル期限 -->
+      <div class="section">
+        <div class="section-header"><div class="section-title">アプリでのキャンセル受付期限</div></div>
+        <div class="section-body">
+          <div class="chips" id="deadlineChips"></div>
+          <div class="setting-note green" id="deadlineNote" style="margin-top:10px;"></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+<script>
+var DOWS=['日','月','火','水','木','金','土'];
+var IV_PRESETS=[0,10,15,20,30,45,60];
+var SLOT_OPTS=[{v:5,l:'5分'},{v:10,l:'10分'},{v:15,l:'15分'},{v:30,l:'30分'}];
+var LASTMIN_OPTS=[{v:'1week',l:'1週間前'},{v:'3days',l:'3日前'},{v:'1day',l:'前日'},{v:'same3h',l:'当日3時間前'},{v:'same1h',l:'当日1時間前'},{v:'same30m',l:'当日30分前'}];
+var DEADLINES=['3日前まで','2日前まで','前日まで','前日24時まで'];
+// 予約受付週数：5〜25週
+var BOOKING_WEEKS_OPTS=[5,6,7,8,9,10,12,14,16,18,20,22,24,25];
+
+var s=dbGetSettings();
+var closedDows=(s.closedDows||[2]).slice();
+var wcRows=(s.weeklyClose||[]).map(function(w,i){return{dow:w.dow,start:w.start,end:w.end,id:i+1};});
+var wcNextId=wcRows.length+10;
+var slotVal=s.slotMin||30;
+var lastMinVal=s.lastMin||'same1h';
+var deadlineVal=s.deadline||'前日24時まで';
+var bookingWeeksVal=s.bookingWeeks||8;
+
+// ===== 予約受付週数 =====
+function renderBookingWeeksChips(){
+  document.getElementById('bookingWeeksChips').innerHTML=BOOKING_WEEKS_OPTS.map(function(w){
+    return '<div class="chip '+(bookingWeeksVal===w?'selected green':'')+'" onclick="setBookingWeeks('+w+')">'+w+'週間</div>';
+  }).join('');
+  updateBookingPreview();
+}
+function setBookingWeeks(w){bookingWeeksVal=w;renderBookingWeeksChips();}
+function updateBookingPreview(){
+  var today=new Date();today.setHours(0,0,0,0);
+  var last=new Date(today);last.setDate(today.getDate()+bookingWeeksVal*7);
+  var fmt=function(d){return(d.getMonth()+1)+'月'+d.getDate()+'日（'+DOWS[d.getDay()]+'）';};
+  document.getElementById('bookingPreviewDates').textContent=fmt(today)+' 〜 '+fmt(last);
+  document.getElementById('bookingPreviewSub').textContent='本日から '+bookingWeeksVal+' 週間先（'+bookingWeeksVal*7+'日後）まで予約可能';
+}
+
+// ===== インターバルチップ =====
+function renderIvChips(){var cur=parseInt(document.getElementById('intervalMin').value,10)||0;document.getElementById('ivChips').innerHTML=IV_PRESETS.map(function(v){return'<div class="chip '+(cur===v?'selected interval':'')+'" onclick="setIv('+v+')">'+(v===0?'なし':v+'分')+'</div>';}).join('');}
+function setIv(v){document.getElementById('intervalMin').value=v;renderIvChips();updatePreview();}
+function syncIvChips(){renderIvChips();}
+
+// ===== スロットチップ =====
+function renderSlotChips(){document.getElementById('slotChips').innerHTML=SLOT_OPTS.map(function(o){return'<div class="chip '+(slotVal===o.v?'selected blue':'')+'" onclick="setSlot('+o.v+')">'+o.l+'</div>';}).join('');var map={5:'5分刻み：10:00・10:05…',10:'10分刻み：10:00・10:10…',15:'15分刻み：10:00・10:15…',30:'30分刻み：10:00・10:30…'};document.getElementById('slotNote').textContent=map[slotVal]||'';}
+function setSlot(v){slotVal=v;renderSlotChips();}
+
+// ===== 直前受付 =====
+function renderLastMinChips(){document.getElementById('lastMinChips').innerHTML=LASTMIN_OPTS.map(function(o){return'<div class="chip '+(lastMinVal===o.v?'selected accent':'')+'" onclick="setLastMin(\''+o.v+'\')">'+o.l+'</div>';}).join('');var map={'1week':'予約日の1週間前まで受付。','3days':'3日前まで受付。','1day':'前日までに予約が必要です。','same3h':'当日3時間前まで受付。','same1h':'当日1時間前まで受付。','same30m':'当日30分前まで受付。'};document.getElementById('lastMinNote').textContent=map[lastMinVal]||'';}
+function setLastMin(v){lastMinVal=v;renderLastMinChips();}
+
+// ===== キャンセル期限 =====
+function renderDeadlineChips(){document.getElementById('deadlineChips').innerHTML=DEADLINES.map(function(d){return'<div class="chip '+(deadlineVal===d?'selected accent':'')+'" onclick="setDeadline(\''+d+'\')">'+d+'</div>';}).join('');var map={'3日前まで':'予約日の3日前23:59までキャンセル操作ができます。','2日前まで':'2日前23:59まで。','前日まで':'前日23:59まで。','前日24時まで':'前日24:00（当日0:00）まで。'};document.getElementById('deadlineNote').textContent=map[deadlineVal]||'';}
+function setDeadline(v){deadlineVal=v;renderDeadlineChips();}
+
+// ===== 定休日 =====
+function renderDowGrid(){document.getElementById('dowGrid').innerHTML=DOWS.map(function(d,i){var isClosed=false;for(var _ci=0;_ci<closedDows.length;_ci++){if(closedDows[_ci]===i){isClosed=true;break;}}var cls=i===0?'sun':i===6?'sat':'';return'<div class="dow-chip '+cls+' '+(isClosed?'closed':'')+'" onclick="toggleDow('+i+')">'+d+'<div class="dow-chip-label">'+(isClosed?'定休':'営業')+'</div></div>';}).join('');var labels=DOWS.filter(function(_,i){return closedDows.includes(i);}).map(function(d){return d+'曜日';});document.getElementById('closedDowLabel').textContent=labels.length?labels.join('・'):'なし';}
+function toggleDow(i){if(closedDows.includes(i)){closedDows=closedDows.filter(function(d){return d!==i;});}else{closedDows=closedDows.concat([i]);}renderDowGrid();}
+
+// ===== 曜日クローズ =====
+function renderWcList(){var list=document.getElementById('wcList');if(wcRows.length===0){list.innerHTML='<div style="font-size:12px;color:var(--muted);padding:4px 0;">設定されていません</div>';return;}list.innerHTML=wcRows.map(function(r){return'<div class="wc-row"><select style="padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;width:68px;" onchange="updateWcDow('+r.id+',this.value)">'+DOWS.map(function(d,i){return'<option value="'+i+'" '+(r.dow===i?'selected':'')+'>'+d+'曜</option>';}).join('')+'</select><div class="wc-time"><input type="time" value="'+r.start+'" onchange="updateWc('+r.id+',\'start\',this.value)"><span>〜</span><input type="time" value="'+r.end+'" onchange="updateWc('+r.id+',\'end\',this.value)"></div><button class="wc-del" onclick="delWcRow('+r.id+')">✕</button></div>';}).join('');}
+function addWcRow(){wcRows.push({id:wcNextId++,dow:1,start:'12:00',end:'13:00'});renderWcList();}
+function delWcRow(id){wcRows=wcRows.filter(function(r){return r.id!==id;});renderWcList();}
+function updateWc(id,f,v){for(var _i=0;_i<wcRows.length;_i++){if(wcRows[_i].id===id){wcRows[_i][f]=v;break;}}}
+function updateWcDow(id,v){for(var _i=0;_i<wcRows.length;_i++){if(wcRows[_i].id===id){wcRows[_i].dow=parseInt(v);break;}}}
+
+// ===== 最終受付プレビュー =====
+function updatePreview(){var closeStr=document.getElementById('closeTime').value||'19:00';var withIv=document.getElementById('intervalToggle').checked;var iv=parseInt(document.getElementById('intervalMin').value,10)||0;var parts=closeStr.split(':').map(Number);var closeMin=parts[0]*60+parts[1];var fmt=function(m){if(m<0)return'受付不可';return String(Math.floor(m/60)).padStart(2,'0')+':'+String(m%60).padStart(2,'0')+' まで受付';};document.getElementById('prev-close').textContent=closeStr;document.getElementById('prev-no-iv').textContent=fmt(closeMin-90);document.getElementById('prev-with-iv').textContent=fmt(closeMin-90-iv);document.getElementById('prev-current').textContent=withIv?fmt(closeMin-90-iv):fmt(closeMin-90);}
+
+// ===== 保存 =====
+function saveAll(){
+  var settings={
+    openTime:document.getElementById('openTime').value,
+    closeTime:document.getElementById('closeTime').value,
+    intervalMin:parseInt(document.getElementById('intervalMin').value,10)||0,
+    intervalInClose:document.getElementById('intervalToggle').checked,
+    slotMin:slotVal,
+    lastMin:lastMinVal,
+    deadline:deadlineVal,
+    closedDows:closedDows.slice(),
+    weeklyClose:wcRows.map(function(r){return{dow:r.dow,start:r.start,end:r.end};}),
+    bookingWeeks:bookingWeeksVal
+  };
+  dbSaveSettings(settings);
+  showToast('設定を保存しました');
+}
+function showToast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2500);}
+
+window.addEventListener('DOMContentLoaded',function(){
+  document.getElementById('openTime').value=s.openTime||'10:00';
+  document.getElementById('closeTime').value=s.closeTime||'19:00';
+  document.getElementById('intervalMin').value=s.intervalMin!=null?s.intervalMin:30;
+  document.getElementById('intervalToggle').checked=s.intervalInClose||false;
+  renderBookingWeeksChips();
+  renderIvChips();renderSlotChips();renderLastMinChips();renderDowGrid();renderWcList();renderDeadlineChips();updatePreview();
+});
+</script>
+</body>
+</html>

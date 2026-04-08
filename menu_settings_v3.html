@@ -1,0 +1,369 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>メニュー設定 - Salon Manager</title>
+<style>
+:root{--ac:#b5845a;--al:#f5ede4;--ad:#7a5535;--sf:#f5f4f0;--bd:rgba(0,0,0,0.12);--tx:#1a1a18;--mu:#73726c;--gn:#7b9e87;--gl:#e8f2eb;--rd:#c47b7b;--rl:#faeaea;--bg:#fff;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:Georgia,serif;background:var(--bg);color:var(--tx);}
+input,select,textarea{background:#fff!important;color:var(--tx)!important;font-family:inherit;}
+.layout{display:flex;height:100vh;}
+.sidebar{width:190px;min-width:190px;background:var(--sf);border-right:1px solid var(--bd);display:flex;flex-direction:column;padding:20px 0;}
+.sidebar-logo{padding:0 16px 20px;border-bottom:1px solid var(--bd);font-size:14px;font-weight:600;color:var(--ac);}
+.sidebar-logo span{display:block;font-size:10px;color:var(--mu);font-weight:400;margin-top:2px;}
+.nav-item{display:block;padding:10px 16px;font-size:12px;color:var(--mu);text-decoration:none;border-left:3px solid transparent;}
+.nav-item.active{color:var(--ac);border-left-color:var(--ac);background:var(--al);font-weight:600;}
+.main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+.topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--bd);}
+.topbar-title{font-size:16px;font-weight:600;}
+.topbar-sub{font-size:11px;color:var(--mu);margin-top:2px;}
+.add-btn{padding:8px 18px;background:var(--ac);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;font-family:inherit;}
+.tab-bar{display:flex;border-bottom:1px solid var(--bd);padding:0 24px;}
+.tab-btn{padding:12px 20px;font-size:13px;font-weight:600;color:var(--mu);border:none;background:none;cursor:pointer;border-bottom:2px solid transparent;font-family:inherit;}
+.tab-btn.active{color:var(--ac);border-bottom-color:var(--ac);}
+.tab-count{font-size:11px;background:var(--bd);border-radius:10px;padding:1px 7px;margin-left:5px;}
+.tab-btn.active .tab-count{background:var(--al);color:var(--ac);}
+.content{flex:1;overflow-y:auto;padding:20px 24px;}
+.list-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;font-size:12px;color:var(--mu);}
+.menu-card{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid var(--bd);border-radius:10px;padding:12px 14px;margin-bottom:8px;}
+.menu-card.hidden-card{opacity:.55;}
+.order-btns{display:flex;flex-direction:column;gap:3px;flex-shrink:0;}
+.order-btn{width:28px;height:28px;border:1px solid var(--bd);border-radius:6px;background:none;cursor:pointer;font-size:14px;color:var(--mu);font-family:inherit;}
+.order-btn:hover:not(:disabled){border-color:var(--ac);color:var(--ac);}
+.order-btn:disabled{opacity:.2;cursor:not-allowed;}
+.menu-info{flex:1;min-width:0;}
+.menu-name{font-size:14px;font-weight:600;margin-bottom:4px;}
+.menu-desc-preview{font-size:11px;color:var(--mu);margin-bottom:4px;line-height:1.5;}
+.menu-meta{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.meta-time{font-size:12px;color:var(--mu);}
+.meta-price{font-size:12px;font-weight:600;color:var(--ac);}
+.meta-badge{font-size:10px;padding:2px 8px;border-radius:10px;font-weight:600;}
+.meta-badge.pub{background:var(--gl);color:#1e4d2b;}
+.meta-badge.prv{background:var(--sf);color:var(--mu);border:1px solid var(--bd);}
+.meta-badge.cau{background:var(--rl);color:#7a2020;}
+.menu-actions{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.tgl{position:relative;width:36px;height:20px;cursor:pointer;flex-shrink:0;}
+.tgl input{opacity:0;width:0;height:0;position:absolute;}
+.tgl-track{position:absolute;inset:0;background:var(--bd);border-radius:10px;transition:background .2s;}
+.tgl input:checked+.tgl-track{background:var(--gn);}
+.tgl-thumb{position:absolute;top:2px;left:2px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.2);}
+.tgl input:checked~.tgl-thumb{transform:translateX(16px);}
+.icon-btn{width:30px;height:30px;border:1px solid var(--bd);border-radius:7px;background:none;cursor:pointer;font-size:14px;font-family:inherit;}
+.icon-btn:hover{border-color:var(--ac);color:var(--ac);}
+.icon-btn.del:hover{border-color:var(--rd);color:var(--rd);}
+.modal-ov{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:100;overflow-y:auto;padding:30px 16px;}
+.modal-ov.show{display:block;}
+.modal{background:#fff;border-radius:14px;padding:24px;width:100%;max-width:440px;margin:0 auto;box-shadow:0 8px 32px rgba(0,0,0,.15);}
+.modal h3{font-size:16px;font-weight:600;margin-bottom:18px;}
+.fg{margin-bottom:12px;}
+.fg label{font-size:12px;font-weight:600;color:var(--mu);display:block;margin-bottom:5px;}
+.fg input[type=text],.fg input[type=number],.fg textarea{width:100%;padding:10px 12px;border:1.5px solid var(--bd);border-radius:9px;font-size:14px;font-family:inherit;}
+.fg input:focus,.fg textarea:focus{outline:none;border-color:var(--ac);}
+.field-row{display:flex;gap:12px;margin-bottom:12px;}
+.field-row .fg{flex:1;margin-bottom:0;}
+.price-wrap{display:flex;align-items:center;gap:6px;}
+.price-wrap input{flex:1;}
+.rg{display:flex;gap:8px;margin-top:4px;}
+.ro{flex:1;padding:10px;text-align:center;border:1.5px solid var(--bd);border-radius:9px;font-size:13px;cursor:pointer;}
+.ro.sel{background:var(--al);border-color:var(--ac);color:var(--ad);font-weight:600;}
+.modal-note{font-size:11px;color:var(--mu);background:var(--sf);border-radius:8px;padding:8px 12px;margin-top:8px;line-height:1.6;}
+.char-count{text-align:right;font-size:11px;color:var(--mu);margin-top:3px;}
+.cau-note{font-size:11px;color:var(--rd);margin-top:4px;}
+.modal-actions{display:flex;gap:10px;margin-top:20px;}
+.mb{flex:1;padding:12px;border-radius:10px;font-size:14px;cursor:pointer;font-family:inherit;font-weight:600;border:1.5px solid var(--bd);background:none;color:var(--mu);}
+.mb.primary{background:var(--ac);color:#fff;border-color:var(--ac);}
+.mb.danger{background:var(--rd);color:#fff;border-color:var(--rd);}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#2e5c3a;color:#fff;font-size:12px;padding:9px 20px;border-radius:20px;opacity:0;transition:all .3s;z-index:300;white-space:nowrap;}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-logo">Salon Manager<span>管理画面</span></div>
+    <div style="height:14px;"></div>
+    <a class="nav-item" href="salon_auth_v2.html">🏠 ダッシュボード</a>
+    <a class="nav-item" href="salon_calendar_v7.html">📅 カレンダー</a>
+    <a class="nav-item" href="customer_memo_v6.html">👤 顧客管理</a>
+    <a class="nav-item active">✦ メニュー設定</a>
+    <a class="nav-item" href="business_hours_v6.html">🕐 営業時間</a>
+    <a class="nav-item" href="cancel_policy_v3.html">📋 キャンセル規定</a>
+    <a class="nav-item" href="stamp_settings.html">🎫 スタンプ設定</a>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div><div class="topbar-title">メニュー設定</div><div class="topbar-sub">最大100件まで登録できます</div></div>
+      <button class="add-btn" onclick="openAdd()">＋ 新規追加</button>
+    </div>
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tabMain" onclick="switchTab('main')">メインメニュー <span class="tab-count" id="mainCount">0</span></button>
+      <button class="tab-btn" id="tabOpt" onclick="switchTab('option')">オプション <span class="tab-count" id="optCount">0</span></button>
+    </div>
+    <div class="content">
+      <div class="list-header"><span id="listLabel"></span><span>↑↓ ボタンで順番を変更できます</span></div>
+      <div id="menuList"></div>
+    </div>
+  </div>
+</div>
+
+<!-- 追加・編集モーダル -->
+<div class="modal-ov" id="modalOv">
+  <div class="modal">
+    <h3 id="mTitle">メニューを追加</h3>
+    <div class="fg"><label>メニュー名</label><input type="text" id="fName" placeholder="例：フェイシャルトリートメント"></div>
+    <div class="field-row">
+      <div class="fg"><label>所要時間（分）</label><input type="number" id="fDuration" placeholder="例：90" min="5" step="5"></div>
+      <div class="fg"><label>料金</label><div class="price-wrap"><input type="number" id="fPrice" placeholder="例：12000" min="0" step="100"><span style="font-size:13px;color:var(--mu);">円</span></div></div>
+    </div>
+    <div class="fg">
+      <label>種別</label>
+      <div class="rg">
+        <div class="ro sel" id="roMain" onclick="setType('main')">メインメニュー</div>
+        <div class="ro" id="roOpt" onclick="setType('option')">オプション</div>
+      </div>
+    </div>
+    <div class="fg">
+      <label>公開設定</label>
+      <div class="rg">
+        <div class="ro sel" id="roPub" onclick="setVis('public')">公開</div>
+        <div class="ro" id="roPrv" onclick="setVis('private')">非公開</div>
+      </div>
+      <div class="modal-note" id="visNote">公開：顧客がアプリから予約時に選択できます</div>
+    </div>
+    <div class="fg">
+      <label>メニュー説明 <span style="font-weight:400;color:#aaa;">任意・140文字以内</span></label>
+      <textarea id="fDesc" rows="3" maxlength="140" placeholder="例：お肌の潤いを取り戻す集中ケアです。"></textarea>
+      <div class="char-count"><span id="dCnt">0</span>/140</div>
+    </div>
+    <div class="fg">
+      <label>注意事項・禁忌事項 <span style="font-weight:400;color:#aaa;">任意</span></label>
+      <textarea id="fCaution" rows="3" placeholder="例：妊娠中の方はご相談ください。"></textarea>
+      <div class="cau-note">⚠️ 顧客アプリで「必読」ボタンをタップすると表示されます</div>
+    </div>
+    <div class="modal-actions">
+      <button class="mb" onclick="closeModal()">キャンセル</button>
+      <button class="mb primary" onclick="saveMenu()">保存する</button>
+    </div>
+  </div>
+</div>
+
+<!-- 削除確認モーダル -->
+<div class="modal-ov" id="delOv">
+  <div class="modal">
+    <h3>メニューを削除しますか？</h3>
+    <p style="font-size:13px;color:var(--mu);margin-bottom:10px;" id="delName"></p>
+    <p style="font-size:12px;padding:10px 12px;background:var(--rl);border-radius:8px;color:#7a2020;line-height:1.6;">削除すると元に戻せません。</p>
+    <div class="modal-actions">
+      <button class="mb" onclick="closeDelModal()">キャンセル</button>
+      <button class="mb danger" onclick="confirmDelete()">削除する</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+var SK='salon_db';
+var DEFAULT_MENUS=[
+  {id:'m1',name:'フェイシャルトリートメント',duration:90,price:12000,type:'main',public:true,desc:'',caution:''},
+  {id:'m2',name:'ボディケア',duration:60,price:8000,type:'main',public:true,desc:'',caution:''},
+  {id:'m3',name:'フェイシャル＋アイ',duration:120,price:16000,type:'main',public:true,desc:'',caution:''},
+  {id:'m4',name:'目元ケア',duration:30,price:3000,type:'option',public:true,desc:'',caution:''},
+  {id:'m5',name:'ヘッドスパ',duration:20,price:2500,type:'option',public:true,desc:'',caution:''},
+  {id:'m6',name:'デコルテケア',duration:15,price:2000,type:'option',public:true,desc:'',caution:''}
+];
+
+function loadMenus(){
+  try{
+    var raw=localStorage.getItem(SK);
+    if(!raw)return JSON.parse(JSON.stringify(DEFAULT_MENUS));
+    var db=JSON.parse(raw);
+    if(db.menus&&db.menus.length>0)return db.menus;
+    return JSON.parse(JSON.stringify(DEFAULT_MENUS));
+  }catch(e){return JSON.parse(JSON.stringify(DEFAULT_MENUS));}
+}
+function saveMenus(m){
+  try{
+    var raw=localStorage.getItem(SK);
+    var db=raw?JSON.parse(raw):{};
+    db.menus=m;
+    localStorage.setItem(SK,JSON.stringify(db));
+  }catch(e){}
+}
+
+var menus=loadMenus();
+var curTab='main';
+var editingId=null;
+var deletingId=null;
+var fType='main';
+var fVis='public';
+
+function renderList(){
+  saveMenus(menus);
+  var mc=0,oc=0;
+  for(var i=0;i<menus.length;i++){if(menus[i].type==='main')mc++;else oc++;}
+  document.getElementById('mainCount').textContent=mc;
+  document.getElementById('optCount').textContent=oc;
+  var list=[];
+  for(var j=0;j<menus.length;j++){if(menus[j].type===curTab)list.push(menus[j]);}
+  document.getElementById('listLabel').textContent=(curTab==='main'?'メインメニュー':'オプション')+' '+list.length+'件';
+  var wrap=document.getElementById('menuList');
+  wrap.innerHTML='';
+  for(var k=0;k<list.length;k++){
+    var m=list[k];
+    var isFirst=(k===0),isLast=(k===list.length-1);
+    var badges='<span class="meta-badge '+(m.public?'pub':'prv')+'">'+(m.public?'公開':'非公開')+'</span>';
+    if(m.caution)badges+=' <span class="meta-badge cau">⚠️ 必読あり</span>';
+    var card=document.createElement('div');
+    card.className='menu-card'+(m.public?'':' hidden-card');
+    card.id='mc_'+m.id;
+    card.innerHTML=
+      '<div class="order-btns">'
+      +'<button class="order-btn" '+(isFirst?'disabled':'')+' onclick="moveMenu(\''+m.id+'\',-1)">↑</button>'
+      +'<button class="order-btn" '+(isLast?'disabled':'')+' onclick="moveMenu(\''+m.id+'\',1)">↓</button>'
+      +'</div>'
+      +'<div class="menu-info">'
+      +'<div class="menu-name">'+m.name+'</div>'
+      +(m.desc?'<div class="menu-desc-preview">'+m.desc+'</div>':'')
+      +'<div class="menu-meta">'
+      +'<span class="meta-time">⏱ '+m.duration+'分</span>'
+      +'<span class="meta-price">'+(m.price!=null?'¥'+m.price.toLocaleString():'料金未設定')+'</span>'
+      +badges
+      +'</div>'
+      +'</div>'
+      +'<div class="menu-actions">'
+      +'<label class="tgl"><input type="checkbox" '+(m.public?'checked':'')+' onchange="togglePub(\''+m.id+'\',this.checked)"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>'
+      +'<button class="icon-btn" onclick="copyMenu(\''+m.id+'\')">⧉</button>'
+      +'<button class="icon-btn" onclick="openEdit(\''+m.id+'\')">✎</button>'
+      +'<button class="icon-btn del" onclick="openDel(\''+m.id+'\')">✕</button>'
+      +'</div>';
+    wrap.appendChild(card);
+  }
+}
+
+function switchTab(t){
+  curTab=t;
+  document.getElementById('tabMain').classList.toggle('active',t==='main');
+  document.getElementById('tabOpt').classList.toggle('active',t==='option');
+  renderList();
+}
+
+function togglePub(id,val){
+  for(var i=0;i<menus.length;i++){if(menus[i].id===id){menus[i].public=val;break;}}
+  renderList();
+}
+
+function moveMenu(id,dir){
+  var idx=-1;
+  for(var i=0;i<menus.length;i++){if(menus[i].id===id){idx=i;break;}}
+  if(idx<0)return;
+  var swap=-1;
+  if(dir===-1){for(var j=idx-1;j>=0;j--){if(menus[j].type===curTab){swap=j;break;}}}
+  else{for(var k=idx+1;k<menus.length;k++){if(menus[k].type===curTab){swap=k;break;}}}
+  if(swap<0)return;
+  var tmp=menus[idx];menus[idx]=menus[swap];menus[swap]=tmp;
+  renderList();
+}
+
+function copyMenu(id){
+  if(menus.length>=100){alert('最大100件までです');return;}
+  var src=null,si=-1;
+  for(var i=0;i<menus.length;i++){if(menus[i].id===id){src=menus[i];si=i;break;}}
+  if(!src)return;
+  var copy=Object.assign({},src,{id:'m'+Date.now(),name:src.name+'（コピー）'});
+  menus.splice(si+1,0,copy);
+  renderList();showToast('「'+src.name+'」をコピーしました');
+}
+
+function openAdd(){
+  editingId=null;fType=curTab;fVis='public';
+  document.getElementById('mTitle').textContent='メニューを追加';
+  document.getElementById('fName').value='';
+  document.getElementById('fDuration').value='';
+  document.getElementById('fPrice').value='';
+  document.getElementById('fDesc').value='';
+  document.getElementById('fCaution').value='';
+  document.getElementById('dCnt').textContent='0';
+  document.getElementById('fDesc').onkeyup=function(){document.getElementById('dCnt').textContent=this.value.length;};
+  setType(curTab);setVis('public');
+  document.getElementById('modalOv').classList.add('show');
+}
+
+function openEdit(id){
+  var m=null;
+  for(var i=0;i<menus.length;i++){if(menus[i].id===id){m=menus[i];break;}}
+  if(!m)return;
+  editingId=id;fType=m.type;fVis=m.public?'public':'private';
+  document.getElementById('mTitle').textContent='メニューを編集';
+  document.getElementById('fName').value=m.name;
+  document.getElementById('fDuration').value=m.duration;
+  document.getElementById('fPrice').value=m.price!=null?m.price:'';
+  document.getElementById('fDesc').value=m.desc||'';
+  document.getElementById('fCaution').value=m.caution||'';
+  document.getElementById('dCnt').textContent=(m.desc||'').length;
+  document.getElementById('fDesc').onkeyup=function(){document.getElementById('dCnt').textContent=this.value.length;};
+  setType(m.type);setVis(m.public?'public':'private');
+  document.getElementById('modalOv').classList.add('show');
+}
+
+function setType(v){
+  fType=v;
+  document.getElementById('roMain').className='ro'+(v==='main'?' sel':'');
+  document.getElementById('roOpt').className='ro'+(v==='option'?' sel':'');
+}
+function setVis(v){
+  fVis=v;
+  document.getElementById('roPub').className='ro'+(v==='public'?' sel':'');
+  document.getElementById('roPrv').className='ro'+(v==='private'?' sel':'');
+  document.getElementById('visNote').textContent=v==='public'?'公開：顧客がアプリから予約時に選択できます':'非公開：サロン側の手動登録時のみ使用できます';
+}
+
+function closeModal(){document.getElementById('modalOv').classList.remove('show');}
+
+function saveMenu(){
+  var name=document.getElementById('fName').value.trim();
+  var dur=parseInt(document.getElementById('fDuration').value,10);
+  var pr=document.getElementById('fPrice').value;
+  var price=pr===''?null:parseInt(pr,10);
+  var desc=document.getElementById('fDesc').value.trim();
+  var caution=document.getElementById('fCaution').value.trim();
+  if(!name){alert('メニュー名を入力してください');return;}
+  if(isNaN(dur)||dur<5){alert('所要時間を入力してください（5分以上）');return;}
+  if(editingId){
+    for(var i=0;i<menus.length;i++){
+      if(menus[i].id===editingId){
+        menus[i].name=name;menus[i].duration=dur;menus[i].price=price;
+        menus[i].type=fType;menus[i].public=(fVis==='public');
+        menus[i].desc=desc;menus[i].caution=caution;break;
+      }
+    }
+  }else{
+    menus.push({id:'m'+Date.now(),name:name,duration:dur,price:price,type:fType,public:(fVis==='public'),desc:desc,caution:caution});
+    curTab=fType;
+  }
+  closeModal();renderList();showToast('保存しました');
+}
+
+function openDel(id){
+  deletingId=id;
+  var m=null;for(var i=0;i<menus.length;i++){if(menus[i].id===id){m=menus[i];break;}}
+  document.getElementById('delName').textContent=m?'「'+m.name+'」を削除します':'';
+  document.getElementById('delOv').classList.add('show');
+}
+function closeDelModal(){document.getElementById('delOv').classList.remove('show');}
+function confirmDelete(){
+  var nm=[];for(var i=0;i<menus.length;i++){if(menus[i].id!==deletingId)nm.push(menus[i]);}
+  menus=nm;closeDelModal();renderList();showToast('削除しました');
+}
+
+function showToast(msg){
+  var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');
+  setTimeout(function(){t.classList.remove('show');},2200);
+}
+
+renderList();
+</script>
+</body>
+</html>

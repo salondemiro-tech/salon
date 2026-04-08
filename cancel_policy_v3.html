@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>キャンセル規定 - Salon Manager</title>
+<style>
+  :root{--accent:#b5845a;--accent-light:#f5ede4;--surface:#f5f4f0;--border:rgba(0,0,0,0.12);--text:#1a1a18;--muted:#73726c;--green:#7b9e87;--green-light:#e8f2eb;--red:#c47b7b;--red-light:#faeaea;--blue:#7a8fbf;--blue-light:#eaeefc;--bg:#ffffff;color-scheme:light;}
+  *{box-sizing:border-box;margin:0;padding:0;color-scheme:light;}
+  body{font-family:'Georgia',serif;color:#1a1a18!important;background:#ffffff!important;}
+  input,textarea,select{background:#ffffff!important;color:#1a1a18!important;}
+  .layout{display:flex;height:100vh;min-height:600px;}
+  .sidebar{width:200px;min-width:200px;background:var(--surface);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:20px 0;}
+  .sidebar-logo{padding:0 16px 20px;border-bottom:1px solid var(--border);font-size:14px;font-weight:600;color:var(--accent);}
+  .sidebar-logo span{display:block;font-size:10px;color:var(--muted);font-weight:400;margin-top:2px;}
+  .nav-item{display:flex;align-items:center;gap:8px;padding:10px 16px;font-size:12px;color:var(--muted);cursor:pointer;transition:all .15s;border-left:3px solid transparent;text-decoration:none;}
+  .nav-item:hover{color:var(--text);background:#eeede9;}
+  .nav-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light);font-weight:600;}
+  .main{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+  .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border);}
+  .topbar-title{font-size:16px;font-weight:600;}
+  .topbar-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+  .save-btn{padding:7px 20px;font-size:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-family:inherit;}
+  .save-btn:hover{opacity:.85;}
+  .content{flex:1;overflow-y:auto;padding:24px;}
+  .section{background:#fff;border:1px solid var(--border);border-radius:12px;margin-bottom:20px;overflow:hidden;}
+  .section-header{padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface);}
+  .section-title{font-size:14px;font-weight:600;}
+  .section-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+  .section-body{padding:20px;}
+  .row-label{font-size:13px;font-weight:500;margin-bottom:4px;}
+  .row-sub{font-size:11px;color:var(--muted);margin-bottom:10px;line-height:1.6;}
+  .divider{border:none;border-top:1px solid var(--border);margin:20px 0;}
+  .policy-ta{width:100%;min-height:130px;padding:12px;border:1px solid var(--border);border-radius:8px;font-size:13px;line-height:1.8;resize:vertical;font-family:inherit;}
+  .policy-ta:focus{outline:none;border-color:var(--accent);}
+  .char-count{font-size:10px;color:var(--muted);text-align:right;margin-top:4px;}
+  .policy-preview{margin-top:12px;padding:14px 16px;background:var(--accent-light);border:1px solid var(--accent);border-radius:10px;}
+  .policy-preview-title{font-size:10px;font-weight:600;color:var(--accent);letter-spacing:.06em;margin-bottom:8px;}
+  .policy-preview-text{font-size:12px;line-height:1.8;white-space:pre-wrap;}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--border);}
+  .toggle-row:last-child{border-bottom:none;}
+  .toggle-label{font-size:13px;font-weight:500;}
+  .toggle-sub{font-size:11px;color:var(--muted);margin-top:3px;line-height:1.6;}
+  .tgl{position:relative;width:40px;height:22px;cursor:pointer;flex-shrink:0;}
+  .tgl input{opacity:0;width:0;height:0;position:absolute;}
+  .tgl-track{position:absolute;inset:0;background:var(--border);border-radius:11px;transition:background .2s;}
+  .tgl input:checked+.tgl-track{background:var(--green);}
+  .tgl-thumb{position:absolute;top:3px;left:3px;width:16px;height:16px;background:#fff;border-radius:50%;transition:transform .2s;box-shadow:0 1px 3px rgba(0,0,0,.15);}
+  .tgl input:checked~.tgl-thumb{transform:translateX(18px);}
+  .rate-table{width:100%;border-collapse:collapse;margin-bottom:12px;}
+  .rate-table th{font-size:11px;color:var(--muted);font-weight:500;padding:6px 10px;text-align:left;border-bottom:1px solid var(--border);background:var(--surface);}
+  .rate-table td{padding:8px 10px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle;}
+  .rate-table tr:last-child td{border-bottom:none;}
+  .rate-select{padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;}
+  .rate-input{width:70px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;text-align:center;font-family:inherit;}
+  .rate-input:focus{outline:none;border-color:var(--accent);}
+  .rate-unit{font-size:12px;color:var(--muted);margin-left:4px;}
+  .rate-del{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-size:12px;color:var(--muted);}
+  .rate-del:hover{border-color:var(--red);color:var(--red);}
+  .add-rate-btn{width:100%;padding:8px;border:1px dashed var(--border);border-radius:8px;background:none;cursor:pointer;font-size:12px;color:var(--muted);font-family:inherit;}
+  .add-rate-btn:hover{border-color:var(--accent);color:var(--accent);}
+  .rate-preview{background:var(--surface);border-radius:8px;padding:12px 14px;border:1px solid var(--border);}
+  .rate-preview-title{font-size:10px;color:var(--muted);letter-spacing:.06em;margin-bottom:8px;}
+  .qr-input{width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;margin-top:4px;}
+  .qr-input:focus{outline:none;border-color:var(--green);}
+  .qr-msg-ta{width:100%;min-height:100px;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:13px;line-height:1.7;resize:vertical;font-family:inherit;margin-top:4px;}
+  .qr-msg-ta:focus{outline:none;border-color:var(--green);}
+  .msg-preview{margin-top:12px;padding:14px 16px;background:var(--blue-light);border:1px solid var(--blue);border-radius:10px;}
+  .msg-preview-title{font-size:10px;font-weight:600;color:#2c3a66;letter-spacing:.06em;margin-bottom:8px;}
+  .msg-preview-text{font-size:12px;line-height:1.8;white-space:pre-wrap;color:#2c3a66;}
+  .placeholder-hint{font-size:11px;color:var(--muted);margin-top:8px;padding:8px 10px;background:var(--surface);border-radius:7px;line-height:1.8;}
+  .setting-note{font-size:11px;color:var(--muted);margin-top:10px;padding:9px 12px;border-radius:8px;line-height:1.7;}
+  .setting-note.green{background:var(--green-light);border-left:3px solid var(--green);}
+  .setting-note.blue{background:var(--blue-light);border-left:3px solid var(--blue);}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#2e5c3a;color:#fff;font-size:12px;padding:9px 20px;border-radius:20px;opacity:0;transition:all .3s;z-index:200;white-space:nowrap;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="sidebar">
+    <div class="sidebar-logo">Salon Manager<span>管理画面</span></div>
+    <div style="height:14px;"></div>
+    <a class="nav-item" href="salon_auth_v2.html">🏠 ダッシュボード</a>
+    <a class="nav-item" href="salon_calendar_v7.html">📅 カレンダー</a>
+    <a class="nav-item" href="customer_memo_v6.html">👤 顧客管理</a>
+    <a class="nav-item" href="menu_settings_v3.html">✦ メニュー設定</a>
+    <a class="nav-item" href="business_hours_v6.html">🕐 営業時間</a>
+    <a class="nav-item active">📋 キャンセル規定</a>
+  </div>
+  <div class="main">
+    <div class="topbar">
+      <div><div class="topbar-title">キャンセル規定</div><div class="topbar-sub">キャンセル料のルールと通知設定を管理します</div></div>
+      <button class="save-btn" onclick="saveAll()">保存する</button>
+    </div>
+    <div class="content">
+
+      <!-- 規定文章 -->
+      <div class="section">
+        <div class="section-header"><div class="section-title">キャンセル規定の文章</div><div class="section-sub">顧客の予約・キャンセル時に表示される規定文です</div></div>
+        <div class="section-body">
+          <textarea class="policy-ta" id="policyText" oninput="updatePolicyPreview();updateCharCount();"></textarea>
+          <div class="char-count"><span id="charCount">0</span> 文字</div>
+          <div class="policy-preview"><div class="policy-preview-title">顧客画面でのプレビュー</div><div class="policy-preview-text" id="policyPreview"></div></div>
+        </div>
+      </div>
+
+      <!-- 表示タイミング -->
+      <div class="section">
+        <div class="section-header"><div class="section-title">規定の表示タイミング</div></div>
+        <div class="section-body">
+          <div class="toggle-row"><div><div class="toggle-label">予約時に表示する</div><div class="toggle-sub">新規予約の完了前に規定を表示し、確認ボタンを押さないと予約できません</div></div><label class="tgl"><input type="checkbox" id="showOnBook" checked><div class="tgl-track"></div><div class="tgl-thumb"></div></label></div>
+          <div class="toggle-row"><div><div class="toggle-label">キャンセル時に表示する</div><div class="toggle-sub">キャンセルする際に規定を表示します</div></div><label class="tgl"><input type="checkbox" id="showOnCancel" checked><div class="tgl-track"></div><div class="tgl-thumb"></div></label></div>
+        </div>
+      </div>
+
+      <!-- 料率設定 -->
+      <div class="section">
+        <div class="section-header"><div class="section-title">キャンセル料の料率設定</div><div class="section-sub">段階を自由に追加・削除できます</div></div>
+        <div class="section-body">
+          <table class="rate-table"><thead><tr><th>タイミング</th><th>キャンセル料</th><th style="width:36px;"></th></tr></thead><tbody id="rateTableBody"></tbody></table>
+          <button class="add-rate-btn" onclick="addRate()">＋ 段階を追加</button>
+          <hr class="divider">
+          <div class="rate-preview-title">現在の設定まとめ</div>
+          <div class="rate-preview" id="ratePreview"></div>
+          <div class="setting-note blue" style="margin-top:10px;">キャンセルが規定に該当した場合、自動でQRコードが送付されます。自動引き落としではありません。</div>
+        </div>
+      </div>
+
+      <!-- 自動通知設定 -->
+      <div class="section">
+        <div class="section-header"><div class="section-title">キャンセル料発生時の自動通知設定</div></div>
+        <div class="section-body">
+          <div class="row-label">決済・振込用のQRコードURL</div>
+          <div class="row-sub">PayPay・Square・銀行振込など</div>
+          <input type="text" class="qr-input" id="qrUrl" placeholder="例：https://pay.paypay.ne.jp/xxx" oninput="updateMsgPreview()">
+          <hr class="divider">
+          <div class="row-label">自動送信メッセージ</div>
+          <div class="placeholder-hint">使える変数：<b>{顧客名}</b>　<b>{予約日時}</b>　<b>{メニュー}</b>　<b>{キャンセル料}</b>　<b>{QRリンク}</b></div>
+          <textarea class="qr-msg-ta" id="qrMsg" oninput="updateMsgPreview()"></textarea>
+          <div class="msg-preview"><div class="msg-preview-title">送信イメージ（山田 花子さんの場合）</div><div class="msg-preview-text" id="msgPreview"></div></div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+var SK='salon_db';
+var DEFAULT_POLICY={
+  text:'【キャンセル規定】\n\nご予約のキャンセル・変更は以下の規定に従いキャンセル料を申し受けます。\n\n・3日前まで：無料\n・2日前〜前日：ご予約料金の50%\n・当日：ご予約料金の100%\n・無断キャンセル：ご予約料金の100%\n\nキャンセルの際はお電話またはアプリよりご連絡ください。',
+  rates:[{id:1,label:'3日前から',percent:0},{id:2,label:'前日から',percent:50},{id:3,label:'当日',percent:100},{id:4,label:'無断キャンセル',percent:100}],
+  qrUrl:'',
+  qrMsg:'{顧客名} 様\n\nキャンセル規定に基づき、下記のキャンセル料が発生しております。\n\n■ 予約日時：{予約日時}\n■ メニュー：{メニュー}\n■ キャンセル料：{キャンセル料}\n\n下記よりお支払いをお願いいたします。\n{QRリンク}',
+  showOnBook:true,
+  showOnCancel:true
+};
+
+function dbLoadRaw(){try{var r=localStorage.getItem(SK);return r?JSON.parse(r):null;}catch(e){return null;}}
+function dbSaveRaw(db){try{localStorage.setItem(SK,JSON.stringify(db));}catch(e){}}
+function dbGetCancelPolicy(){
+  var db=dbLoadRaw();
+  if(!db)return Object.assign({},DEFAULT_POLICY);
+  return Object.assign({},DEFAULT_POLICY,db.cancelPolicy||{});
+}
+function dbSaveCancelPolicy(p){
+  var db=dbLoadRaw()||{};
+  db.cancelPolicy=p;
+  dbSaveRaw(db);
+}
+
+var TYPE_OPTS=[{v:'days7',l:'7日前から'},{v:'days6',l:'6日前から'},{v:'days5',l:'5日前から'},{v:'days4',l:'4日前から'},{v:'days3',l:'3日前から'},{v:'days2',l:'2日前から'},{v:'days1',l:'前日から'},{v:'same',l:'当日'},{v:'noshow',l:'無断キャンセル'}];
+var rates=[];
+var rateNextId=10;
+
+function init(){
+  var p=dbGetCancelPolicy();
+  document.getElementById('policyText').value=p.text||'';
+  document.getElementById('qrUrl').value=p.qrUrl||'';
+  document.getElementById('qrMsg').value=p.qrMsg||'';
+  document.getElementById('showOnBook').checked=p.showOnBook!==false;
+  document.getElementById('showOnCancel').checked=p.showOnCancel!==false;
+  rates=[];
+  var pr=p.rates||[];
+  for(var i=0;i<pr.length;i++)rates.push({label:pr[i].label,percent:pr[i].percent,id:i+1});
+  rateNextId=rates.length+10;
+  updatePolicyPreview();updateCharCount();renderRateTable();updateMsgPreview();
+}
+
+function updatePolicyPreview(){document.getElementById('policyPreview').textContent=document.getElementById('policyText').value;}
+function updateCharCount(){document.getElementById('charCount').textContent=document.getElementById('policyText').value.length;}
+
+function renderRateTable(){
+  var tbody=document.getElementById('rateTableBody');
+  tbody.innerHTML='';
+  for(var k=0;k<rates.length;k++){
+    var r=rates[k];
+    var opts='';
+    for(var oi=0;oi<TYPE_OPTS.length;oi++){
+      opts+='<option value="'+TYPE_OPTS[oi].l+'" '+(r.label===TYPE_OPTS[oi].l?'selected':'')+'>'+TYPE_OPTS[oi].l+'</option>';
+    }
+    var tr=document.createElement('tr');
+    tr.innerHTML='<td><select class="rate-select" data-rid="'+r.id+'">'+opts+'</select></td>'
+      +'<td><input type="number" class="rate-input" value="'+r.percent+'" min="0" max="100" step="10" data-rid="'+r.id+'"><span class="rate-unit">%</span></td>'
+      +'<td><button class="rate-del" data-rid="'+r.id+'">✕</button></td>';
+    (function(rid){
+      tr.querySelector('select').addEventListener('change',function(){updateRateLabel(rid,this.value);});
+      tr.querySelector('input').addEventListener('change',function(){updateRatePercent(rid,this.value);});
+      tr.querySelector('button').addEventListener('click',function(){delRate(rid);});
+    })(r.id);
+    tbody.appendChild(tr);
+  }
+  updateRatePreview();
+}
+
+function addRate(){rates.push({id:rateNextId++,label:'2日前から',percent:30});renderRateTable();}
+function delRate(id){
+  if(rates.length<=1){showToast('最低1段階は必要です');return;}
+  var nr=[];for(var i=0;i<rates.length;i++){if(rates[i].id!==id)nr.push(rates[i]);}
+  rates=nr;renderRateTable();
+}
+function updateRateLabel(id,v){for(var i=0;i<rates.length;i++){if(rates[i].id===id){rates[i].label=v;break;}}updateRatePreview();}
+function updateRatePercent(id,v){for(var i=0;i<rates.length;i++){if(rates[i].id===id){rates[i].percent=parseInt(v)||0;break;}}updateRatePreview();}
+
+function updateRatePreview(){
+  var html='';
+  for(var i=0;i<rates.length;i++){
+    var r=rates[i];
+    var color=r.percent===0?'var(--green)':r.percent<100?'var(--accent)':'var(--red)';
+    html+='<div style="display:flex;justify-content:space-between;padding:3px 0;border-bottom:1px solid var(--border);"><span>'+r.label+'</span><span style="font-weight:600;color:'+color+';">'+(r.percent===0?'無料':r.percent+'%')+'</span></div>';
+  }
+  document.getElementById('ratePreview').innerHTML=html;
+}
+
+function updateMsgPreview(){
+  var url=document.getElementById('qrUrl').value||'https://pay.example.com/xxx';
+  var msg=document.getElementById('qrMsg').value;
+  msg=msg.replace(/{顧客名}/g,'山田 花子').replace(/{予約日時}/g,'4月3日（木）14:00').replace(/{メニュー}/g,'フェイシャルトリートメント').replace(/{キャンセル料}/g,'¥6,000（50%）').replace(/{QRリンク}/g,url);
+  document.getElementById('msgPreview').textContent=msg;
+}
+
+function saveAll(){
+  var policy={
+    text:document.getElementById('policyText').value,
+    rates:(function(){var r=[];for(var i=0;i<rates.length;i++)r.push({label:rates[i].label,percent:rates[i].percent});return r;})(),
+    qrUrl:document.getElementById('qrUrl').value,
+    qrMsg:document.getElementById('qrMsg').value,
+    showOnBook:document.getElementById('showOnBook').checked,
+    showOnCancel:document.getElementById('showOnCancel').checked
+  };
+  dbSaveCancelPolicy(policy);
+  showToast('設定を保存しました');
+}
+
+function showToast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},2500);}
+
+init();
+</script>
+</body>
+</html>

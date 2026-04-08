@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>顧客メモ - Salon Manager</title>
+<style>
+  :root{--accent:#b5845a;--accent-light:#f5ede4;--surface:#f5f4f0;--border:rgba(0,0,0,0.12);--text:#1a1a18;--muted:#73726c;--green:#7b9e87;--green-light:#e8f2eb;--blue:#7a8fbf;--blue-light:#eaeefc;--red:#c47b7b;--red-light:#faeaea;--bg:#ffffff;color-scheme:light;}
+  *{box-sizing:border-box;margin:0;padding:0;color-scheme:light;}
+  body{font-family:'Georgia',serif;color:#1a1a18!important;background:#ffffff!important;}
+  input,textarea,select{background:#ffffff!important;color:#1a1a18!important;}
+  .layout{display:flex;height:100vh;min-height:600px;}
+  .left-col{width:200px;min-width:160px;border-right:1px solid var(--border);display:flex;flex-direction:column;overflow:hidden;}
+  .cust-search{padding:12px 14px;border-bottom:1px solid var(--border);background:var(--surface);}
+  .cust-search input{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;}
+  .cust-list{overflow-y:auto;flex:1;}
+  .cust-item{display:flex;align-items:center;gap:10px;padding:11px 14px;cursor:pointer;border-bottom:1px solid var(--border);}
+  .cust-item:hover{background:var(--accent-light);}
+  .cust-item.active{background:var(--accent-light);border-left:3px solid var(--accent);}
+  .cust-avatar{width:36px;height:36px;border-radius:50%;background:var(--accent);color:#fff;font-size:14px;display:flex;align-items:center;justify-content:center;font-weight:600;flex-shrink:0;}
+  .cust-info .cust-name{font-size:13px;font-weight:600;}
+  .cust-info .cust-sub{font-size:11px;color:var(--muted);margin-top:2px;}
+  .right-col{flex:1;display:flex;flex-direction:column;overflow:hidden;}
+  .right-header{padding:14px 20px 12px;border-bottom:1px solid var(--border);background:var(--surface);}
+  .rh-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;}
+  .rh-title{font-size:15px;font-weight:600;}
+  .rh-edit-btn{padding:5px 12px;border:1px solid var(--accent);border-radius:6px;background:none;color:var(--accent);font-size:11px;cursor:pointer;font-family:inherit;}
+  .rh-edit-btn:hover{background:var(--accent);color:#fff;}
+  .stats-bar{display:flex;border:1px solid var(--border);border-radius:10px;overflow:hidden;}
+  .stat-item{flex:1;padding:7px 8px;text-align:center;border-right:1px solid var(--border);}
+  .stat-item:last-child{border-right:none;}
+  .stat-num{font-size:16px;font-weight:600;color:var(--accent);display:block;}
+  .stat-label{font-size:10px;color:var(--muted);display:block;}
+  .tab-bar{display:flex;border-bottom:1px solid var(--border);}
+  .tab-btn{flex:1;padding:10px;font-size:12px;background:none;border:none;cursor:pointer;color:var(--muted);font-family:inherit;border-bottom:2px solid transparent;}
+  .tab-btn.active{color:var(--accent);border-bottom-color:var(--accent);font-weight:600;}
+  .tab-content{flex:1;overflow-y:auto;padding:16px 20px;}
+  .slabel{font-size:10px;letter-spacing:.1em;color:var(--muted);margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;}
+  .memo-ta{width:100%;min-height:80px;padding:9px;border:1px solid var(--border);border-radius:8px;font-size:13px;line-height:1.6;resize:vertical;font-family:inherit;}
+  .memo-ta:focus{outline:none;border-color:var(--accent);}
+  .saved-msg{font-size:11px;color:var(--green);height:16px;margin-top:3px;}
+  .visit-card{border:1px solid var(--border);border-radius:10px;margin-bottom:10px;overflow:hidden;}
+  .visit-header{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;cursor:pointer;user-select:none;}
+  .visit-header:hover{background:var(--accent-light);}
+  .vh-date{font-size:13px;font-weight:600;}
+  .vh-menu{font-size:11px;color:var(--muted);margin-top:2px;}
+  .vh-right{display:flex;align-items:center;gap:4px;flex-shrink:0;}
+  .vh-pay{font-size:11px;font-weight:600;color:var(--accent);white-space:nowrap;}
+  .vh-badge{font-size:9px;padding:2px 5px;border-radius:20px;font-weight:600;white-space:nowrap;}
+  .badge-online{background:var(--green-light);color:#2e5c3a;}
+  .badge-manual{background:var(--blue-light);color:#2c3a66;}
+  .badge-cancel{background:var(--red-light);color:#7a2020;}
+  .chevron{font-size:11px;color:var(--muted);transition:transform .2s;}
+  .chevron.open{transform:rotate(90deg);}
+  .visit-body{display:none;border-top:1px solid var(--border);}
+  .visit-body.open{display:block;}
+  .payment-row{display:flex;align-items:center;gap:4px;padding:10px 14px;background:var(--surface);flex-wrap:wrap;}
+  .payment-row label{font-size:11px;color:var(--muted);white-space:nowrap;}
+  .pay-input{width:80px;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;text-align:right;font-family:inherit;}
+  .pay-save{padding:5px 8px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit;white-space:nowrap;flex-shrink:0;}
+  .visit-memo-area{padding:10px 14px;}
+  .vm-label{font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;}
+  .camera-btn{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:600;}
+  .vm-ta{width:100%;min-height:64px;padding:9px;border:1px solid var(--border);border-radius:7px;font-size:12px;line-height:1.6;resize:vertical;font-family:inherit;}
+  .vm-ta:focus{outline:none;border-color:var(--accent);}
+  .vm-saved{font-size:10px;color:var(--green);height:14px;margin-top:3px;}
+  .memo-photos{padding:0 14px 10px;}
+  .mp-label{font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;}
+  .mp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;}
+  .mp-slot{aspect-ratio:1;border-radius:5px;overflow:hidden;border:1px solid var(--border);position:relative;background:var(--surface);}
+  .mp-slot img{width:100%;height:100%;object-fit:cover;display:block;cursor:pointer;}
+  .mp-del{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:rgba(196,123,123,.9);border:none;color:#fff;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
+  .mp-empty{font-size:11px;color:var(--muted);padding:8px 0;text-align:center;}
+  .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:50;align-items:center;justify-content:center;}
+  .modal-bg.show{display:flex;}
+  .modal{background:#fff;border-radius:14px;padding:22px;width:320px;}
+  .modal h3{font-size:14px;margin-bottom:14px;}
+  .modal label{font-size:11px;color:var(--muted);display:block;margin-bottom:3px;margin-top:10px;}
+  .modal input{width:100%;padding:7px 9px;border-radius:6px;border:1px solid var(--border);font-size:13px;font-family:inherit;}
+  .modal-actions{display:flex;gap:8px;margin-top:16px;}
+  .mbt{flex:1;padding:7px;border-radius:7px;font-size:12px;border:1px solid var(--border);cursor:pointer;background:none;font-family:inherit;}
+  .mbt.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
+  .empty-state{text-align:center;color:var(--muted);padding:48px 20px;font-size:14px;}
+  .img-modal{display:none;position:fixed;inset:0;background:rgba(0,0,0,.8);z-index:100;align-items:center;justify-content:center;}
+  .img-modal.show{display:flex;}
+  .img-modal img{max-width:90%;max-height:90%;border-radius:8px;}
+  .img-modal-close{position:absolute;top:16px;right:20px;color:#fff;font-size:28px;cursor:pointer;background:none;border:none;}
+  .hidden-input{display:none;}
+  .nav-item{display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:12px;color:var(--muted);cursor:pointer;transition:all .15s;border-left:3px solid transparent;text-decoration:none;border-bottom:1px solid var(--border);}
+  .nav-item:hover{background:var(--accent-light);color:var(--accent);}
+</style>
+</head>
+<body>
+<div class="layout">
+  <div class="left-col">
+    <a class="nav-item" href="salon_calendar_v7.html">← カレンダーに戻る</a>
+    <div class="cust-search">
+      <input type="text" id="custSearch" placeholder="顧客名で検索..." oninput="renderCustList()">
+    </div>
+    <div class="cust-list" id="custList"></div>
+  </div>
+  <div class="right-col">
+    <div id="emptyState" class="empty-state">← 顧客を選択してください</div>
+    <div id="detailArea" style="display:none;flex-direction:column;flex:1;overflow:hidden;">
+      <div class="right-header">
+        <div class="rh-top">
+          <div class="rh-title" id="detailName"></div>
+          <button class="rh-edit-btn" onclick="openEdit()">情報を編集</button>
+        </div>
+        <div class="stats-bar">
+          <div class="stat-item"><span class="stat-num" id="statCount">0</span><span class="stat-label">来店回数</span></div>
+          <div class="stat-item"><span class="stat-num" id="statTotal">—</span><span class="stat-label">累計支払い</span></div>
+          <div class="stat-item"><span class="stat-num" id="statAvg">—</span><span class="stat-label">平均単価</span></div>
+        </div>
+      </div>
+      <div class="tab-bar">
+        <button class="tab-btn active" id="tabMemo" onclick="switchTab('memo')">カルテメモ</button>
+        <button class="tab-btn" id="tabHistory" onclick="switchTab('history')">来店履歴</button>
+      </div>
+      <div class="tab-content" id="tabContent"></div>
+    </div>
+  </div>
+</div>
+
+<div class="modal-bg" id="editModal">
+  <div class="modal">
+    <h3>顧客情報を編集</h3>
+    <label>お名前</label><input type="text" id="eName">
+    <label>電話番号</label><input type="text" id="ePhone">
+    <label>メールアドレス</label><input type="text" id="eEmail">
+    <div class="modal-actions">
+      <button class="mbt" onclick="closeEdit()">キャンセル</button>
+      <button class="mbt primary" onclick="saveEdit()">保存する</button>
+    </div>
+  </div>
+</div>
+
+<div class="img-modal" id="imgModal">
+  <button class="img-modal-close" onclick="closeImgModal()">×</button>
+  <img id="imgModalSrc" src="" alt="">
+</div>
+
+<input type="file" accept="image/*" class="hidden-input" id="cameraInput" onchange="handlePhoto(event)">
+
+<script>
+var SK='salon_db';
+var DDB={salon:{id:null,name:'',email:''},settings:{openTime:'10:00',closeTime:'19:00',intervalMin:30,slotMin:30,closedDows:[2],weeklyClose:[]},menus:[{id:'m1',name:'フェイシャルトリートメント',duration:90,price:12000,type:'main',public:true},{id:'m2',name:'ボディケア',duration:60,price:8000,type:'main',public:true},{id:'m3',name:'フェイシャル＋アイ',duration:120,price:16000,type:'main',public:true}],customers:[{id:'c1',name:'山田 花子',phone:'090-1234-5678',email:'hanako_demo',isLine:false,stamps:0},{id:'c2',name:'田中 美咲',phone:'090-2222-3333',email:'misaki_demo',isLine:false,stamps:0}],appointments:[{id:'a1',customerId:'c2',name:'田中 美咲',date:'2026-04-02',start:'11:00',durationMin:120,intervalMin:30,menu:'フェイシャル＋アイ',status:'active'},{id:'a2',customerId:'c1',name:'山田 花子',date:'2026-04-03',start:'14:00',durationMin:90,intervalMin:30,menu:'フェイシャルトリートメント',status:'active'},{id:'a3',customerId:'c1',name:'山田 花子',date:'2026-04-04',start:'10:00',durationMin:60,intervalMin:20,menu:'ボディケア',status:'active'}],closeBlocks:[],cancelPolicy:{text:'',rates:[]}};
+
+function dbLoad(){var r=localStorage.getItem(SK);if(!r){localStorage.setItem(SK,JSON.stringify(DDB));return JSON.parse(JSON.stringify(DDB));}var s=JSON.parse(r);return{salon:Object.assign({},DDB.salon,s.salon||{}),settings:Object.assign({},DDB.settings,s.settings||{}),menus:s.menus||DDB.menus,customers:s.customers||JSON.parse(JSON.stringify(DDB.customers)),appointments:s.appointments||DDB.appointments,closeBlocks:s.closeBlocks||[],cancelPolicy:s.cancelPolicy||DDB.cancelPolicy,stampCard:Object.assign({},{enabled:true,goal:10,reward:'',bonusStamps:[],color:'#b5845a'},s.stampCard||{})};}
+function dbSave(db){localStorage.setItem(SK,JSON.stringify(db));}
+function dbGetCustomers(){return dbLoad().customers;}
+function dbUpdateCustomer(id,ch){var db=dbLoad();for(var i=0;i<db.customers.length;i++){if(db.customers[i].id===id){db.customers[i]=Object.assign({},db.customers[i],ch);dbSave(db);return;}}
+}
+function dbGetAppointments(){return dbLoad().appointments;}
+function dbUpdateAppointment(id,ch){var db=dbLoad();for(var i=0;i<db.appointments.length;i++){if(db.appointments[i].id===id){db.appointments[i]=Object.assign({},db.appointments[i],ch);dbSave(db);return;}}
+}
+
+var currentCustId=null,currentTab='memo',expandedVisitId=null,activeUploadVisitId=null,memoTimers={},visitPhotos={},karteTimer=null;
+var DOWS=['日','月','火','水','木','金','土'];
+
+function renderCustList(){
+  var q=document.getElementById('custSearch').value.trim().toLowerCase();
+  var custs=dbGetCustomers(),appts=dbGetAppointments();
+  var list=document.getElementById('custList');
+  list.innerHTML='';
+  var found=false;
+  for(var i=0;i<custs.length;i++){
+    var c=custs[i];
+    if(q&&c.name.toLowerCase().indexOf(q)<0)continue;
+    found=true;
+    var cnt=0;for(var j=0;j<appts.length;j++){if(appts[j].customerId===c.id&&appts[j].status==='active')cnt++;}
+    var div=document.createElement('div');
+    div.className='cust-item'+(currentCustId===c.id?' active':'');
+    div.innerHTML='<div class="cust-avatar">'+c.name[0]+'</div><div class="cust-info"><div class="cust-name">'+c.name+'</div><div class="cust-sub">'+(cnt>0?'予約 '+cnt+'件':c.phone)+'</div></div>';
+    (function(id){div.addEventListener('click',function(){selectCust(id);});})(c.id);
+    list.appendChild(div);
+  }
+  if(!found)list.innerHTML='<div style="padding:16px;font-size:12px;color:var(--muted);text-align:center;">該当なし</div>';
+}
+
+function selectCust(id){
+  currentCustId=id;expandedVisitId=null;renderCustList();
+  document.getElementById('emptyState').style.display='none';
+  document.getElementById('detailArea').style.display='flex';
+  renderDetail();
+}
+
+function renderDetail(){
+  var custs=dbGetCustomers(),cust=null;
+  for(var i=0;i<custs.length;i++){if(custs[i].id===currentCustId){cust=custs[i];break;}}
+  if(!cust)return;
+  document.getElementById('detailName').textContent=cust.name;
+  var appts=dbGetAppointments(),total=0,cnt=0,pcnt=0;
+  for(var j=0;j<appts.length;j++){
+    var a=appts[j];
+    if(a.customerId!==currentCustId||a.status==='cancelled')continue;
+    cnt++;
+    if(a.payment!=null){total+=a.payment||0;pcnt++;}
+  }
+  var avg=pcnt?Math.round(total/pcnt):0;
+  document.getElementById('statCount').textContent=cnt+'回';
+  document.getElementById('statTotal').textContent=total>0?'¥'+total.toLocaleString():'—';
+  document.getElementById('statAvg').textContent=avg>0?'¥'+avg.toLocaleString():'—';
+  switchTab(currentTab);
+}
+
+function switchTab(tab){
+  currentTab=tab;
+  document.getElementById('tabMemo').classList.toggle('active',tab==='memo');
+  document.getElementById('tabHistory').classList.toggle('active',tab==='history');
+  if(tab==='memo')renderMemoTab();else renderHistoryTab();
+}
+
+function renderMemoTab(){
+  var custs=dbGetCustomers(),cust=null;
+  for(var i=0;i<custs.length;i++){if(custs[i].id===currentCustId){cust=custs[i];break;}}
+  if(!cust)return;
+  var tc=document.getElementById('tabContent');
+  tc.innerHTML='';
+  var lbl=document.createElement('div');lbl.className='slabel';lbl.innerHTML='カルテメモ <span style="font-size:10px;color:var(--accent);">自動保存</span>';
+  var ta=document.createElement('textarea');ta.className='memo-ta';ta.id='karteText';ta.value=cust.karteNote||'';
+  ta.addEventListener('input',onKarteInput);
+  var saved=document.createElement('div');saved.id='karteSaved';saved.className='saved-msg';
+  var sp=document.createElement('div');sp.style.height='12px';
+  var lbl2=document.createElement('div');lbl2.className='slabel';lbl2.textContent='電話番号';
+  var ph=document.createElement('div');ph.style.cssText='font-size:13px;font-weight:600;margin-bottom:8px;';ph.textContent=cust.phone;
+  var lbl3=document.createElement('div');lbl3.className='slabel';lbl3.textContent='メールアドレス';
+  var em=document.createElement('div');em.style.cssText='font-size:12px;color:var(--muted);';em.textContent=cust.email;
+  tc.appendChild(lbl);tc.appendChild(ta);tc.appendChild(saved);tc.appendChild(sp);tc.appendChild(lbl2);tc.appendChild(ph);tc.appendChild(lbl3);tc.appendChild(em);
+}
+
+function onKarteInput(){
+  clearTimeout(karteTimer);
+  karteTimer=setTimeout(function(){
+    var ta=document.getElementById('karteText');
+    if(ta)dbUpdateCustomer(currentCustId,{karteNote:ta.value});
+    var msg=document.getElementById('karteSaved');
+    if(msg){msg.textContent='保存しました';setTimeout(function(){msg.textContent='';},2000);}
+  },800);
+}
+
+function renderHistoryTab(){
+  var appts=dbGetAppointments(),myAppts=[];
+  for(var i=0;i<appts.length;i++){if(appts[i].customerId===currentCustId)myAppts.push(appts[i]);}
+  myAppts.sort(function(a,b){return b.date.localeCompare(a.date);});
+  var tc=document.getElementById('tabContent');
+  if(!myAppts.length){tc.innerHTML='<div class="empty-state" style="padding:32px 0;">来店履歴がありません</div>';return;}
+  tc.innerHTML='';
+  for(var j=0;j<myAppts.length;j++){
+    var a=myAppts[j];
+    var p=a.date.split('-'),dow=DOWS[new Date(a.date).getDay()];
+    var isOpen=expandedVisitId===a.id,isCan=a.status==='cancelled';
+    var bCls=isCan?'badge-cancel':a.type==='online'?'badge-online':'badge-manual';
+    var bLbl=isCan?'キャンセル':a.type==='online'?'アプリ予約':'手動登録';
+    var payDisp=a.payment!=null?'¥'+a.payment.toLocaleString():'未入力';
+    var photos=visitPhotos[a.id]||[];
+
+    var card=document.createElement('div');card.className='visit-card';card.id='vc_'+a.id;
+
+    // header
+    var hdr=document.createElement('div');hdr.className='visit-header';
+    hdr.innerHTML='<div><div class="vh-date" style="'+(isCan?'text-decoration:line-through;color:var(--muted);':'')+'">'
+      +p[0]+'年'+p[1]+'月'+p[2]+'日（'+dow+'）'+a.start+'〜</div>'
+      +'<div class="vh-menu">'+a.menu+'（'+a.durationMin+'分）</div></div>'
+      +'<div class="vh-right"><span class="vh-pay" style="color:'+(isCan?'var(--red)':'var(--accent)')+';">'+(isCan?'キャンセル':payDisp)+'</span>'
+      +'<span class="vh-badge '+bCls+'">'+bLbl+'</span>'
+      +'<span class="chevron '+(isOpen?'open':'')+'">▶</span></div>';
+    (function(aid){hdr.addEventListener('click',function(){toggleVisit(aid);});})(a.id);
+
+    // body
+    var body=document.createElement('div');body.className='visit-body'+(isOpen?' open':'');body.id='vb_'+a.id;
+
+    // photo slots
+    var photoHtml='';
+    for(var pi=0;pi<photos.length;pi++){
+      photoHtml+='<div class="mp-slot" data-aid="'+a.id+'" data-pi="'+pi+'"><img class="mp-img" src="'+photos[pi].dataUrl+'"><button class="mp-del" data-aid="'+a.id+'" data-pi="'+pi+'">×</button></div>';
+    }
+
+    if(isCan){
+      body.innerHTML='<div class="visit-memo-area"><div class="vm-label"><span>メモ</span><button class="camera-btn" data-vid="'+a.id+'">📷 写真・ライブラリ</button></div>'
+        +'<textarea class="vm-ta" id="vm_'+a.id+'" data-vid="'+a.id+'">'+(a.visitMemo||'')+'</textarea>'
+        +'<div class="vm-saved" id="vms_'+a.id+'"></div></div>'
+        +(photos.length?'<div class="memo-photos"><div class="mp-label">写真（'+photos.length+'枚）</div><div class="mp-grid">'+photoHtml+'</div></div>':'');
+    } else {
+      body.innerHTML='<div class="payment-row"><label>支払い金額</label>'
+        +'<input class="pay-input" type="number" id="pay_'+a.id+'" value="'+(a.payment!=null?a.payment:'')+'" placeholder="0" min="0" step="100">'
+        +'<span style="font-size:12px;color:var(--muted);">円</span>'
+        +'<button class="pay-save" data-vid="'+a.id+'">保存</button></div>'
+        +'<div style="font-size:10px;color:'+(a.payment!=null?'var(--green)':'var(--muted)')+';padding:2px 14px;" id="psaved_'+a.id+'">'+(a.payment!=null?'':'未入力')+'</div>'
+        +'<div class="visit-memo-area"><div class="vm-label"><span>この日のメモ</span><button class="camera-btn" data-vid="'+a.id+'">📷 写真・ライブラリ</button></div>'
+        +'<textarea class="vm-ta" id="vm_'+a.id+'" data-vid="'+a.id+'" placeholder="施術内容・申し送りなど...">'+(a.visitMemo||'')+'</textarea>'
+        +'<div class="vm-saved" id="vms_'+a.id+'"></div></div>'
+        +(photos.length?'<div class="memo-photos"><div class="mp-label">写真（'+photos.length+'枚）</div><div class="mp-grid">'+photoHtml+'</div></div>':'<div class="memo-photos"><div class="mp-empty">📷 写真ボタンから追加できます</div></div>');
+    }
+
+    // bodyのイベント登録
+    (function(aid,bd){
+      var cams=bd.querySelectorAll('.camera-btn');
+      for(var ci=0;ci<cams.length;ci++){
+        (function(el){el.addEventListener('click',function(){triggerCamera(el.getAttribute('data-vid'));});})(cams[ci]);
+      }
+      var tas=bd.querySelectorAll('.vm-ta');
+      for(var ti=0;ti<tas.length;ti++){
+        (function(el){el.addEventListener('input',function(){onVmInput(el.getAttribute('data-vid'));});})(tas[ti]);
+      }
+      var pays=bd.querySelectorAll('.pay-save');
+      for(var pi2=0;pi2<pays.length;pi2++){
+        (function(el){el.addEventListener('click',function(){savePay(el.getAttribute('data-vid'));});})(pays[pi2]);
+      }
+      var imgs=bd.querySelectorAll('.mp-img');
+      for(var im=0;im<imgs.length;im++){
+        (function(el){el.addEventListener('click',function(){openImgModal(el.src);});})(imgs[im]);
+      }
+      var dels=bd.querySelectorAll('.mp-del');
+      for(var dm=0;dm<dels.length;dm++){
+        (function(el){el.addEventListener('click',function(e){e.stopPropagation();deletePhoto(el.getAttribute('data-aid'),parseInt(el.getAttribute('data-pi')));});})(dels[dm]);
+      }
+    })(a.id, body);
+
+    card.appendChild(hdr);card.appendChild(body);tc.appendChild(card);
+  }
+}
+
+function toggleVisit(id){
+  expandedVisitId=expandedVisitId===id?null:id;
+  renderHistoryTab();
+  if(expandedVisitId===id){setTimeout(function(){var el=document.getElementById('vc_'+id);if(el)el.scrollIntoView({behavior:'smooth',block:'nearest'});},50);}
+}
+
+function savePay(id){
+  var el=document.getElementById('pay_'+id);
+  var val=parseInt(el.value,10);
+  if(isNaN(val)||val<0){alert('正しい金額を入力してください');return;}
+  dbUpdateAppointment(id,{payment:val});
+  var msg=document.getElementById('psaved_'+id);
+  if(msg){msg.textContent='保存しました';msg.style.color='var(--green)';}
+  renderDetail();
+}
+
+function onVmInput(id){
+  clearTimeout(memoTimers[id]);
+  memoTimers[id]=setTimeout(function(){
+    var ta=document.getElementById('vm_'+id),msg=document.getElementById('vms_'+id);
+    if(ta)dbUpdateAppointment(id,{visitMemo:ta.value});
+    if(msg){msg.textContent='保存しました';setTimeout(function(){msg.textContent='';},2000);}
+  },800);
+}
+
+function triggerCamera(visitId){activeUploadVisitId=visitId;document.getElementById('cameraInput').value='';document.getElementById('cameraInput').click();}
+function handlePhoto(event){
+  var file=event.target.files[0];if(!file)return;
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var now=new Date(),time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
+    var vid=activeUploadVisitId;
+    if(vid){if(!visitPhotos[vid])visitPhotos[vid]=[];visitPhotos[vid].push({dataUrl:e.target.result,time:time});}
+    renderHistoryTab();
+  };
+  reader.readAsDataURL(file);
+}
+function deletePhoto(visitId,idx){if(visitPhotos[visitId])visitPhotos[visitId].splice(idx,1);renderHistoryTab();}
+
+function openImgModal(src){document.getElementById('imgModalSrc').src=src;document.getElementById('imgModal').classList.add('show');}
+function closeImgModal(){document.getElementById('imgModal').classList.remove('show');}
+document.getElementById('imgModal').addEventListener('click',function(e){if(e.target===e.currentTarget)closeImgModal();});
+
+function openEdit(){
+  var custs=dbGetCustomers(),cust=null;
+  for(var i=0;i<custs.length;i++){if(custs[i].id===currentCustId){cust=custs[i];break;}}
+  if(!cust)return;
+  document.getElementById('eName').value=cust.name;
+  document.getElementById('ePhone').value=cust.phone;
+  document.getElementById('eEmail').value=cust.email;
+  document.getElementById('editModal').classList.add('show');
+}
+function closeEdit(){document.getElementById('editModal').classList.remove('show');}
+function saveEdit(){
+  var name=document.getElementById('eName').value.trim(),phone=document.getElementById('ePhone').value.trim(),email=document.getElementById('eEmail').value.trim();
+  if(!name||!phone){alert('名前と電話番号を入力してください');return;}
+  dbUpdateCustomer(currentCustId,{name:name,phone:phone,email:email});
+  closeEdit();renderCustList();renderDetail();
+}
+
+renderCustList();
+</script>
+</body>
+</html>
