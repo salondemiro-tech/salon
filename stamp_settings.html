@@ -402,6 +402,8 @@ function saveAll(){
     expiry:selectedExp
   };
   dbSaveStampCard(policy);
+  renderCustStampTable();
+  updatePreview();
   showToast('スタンプカード設定を保存しました');
 }
 
