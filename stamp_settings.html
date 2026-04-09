@@ -341,7 +341,7 @@ function renderCustStampTable(){
     for(var d=0;d<Math.min(goal,10);d++){dots+='<div class="stamp-dot '+(d<pct?'on':'')+'" style="'+(d<pct?'background:'+selectedColor:'')+';"></div>';}
     var rewardReady=stamps>=goal;
     var tr=document.createElement('tr');
-    var cyclesText=c.cycles?'<br><span style="font-size:10px;background:var(--accent-light);color:var(--accent);padding:1px 6px;border-radius:10px;font-weight:600;">'+c.cycles+'枚目のカード</span>':'';
+    var cyclesText=(c.cycles&&c.cycles>0)?'<br><span style="font-size:10px;background:var(--accent-light);color:var(--accent);padding:1px 6px;border-radius:10px;font-weight:600;">'+(c.cycles+1)+'枚目のカード</span>':'';
     tr.innerHTML='<td style="white-space:nowrap;font-size:13px;font-weight:600;min-width:60px;">'+c.name+cyclesText+'</td>'
       +'<td><div class="stamp-bar"><div class="stamp-dots">'+dots+'</div><span class="stamp-count" style="font-size:11px;white-space:nowrap;">'+stamps+'個</span></div></td>'
       +'<td style="min-width:64px;">'
