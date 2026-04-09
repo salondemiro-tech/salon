@@ -106,12 +106,13 @@
       <button onclick="openAddCust()" style="width:100%;padding:7px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">＋ 新規顧客を追加</button>
     </div>
     <div style="padding:6px 8px;border-bottom:1px solid var(--border);display:flex;gap:4px;">
-      <button onclick="setSortMode('name')" id="sortName" style="flex:1;padding:4px 2px;font-size:10px;border:1px solid var(--border);border-radius:5px;background:var(--accent);color:#fff;cursor:pointer;font-family:inherit;">あいうえお</button>
-      <button onclick="setSortMode('new')" id="sortNew" style="flex:1;padding:4px 2px;font-size:10px;border:1px solid var(--border);border-radius:5px;background:none;color:var(--muted);cursor:pointer;font-family:inherit;">新しい順</button>
-      <button onclick="setSortMode('old')" id="sortOld" style="flex:1;padding:4px 2px;font-size:10px;border:1px solid var(--border);border-radius:5px;background:none;color:var(--muted);cursor:pointer;font-family:inherit;">古い順</button>
+      <button onclick="setSortMode('new')" id="sortNew" style="flex:1;padding:5px 2px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:var(--accent);color:#fff;cursor:pointer;font-family:inherit;">新しい順</button>
+      <button onclick="setSortMode('old')" id="sortOld" style="flex:1;padding:5px 2px;font-size:11px;border:1px solid var(--border);border-radius:5px;background:none;color:var(--muted);cursor:pointer;font-family:inherit;">古い順</button>
     </div>
     <div class="cust-search">
-      <input type="text" id="custSearch" placeholder="顧客名で検索..." oninput="renderCustList()">
+      <input type="text" id="custSearch" placeholder="氏名で検索..." oninput="renderCustList()" style="margin-bottom:5px;">
+      <input type="text" id="custSearchPhone" placeholder="電話番号で検索..." oninput="renderCustList()" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;font-family:inherit;margin-bottom:5px;background:#fff;color:#1a1a18;">
+      <input type="text" id="custSearchEmail" placeholder="メールで検索..." oninput="renderCustList()" style="width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;font-family:inherit;background:#fff;color:#1a1a18;">
     </div>
     <div class="cust-list" id="custList"></div>
   </div>
@@ -181,18 +182,18 @@ var DOWS=['日','月','火','水','木','金','土'];
 function renderCustList(){
   var q=document.getElementById('custSearch').value.trim().toLowerCase();
   var custs=dbGetCustomers().slice(),appts=dbGetAppointments();
-  // 並び替え
-  if(sortMode==='name'){
-    custs.sort(function(a,b){return a.name.localeCompare(b.name,'ja');});
-  } else if(sortMode==='new'){
+  // 並び替え（idにタイムスタンプが入っているので登録日順に使える）
+  if(sortMode==='new'){
     custs.sort(function(a,b){
-      var ai=a.id||'';var bi=b.id||'';
-      return bi.localeCompare(ai);
+      var ai=parseInt((a.id||'').replace('c',''))||0;
+      var bi=parseInt((b.id||'').replace('c',''))||0;
+      return bi-ai;
     });
   } else {
     custs.sort(function(a,b){
-      var ai=a.id||'';var bi=b.id||'';
-      return ai.localeCompare(bi);
+      var ai=parseInt((a.id||'').replace('c',''))||0;
+      var bi=parseInt((b.id||'').replace('c',''))||0;
+      return ai-bi;
     });
   }
   var list=document.getElementById('custList');
@@ -200,7 +201,11 @@ function renderCustList(){
   var found=false;
   for(var i=0;i<custs.length;i++){
     var c=custs[i];
+    var qp=document.getElementById('custSearchPhone')?document.getElementById('custSearchPhone').value.trim():'';
+    var qe=document.getElementById('custSearchEmail')?document.getElementById('custSearchEmail').value.trim().toLowerCase():'';
     if(q&&c.name.toLowerCase().indexOf(q)<0)continue;
+    if(qp&&(c.phone||'').indexOf(qp)<0)continue;
+    if(qe&&(c.email||'').toLowerCase().indexOf(qe)<0)continue;
     found=true;
     var cnt=0;for(var j=0;j<appts.length;j++){if(appts[j].customerId===c.id&&appts[j].status==='active')cnt++;}
     var div=document.createElement('div');
@@ -459,11 +464,11 @@ function saveEdit(){
 renderCustList();
 
 // ===== 並び替え =====
-var sortMode='name';
+var sortMode='new';
 function setSortMode(mode){
   sortMode=mode;
-  var btns=['sortName','sortNew','sortOld'];
-  var modes=['name','new','old'];
+  var btns=['sortNew','sortOld'];
+  var modes=['new','old'];
   for(var i=0;i<btns.length;i++){
     var el=document.getElementById(btns[i]);
     if(el){
@@ -537,47 +542,84 @@ function openMerge(){
   var custs=dbGetCustomers(),cust=null;
   for(var i=0;i<custs.length;i++){if(custs[i].id===currentCustId){cust=custs[i];break;}}
   if(!cust)return;
-  // 統合先リスト（自分以外）
-  var sel=document.getElementById('mergeTarget');
-  sel.innerHTML='';
-  for(var j=0;j<custs.length;j++){
-    if(custs[j].id===currentCustId)continue;
-    var opt=document.createElement('option');
-    opt.value=custs[j].id;
-    opt.textContent=custs[j].name+' ('+custs[j].phone+')';
-    sel.appendChild(opt);
-  }
-  if(!sel.options.length){alert('統合できる他の顧客がいません');return;}
-  updateMergeFields();
-  sel.addEventListener('change',updateMergeFields);
+  var others=custs.filter(function(c){return c.id!==currentCustId;});
+  if(!others.length){alert('統合できる他の顧客がいません');return;}
+  document.getElementById('mergeSearch').value='';
+  document.getElementById('mergeTarget').value='';
+  document.getElementById('mergeArrow').style.display='none';
+  document.getElementById('mergeName').value='';
+  document.getElementById('mergePhone').value='';
+  document.getElementById('mergeEmail').value='';
+  document.getElementById('mergeNameBtns').innerHTML='';
+  document.getElementById('mergePhoneBtns').innerHTML='';
+  document.getElementById('mergeEmailBtns').innerHTML='';
+  renderMergeList('');
   document.getElementById('mergeOv').style.display='block';
 }
-function updateMergeFields(){
+
+function renderMergeList(q){
+  var custs=dbGetCustomers();
+  var list=document.getElementById('mergeList');
+  list.innerHTML='';
+  var found=false;
+  for(var i=0;i<custs.length;i++){
+    var c=custs[i];
+    if(c.id===currentCustId)continue;
+    if(q&&c.name.indexOf(q)<0&&(c.phone||'').indexOf(q)<0)continue;
+    found=true;
+    var item=document.createElement('div');
+    item.style.cssText='padding:8px 12px;cursor:pointer;border-bottom:1px solid rgba(0,0,0,.06);font-size:13px;';
+    item.innerHTML='<span style="font-weight:600;">'+c.name+'</span> <span style="color:var(--muted);font-size:11px;">'+c.phone+'</span>';
+    item.onmouseover=function(){this.style.background='var(--accent-light)';};
+    item.onmouseout=function(){this.style.background='';};
+    (function(cid){item.addEventListener('click',function(){selectMergeTarget(cid);});})(c.id);
+    list.appendChild(item);
+  }
+  if(!found){list.innerHTML='<div style="padding:10px 12px;font-size:12px;color:var(--muted);">該当なし</div>';}
+}
+
+function filterMergeList(){
+  var q=document.getElementById('mergeSearch').value.trim();
+  renderMergeList(q);
+}
+
+function selectMergeTarget(targetId){
+  document.getElementById('mergeTarget').value=targetId;
   var custs=dbGetCustomers(),cust=null,target=null;
-  var targetId=document.getElementById('mergeTarget').value;
   for(var i=0;i<custs.length;i++){
     if(custs[i].id===currentCustId)cust=custs[i];
     if(custs[i].id===targetId)target=custs[i];
   }
   if(!cust||!target)return;
-  // 氏名ボタン
+  // 検索欄に選択名を表示
+  document.getElementById('mergeSearch').value=target.name+' ('+target.phone+')';
+  document.getElementById('mergeList').innerHTML='';
+  // 矢印表示
+  document.getElementById('mergeArrow').style.display='block';
+  document.getElementById('mergeFromLabel').textContent=target.name;
+  document.getElementById('mergeToLabel').textContent=cust.name;
+  document.getElementById('mergeFinalLabel').textContent='→ '+cust.name+'に統合';
+  // フィールド更新
+  updateMergeFieldsById(cust,target);
+}
+function updateMergeFieldsById(cust,target){
   function makeBtns(containerId,inputId,v1,v2,label1,label2){
     var c=document.getElementById(containerId);
     c.innerHTML='';
     var b1=document.createElement('button');
     b1.textContent=label1+': '+v1;
-    b1.style.cssText='padding:4px 8px;font-size:11px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;font-family:inherit;';
-    b1.onclick=function(){document.getElementById(inputId).value=v1;};
+    b1.style.cssText='padding:4px 8px;font-size:11px;border:1px solid var(--accent);border-radius:6px;background:var(--accent);color:#fff;cursor:pointer;font-family:inherit;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    (function(val){b1.addEventListener('click',function(){document.getElementById(inputId).value=val;});})(v1);
     var b2=document.createElement('button');
     b2.textContent=label2+': '+v2;
-    b2.style.cssText='padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-family:inherit;';
-    b2.onclick=function(){document.getElementById(inputId).value=v2;};
+    b2.style.cssText='padding:4px 8px;font-size:11px;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-family:inherit;max-width:140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;';
+    (function(val){b2.addEventListener('click',function(){document.getElementById(inputId).value=val;});})(v2);
     c.appendChild(b1);c.appendChild(b2);
     document.getElementById(inputId).value=v1;
   }
-  makeBtns('mergeNameBtns','mergeName',cust.name,target.name,'現在','統合先');
-  makeBtns('mergePhoneBtns','mergePhone',cust.phone,target.phone,'現在','統合先');
-  makeBtns('mergeEmailBtns','mergeEmail',cust.email||'',target.email||'','現在','統合先');
+  makeBtns('mergeNameBtns','mergeName',cust.name,target.name,'現在','統合元');
+  makeBtns('mergePhoneBtns','mergePhone',cust.phone,target.phone,'現在','統合元');
+  makeBtns('mergeEmailBtns','mergeEmail',cust.email||'',target.email||'','現在','統合元');
 }
 function confirmMerge(){
   var name=document.getElementById('mergeName').value.trim();
@@ -666,9 +708,23 @@ function saveAddCust(){
   <div style="background:#fff;border-radius:14px;padding:24px;width:100%;max-width:480px;margin:0 auto;">
     <h3 style="font-size:16px;font-weight:600;margin-bottom:4px;">顧客カルテを統合</h3>
     <p style="font-size:11px;color:var(--muted);margin-bottom:16px;">統合先を選んで、氏名・電話・メールを設定してください。予約履歴は合算されます。</p>
+    <!-- 統合先検索＋矢印表示 -->
     <div style="margin-bottom:12px;">
-      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px;">統合する顧客を選択</label>
-      <select id="mergeTarget" style="width:100%;padding:10px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:9px;font-size:13px;font-family:inherit;background:#fff;"></select>
+      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px;">統合先を検索</label>
+      <input type="text" id="mergeSearch" placeholder="氏名・電話で検索..." oninput="filterMergeList()" style="width:100%;padding:8px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:9px;font-size:13px;font-family:inherit;background:#fff;margin-bottom:6px;">
+      <div id="mergeList" style="border:1.5px solid rgba(0,0,0,.12);border-radius:9px;max-height:140px;overflow-y:auto;"></div>
+      <input type="hidden" id="mergeTarget" value="">
+    </div>
+    <!-- 矢印で統合の方向を視覚化 -->
+    <div id="mergeArrow" style="display:none;margin-bottom:14px;background:#f5f4f0;border-radius:10px;padding:12px;text-align:center;">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">統合のイメージ</div>
+      <div style="display:flex;align-items:center;justify-content:center;gap:10px;font-size:13px;font-weight:600;">
+        <div id="mergeFromLabel" style="padding:6px 12px;background:#faeaea;border-radius:8px;color:#7a2020;"></div>
+        <div style="font-size:20px;color:var(--accent);">＋</div>
+        <div id="mergeToLabel" style="padding:6px 12px;background:var(--accent-light);border-radius:8px;color:var(--accent);"></div>
+        <div style="font-size:20px;">→</div>
+        <div id="mergeFinalLabel" style="padding:6px 12px;background:#e8f2eb;border-radius:8px;color:#2e5c3a;font-size:12px;">統合後</div>
+      </div>
     </div>
     <div style="margin-bottom:10px;">
       <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:5px;">氏名</label>
