@@ -340,6 +340,10 @@ function renderCal(){
   var cs=getCalSettings();HOURS=cs.hours;DAY_START=cs.dayStart;
   var area=document.getElementById('calArea');
   var days=getWeekDays(),todayStr=fmtDate(new Date()),settings=cs.s,HOL=settings.closedDows||[2];
+  // 受付期間の計算
+  var bookingWeeks=settings.bookingWeeks||8;
+  var rangeEnd=new Date();rangeEnd.setHours(0,0,0,0);rangeEnd.setDate(rangeEnd.getDate()+bookingWeeks*7);
+  var rangeEndStr=fmtDate(rangeEnd);
   var appointments=dbGetAppointments(),closeBlocks=dbGetCloseBlocks();
   updateWeekLabel(days);
   var html='<div class="weekdays"><div></div>';
@@ -347,7 +351,9 @@ function renderCal(){
     var d=days[di],dow=d.getDay();
     var cls=dow===0?'sun':dow===6?'sat':'',isToday=fmtDate(d)===todayStr;
     var numHtml=isToday?'<span class="day-num"><span class="today-num">'+d.getDate()+'</span></span>':'<span class="day-num">'+d.getDate()+'</span>';
-    html+='<div class="wdl '+cls+'">'+DOWS[dow]+numHtml+'<span class="month-hint">'+(d.getMonth()+1)+'月</span></div>';
+    var isOorH=(fmtDate(d)>rangeEndStr);
+    var oorBadge=isOorH?'<div style="font-size:9px;color:var(--muted);margin-top:2px;">受付期間外</div>':'';
+    html+='<div class="wdl '+cls+(isOorH?' oor-header':'')+'">'+DOWS[dow]+numHtml+'<span class="month-hint">'+(d.getMonth()+1)+'月</span>'+oorBadge+'</div>';
   }
   html+='</div><div class="time-grid">';
   for(var ri=0;ri<HOURS.length;ri++){
@@ -356,8 +362,15 @@ function renderCal(){
       var dd=days[ci],ddow=dd.getDay(),dateStr=fmtDate(dd),isHol=false;
       for(var hi=0;hi<HOL.length;hi++){if(HOL[hi]===ddow){isHol=true;break;}}
       var isTodayCol=dateStr===todayStr;
+      var isOor=(dateStr>rangeEndStr);
+      var colCls='dcol ';
+      if(isHol)colCls+='hol';
+      else colCls+='clickable';
+      if(isTodayCol&&!isHol)colCls+=' today-col';
+      if(isOor)colCls+=' oor-col';
       var clickAttr=isHol?'':'onclick="cellClick(\'' + dateStr + '\',' + HOURS[ri] + ',event)"';
-      html+='<div class="dcol '+(isHol?'hol':'clickable')+' '+(isTodayCol&&!isHol?'today-col':'')+'" '+clickAttr+'>'+(isHol&&ri===0?'<div class="hol-label">定休日</div>':'')+'</div>';
+      var holLbl=(isHol&&ri===0)?'<div class="hol-label">定休日</div>':'';
+      html+='<div class="'+colCls+'" '+clickAttr+'>'+holLbl+'</div>';
     }
   }
   html+='</div>';
