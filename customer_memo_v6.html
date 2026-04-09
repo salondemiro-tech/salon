@@ -203,8 +203,10 @@ function renderCustList(){
     var c=custs[i];
     var qp=document.getElementById('custSearchPhone')?document.getElementById('custSearchPhone').value.trim():'';
     var qe=document.getElementById('custSearchEmail')?document.getElementById('custSearchEmail').value.trim().toLowerCase():'';
-    if(q&&c.name.toLowerCase().indexOf(q)<0)continue;
-    if(qp&&(c.phone||'').indexOf(qp)<0)continue;
+    // スペース（全角・半角）とハイフン（全角・半角）を除去して比較
+    function norm(s){return (s||'').replace(/[\s　\-ー－]/g,'').toLowerCase();}
+    if(q&&norm(c.name).indexOf(norm(q))<0)continue;
+    if(qp&&norm(c.phone).indexOf(norm(qp))<0)continue;
     if(qe&&(c.email||'').toLowerCase().indexOf(qe)<0)continue;
     found=true;
     var cnt=0;for(var j=0;j<appts.length;j++){if(appts[j].customerId===c.id&&appts[j].status==='active')cnt++;}
