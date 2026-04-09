@@ -191,9 +191,17 @@
 
 <script>
 var SK='salon_db';
-var DDB={salon:{id:null,name:'',email:''},settings:{openTime:'10:00',closeTime:'19:00',intervalMin:30,slotMin:30,closedDows:[2],weeklyClose:[{dow:3,start:'12:00',end:'13:00'}]},menus:[{id:'m1',name:'フェイシャルトリートメント',duration:90,price:12000,type:'main',public:true},{id:'m2',name:'ボディケア',duration:60,price:8000,type:'main',public:true},{id:'m3',name:'フェイシャル＋アイ',duration:120,price:16000,type:'main',public:true},{id:'m4',name:'目元ケア',duration:30,price:3000,type:'option',public:true},{id:'m5',name:'ヘッドスパ',duration:20,price:2500,type:'option',public:true},{id:'m6',name:'デコルテケア',duration:15,price:2000,type:'option',public:true}],customers:[{id:'c1',name:'山田 花子',phone:'090-1234-5678',email:'hanako_demo',isLine:false},{id:'c2',name:'田中 美咲',phone:'090-2222-3333',email:'misaki_demo',isLine:false}],appointments:[{id:'a1',customerId:'c2',name:'田中 美咲',date:'2026-04-02',start:'11:00',durationMin:120,intervalMin:30,menu:'フェイシャル＋アイ',status:'active'},{id:'a2',customerId:'c1',name:'山田 花子',date:'2026-04-03',start:'14:00',durationMin:90,intervalMin:30,menu:'フェイシャルトリートメント',status:'active'},{id:'a3',customerId:'c1',name:'山田 花子',date:'2026-04-04',start:'10:00',durationMin:60,intervalMin:20,menu:'ボディケア',status:'active'}],closeBlocks:[{id:'b1',date:'2026-04-03',start:'15:30',end:'16:30',reason:'外出'}],cancelPolicy:{text:'',rates:[]}};
+var DDB={salon:{id:null,name:'',email:''},settings:{openTime:'10:00',closeTime:'19:00',intervalMin:30,slotMin:30,closedDows:[2],weeklyClose:[{dow:3,start:'12:00',end:'13:00'}],bookingWeeks:8},menus:[{id:'m1',name:'フェイシャルトリートメント',duration:90,price:12000,type:'main',public:true},{id:'m2',name:'ボディケア',duration:60,price:8000,type:'main',public:true},{id:'m3',name:'フェイシャル＋アイ',duration:120,price:16000,type:'main',public:true},{id:'m4',name:'目元ケア',duration:30,price:3000,type:'option',public:true},{id:'m5',name:'ヘッドスパ',duration:20,price:2500,type:'option',public:true},{id:'m6',name:'デコルテケア',duration:15,price:2000,type:'option',public:true}],customers:[{id:'c1',name:'山田 花子',phone:'090-1234-5678',email:'hanako_demo',isLine:false},{id:'c2',name:'田中 美咲',phone:'090-2222-3333',email:'misaki_demo',isLine:false}],appointments:[{id:'a1',customerId:'c2',name:'田中 美咲',date:'2026-04-02',start:'11:00',durationMin:120,intervalMin:30,menu:'フェイシャル＋アイ',status:'active'},{id:'a2',customerId:'c1',name:'山田 花子',date:'2026-04-03',start:'14:00',durationMin:90,intervalMin:30,menu:'フェイシャルトリートメント',status:'active'},{id:'a3',customerId:'c1',name:'山田 花子',date:'2026-04-04',start:'10:00',durationMin:60,intervalMin:20,menu:'ボディケア',status:'active'}],closeBlocks:[{id:'b1',date:'2026-04-03',start:'15:30',end:'16:30',reason:'外出'}],cancelPolicy:{text:'',rates:[]}};
 
-function dbLoad(){var r=localStorage.getItem(SK);if(!r){localStorage.setItem(SK,JSON.stringify(DDB));return JSON.parse(JSON.stringify(DDB));}var s=JSON.parse(r);var m=Object.assign({},DDB,s);m.settings=Object.assign({},DDB.settings,s.settings||{});return m;}
+function dbLoad(){
+  var r=localStorage.getItem(SK);
+  if(!r){localStorage.setItem(SK,JSON.stringify(DDB));return JSON.parse(JSON.stringify(DDB));}
+  var s=JSON.parse(r);
+  var m=Object.assign({},DDB,s);
+  m.settings=Object.assign({},DDB.settings,s.settings||{});
+  m.customers=s.customers||DDB.customers;
+  return m;
+}
 function dbSave(db){localStorage.setItem(SK,JSON.stringify(db));}
 function dbGetSettings(){return dbLoad().settings;}
 function dbGetMenus(){return dbLoad().menus;}
@@ -206,8 +214,17 @@ function dbGetCloseBlocks(){return dbLoad().closeBlocks;}
 function dbAddCloseBlock(b){var db=dbLoad();b.id=b.id||('b'+Date.now());db.closeBlocks.push(b);dbSave(db);return b;}
 function dbDeleteCloseBlock(id){var db=dbLoad();var r=[];for(var i=0;i<db.closeBlocks.length;i++){if(db.closeBlocks[i].id!==id)r.push(db.closeBlocks[i]);}db.closeBlocks=r;dbSave(db);}
 
-var HOURS=[];for(var _h=9;_h<=20;_h++)HOURS.push(_h);
-var SLOT_H=48,DAY_START=9,DOWS=['日','月','火','水','木','金','土'];
+var SLOT_H=48,DOWS=['日','月','火','水','木','金','土'];
+// 開店・閉店時間をsettingsから動的に取得
+function getCalSettings(){
+  var s=dbGetSettings();
+  var open=parseInt((s.openTime||'09:00').split(':')[0]);
+  var close=parseInt((s.closeTime||'20:00').split(':')[0])+1;
+  var hours=[];for(var h=open;h<close;h++)hours.push(h);
+  return{hours:hours,dayStart:open,s:s};
+}
+var HOURS=[],DAY_START=9;
+(function(){var cs=getCalSettings();HOURS=cs.hours;DAY_START=cs.dayStart;})();
 var weekStart=(function(){var t=new Date();t.setHours(0,0,0,0);return t;})();
 var curTab='appt';
 
@@ -258,7 +275,23 @@ function saveEntry(){
     var name=document.getElementById('mName').value.trim(),date=document.getElementById('mDate').value,time=document.getElementById('mTime').value,menuId=document.getElementById('mMenu').value,memo=document.getElementById('mMemo').value;
     if(!name||!date||!time){alert('名前・日付・時間を入力してください');return;}
     var menu=getMenuById(menuId);
-    dbAddAppointment({name:name,menu:menu?menu.name:menuId,date:date,start:time,durationMin:menu?menu.duration:60,intervalMin:dbGetSettings().intervalMin,memo:memo,type:'manual',status:'active'});
+    var baseDur=menu?menu.duration:60;
+    // オプションの時間を合計
+    var optSelects=document.querySelectorAll('#mOptionList select');
+    var optDur=0;
+    for(var oi=0;oi<optSelects.length;oi++){
+      var optMenu=getMenuById(optSelects[oi].value);
+      if(optMenu)optDur+=optMenu.duration;
+    }
+    var totalDur=baseDur+optDur;
+    var optNames=[];
+    for(var oni=0;oni<optSelects.length;oni++){
+      var om=getMenuById(optSelects[oni].value);
+      if(om)optNames.push(om.name);
+    }
+    var fullMenuName=menu?menu.name:menuId;
+    if(optNames.length>0)fullMenuName+='＋'+optNames.join('＋');
+    dbAddAppointment({name:name,menu:fullMenuName,date:date,start:time,durationMin:totalDur,intervalMin:dbGetSettings().intervalMin,memo:memo,type:'manual',status:'active'});
     document.getElementById('mName').value='';document.getElementById('mMemo').value='';document.getElementById('mOptionList').innerHTML='';
   } else {
     var date2=document.getElementById('cDate').value,start=document.getElementById('cStart').value,end=document.getElementById('cEnd').value,reason=document.getElementById('cReason').value;
@@ -303,8 +336,10 @@ function updateWeekLabel(days){
 }
 
 function renderCal(){
+  // 毎回settingsから開店・閉店時間を更新
+  var cs=getCalSettings();HOURS=cs.hours;DAY_START=cs.dayStart;
   var area=document.getElementById('calArea');
-  var days=getWeekDays(),todayStr=fmtDate(new Date()),settings=dbGetSettings(),HOL=settings.closedDows||[2];
+  var days=getWeekDays(),todayStr=fmtDate(new Date()),settings=cs.s,HOL=settings.closedDows||[2];
   var appointments=dbGetAppointments(),closeBlocks=dbGetCloseBlocks();
   updateWeekLabel(days);
   var html='<div class="weekdays"><div></div>';

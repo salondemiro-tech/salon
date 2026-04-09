@@ -392,7 +392,18 @@ var DDB={
   cancelPolicy:{text:'・3日前まで：無料\n・2日前〜前日：ご予約料金の50%\n・当日：ご予約料金の100%\n・無断キャンセル：ご予約料金の100%',showOnBook:true,showOnCancel:true},
   stampCard:{enabled:true,goal:10,reward:'次回施術10%OFF',bonusStamps:[{at:5,reward:'オプション1品無料'}],color:'#b5845a'}
 };
-function dbLoad(){var r=localStorage.getItem(SK);if(!r){localStorage.setItem(SK,JSON.stringify(DDB));return JSON.parse(JSON.stringify(DDB));}var s=JSON.parse(r);var m=Object.assign({},DDB,s);m.settings=Object.assign({},DDB.settings,s.settings||{});m.stampCard=Object.assign({},DDB.stampCard,s.stampCard||{});m.salon=Object.assign({},DDB.salon,s.salon||{});return m;}
+function dbLoad(){
+  var r=localStorage.getItem(SK);
+  if(!r){localStorage.setItem(SK,JSON.stringify(DDB));return JSON.parse(JSON.stringify(DDB));}
+  var s=JSON.parse(r);
+  var m=Object.assign({},DDB,s);
+  m.settings=Object.assign({},DDB.settings,s.settings||{});
+  m.stampCard=Object.assign({},DDB.stampCard,s.stampCard||{});
+  m.salon=Object.assign({},DDB.salon,s.salon||{});
+  if(s.customers&&s.customers.length>0)m.customers=s.customers;
+  if(s.menus&&s.menus.length>0)m.menus=s.menus;
+  return m;
+}
 function dbSave(db){localStorage.setItem(SK,JSON.stringify(db));}
 function dbGetSettings(){return dbLoad().settings;}
 function dbGetSalon(){return dbLoad().salon;}

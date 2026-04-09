@@ -349,8 +349,12 @@ function onVmInput(id){
 function triggerCamera(visitId){activeUploadVisitId=visitId;document.getElementById('cameraInput').value='';document.getElementById('cameraInput').click();}
 function handlePhoto(event){
   var file=event.target.files[0];if(!file)return;
+  // ファイルタイプチェック
+  if(file.type.indexOf('image/')<0){alert('画像ファイルを選択してください');return;}
   var reader=new FileReader();
+  reader.onerror=function(){alert('画像の読み込みに失敗しました。別の画像をお試しください。');};
   reader.onload=function(e){
+    if(!e.target.result){alert('画像データが空です');return;}
     var now=new Date(),time=String(now.getHours()).padStart(2,'0')+':'+String(now.getMinutes()).padStart(2,'0');
     var vid=activeUploadVisitId;
     if(vid){if(!visitPhotos[vid])visitPhotos[vid]=[];visitPhotos[vid].push({dataUrl:e.target.result,time:time});}
