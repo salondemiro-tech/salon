@@ -27,7 +27,25 @@ function dbGetSalon(){return dbLoad().salon;}
 function dbGetCustomers(){return dbLoad().customers;}
 function dbGetStampCard(){return dbLoad().stampCard;}
 function dbSaveStampCard(sc){var db=dbLoad();db.stampCard=sc;dbSave(db);}
-function dbAddStamp(custId,count){count=count||1;var db=dbLoad();for(var i=0;i<db.customers.length;i++){if(db.customers[i].id===custId){db.customers[i].stamps=(db.customers[i].stamps||0)+count;dbSave(db);return db.customers[i];}}return null;}
+function dbAddStamp(custId,count){
+  count=count||1;
+  var db=dbLoad();
+  var sc=db.stampCard||{goal:10};
+  var goal=sc.goal||10;
+  for(var i=0;i<db.customers.length;i++){
+    if(db.customers[i].id===custId){
+      db.customers[i].stamps=(db.customers[i].stamps||0)+count;
+      // ゴール達成したら自動リセット＋cycles++
+      if(db.customers[i].stamps>=goal){
+        db.customers[i].cycles=(db.customers[i].cycles||0)+1;
+        db.customers[i].stamps=0;
+      }
+      dbSave(db);
+      return db.customers[i];
+    }
+  }
+  return null;
+}
 function dbRemoveStamp(custId){var db=dbLoad();for(var i=0;i<db.customers.length;i++){if(db.customers[i].id===custId){var cur=db.customers[i].stamps||0;db.customers[i].stamps=Math.max(0,cur-1);dbSave(db);return db.customers[i];}}return null;}
 function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length;i++){if(db.customers[i].id===custId){db.customers[i].stamps=0;dbSave(db);return db.customers[i];}}return null;}
 </script>
@@ -313,7 +331,8 @@ function renderCustStampTable(){
     for(var d=0;d<Math.min(goal,10);d++){dots+='<div class="stamp-dot '+(d<pct?'on':'')+'" style="'+(d<pct?'background:'+selectedColor:'')+';"></div>';}
     var rewardReady=stamps>=goal;
     var tr=document.createElement('tr');
-    tr.innerHTML='<td style="white-space:nowrap;font-size:13px;font-weight:600;min-width:60px;">'+c.name+(rewardReady?'<br><span class="reward-badge">🎁</span>':'')+'</td>'
+    var cyclesText=c.cycles?'<br><span style="font-size:10px;background:var(--accent-light);color:var(--accent);padding:1px 6px;border-radius:10px;font-weight:600;">'+c.cycles+'枚目のカード</span>':'';
+    tr.innerHTML='<td style="white-space:nowrap;font-size:13px;font-weight:600;min-width:60px;">'+c.name+cyclesText+'</td>'
       +'<td><div class="stamp-bar"><div class="stamp-dots">'+dots+'</div><span class="stamp-count" style="font-size:11px;white-space:nowrap;">'+stamps+'個</span></div></td>'
       +'<td style="min-width:64px;">'
       +'<button class="add-stamp-btn" data-id="'+c.id+'">＋ スタンプ</button>'

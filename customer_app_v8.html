@@ -807,7 +807,7 @@ function renderStamp(){
   var sName=dbGetSalon().name||'Salon ✦ Name';
   scr.innerHTML='<div class="stcard">'
     +'<div class="stch"><div class="stname">'+sName+'</div><div class="stbadge">🎫 スタンプカード</div></div>'
-    +'<div class="stsub">'+goal+'個集めると特典プレゼント🎁</div>'
+    +'<div class="stsub">'+goal+'個集めると特典プレゼント🎁'+(cust&&cust.cycles?' ／ 現在'+cust.cycles+'枚目のカード':'')+'</div>'
     +'<div class="stgrid">'+sg+'</div>'
     +'<div class="stpbar"><div class="stpfill" style="width:'+pct+'%;background:'+color+';"></div></div>'
     +'<div class="stptxt">'+stamps+' / '+goal+' スタンプ</div>'
