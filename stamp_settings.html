@@ -344,10 +344,7 @@ function renderCustStampTable(){
     var cyclesText=(c.cycles&&c.cycles>0)?'<br><span style="font-size:10px;background:var(--accent-light);color:var(--accent);padding:1px 6px;border-radius:10px;font-weight:600;">'+(c.cycles+1)+'枚目のカード</span>':'';
     tr.innerHTML='<td style="white-space:nowrap;font-size:13px;font-weight:600;min-width:60px;">'+c.name+cyclesText+'</td>'
       +'<td><div class="stamp-bar"><div class="stamp-dots">'+dots+'</div><span class="stamp-count" style="font-size:11px;white-space:nowrap;">'+stamps+'個</span></div></td>'
-      +'<td style="min-width:64px;">'
-      +'<button class="add-stamp-btn" data-id="'+c.id+'">＋ スタンプ</button>'
-      +(stamps>0?'<button class="reset-stamp-btn" data-id="'+c.id+'">－ 1個</button>':'')
-      +'</td>';
+      +'<td style="font-size:11px;color:var(--muted);min-width:80px;">顧客カルテから付与</td>';
     // イベントリスナーで登録（onclickの文字列エスケープ問題を回避）
     (function(custId){
       var addBtn=tr.querySelector('.add-stamp-btn');
