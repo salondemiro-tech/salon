@@ -102,6 +102,9 @@
     <a class="nav-item" href="cancel_policy_v3.html" style="font-size:11px;">📋 キャンセル</a>
     <a class="nav-item" href="stamp_settings.html" style="font-size:11px;">🎫 スタンプ</a>
     <div style="border-top:1px solid var(--border);margin:4px 0;"></div>
+    <div style="padding:10px 12px;border-bottom:1px solid var(--border);">
+      <button onclick="openAddCust()" style="width:100%;padding:7px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;">＋ 新規顧客を追加</button>
+    </div>
     <div class="cust-search">
       <input type="text" id="custSearch" placeholder="顧客名で検索..." oninput="renderCustList()">
     </div>
@@ -394,6 +397,52 @@ function saveEdit(){
 }
 
 renderCustList();
+
+function openAddCust(){
+  document.getElementById('ncName').value='';
+  document.getElementById('ncPhone').value='';
+  document.getElementById('ncEmail').value='';
+  document.getElementById('addCustOv').style.display='flex';
+}
+function closeAddCust(){
+  document.getElementById('addCustOv').style.display='none';
+}
+function saveAddCust(){
+  var name=document.getElementById('ncName').value.trim();
+  var phone=document.getElementById('ncPhone').value.trim();
+  var email=document.getElementById('ncEmail').value.trim();
+  if(!name){alert('氏名を入力してください');return;}
+  if(!phone){alert('電話番号を入力してください');return;}
+  var db=dbLoad();
+  var newCust={id:'c'+Date.now(),name:name,phone:phone,email:email,isLine:false,stamps:0,cycles:0};
+  db.customers.push(newCust);
+  dbSave(db);
+  closeAddCust();
+  renderCustList();
+  selectCust(newCust.id);
+}
 </script>
+<!-- 顧客追加モーダル -->
+<div id="addCustOv" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:14px;padding:24px;width:100%;max-width:400px;box-shadow:0 8px 32px rgba(0,0,0,.15);">
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:16px;">新規顧客を追加</h3>
+    <div style="margin-bottom:10px;">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;">氏名 <span style="color:#c47b7b;">必須</span></label>
+      <input type="text" id="ncName" placeholder="例：山田 花子" style="width:100%;padding:10px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:9px;font-size:14px;font-family:inherit;background:#fff;color:#1a1a18;">
+    </div>
+    <div style="margin-bottom:10px;">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;">電話番号 <span style="color:#c47b7b;">必須</span></label>
+      <input type="tel" id="ncPhone" placeholder="例：090-1234-5678" style="width:100%;padding:10px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:9px;font-size:14px;font-family:inherit;background:#fff;color:#1a1a18;">
+    </div>
+    <div style="margin-bottom:16px;">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:4px;">メールアドレス <span style="font-weight:400;color:#aaa;">任意</span></label>
+      <input type="email" id="ncEmail" placeholder="例：hanako@example.com" style="width:100%;padding:10px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:9px;font-size:14px;font-family:inherit;background:#fff;color:#1a1a18;">
+    </div>
+    <div style="display:flex;gap:10px;">
+      <button onclick="closeAddCust()" style="flex:1;padding:12px;border-radius:10px;border:1.5px solid rgba(0,0,0,.12);background:none;font-size:14px;font-family:inherit;cursor:pointer;color:#73726c;">キャンセル</button>
+      <button onclick="saveAddCust()" style="flex:1;padding:12px;border-radius:10px;border:none;background:#b5845a;color:#fff;font-size:14px;font-family:inherit;font-weight:600;cursor:pointer;">追加する</button>
+    </div>
+  </div>
+</div>
 </body>
 </html>
