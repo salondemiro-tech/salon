@@ -209,6 +209,16 @@ function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length
         </div>
       </div>
 
+      <!-- データリセット（テスト用） -->
+      <div class="section" style="border-color:#c47b7b;">
+        <div class="section-header" style="background:#faeaea;">
+          <div><div class="section-title" style="color:#c47b7b;">🔧 テストデータのリセット</div><div class="section-sub">localStorageの古いスタンプデータをリセットします（テスト時のみ使用）</div></div>
+        </div>
+        <div class="section-body">
+          <button onclick="resetAllStamps()" style="padding:8px 16px;background:#c47b7b;color:#fff;border:none;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;">全顧客のスタンプを0にリセット</button>
+        </div>
+      </div>
+
       <!-- 顧客スタンプ管理 -->
       <div class="section">
         <div class="section-header"><div><div class="section-title">顧客スタンプ管理</div><div class="section-sub">来店時にスタンプを付与します。顧客カルテ画面からも操作できます。</div></div></div>
@@ -349,11 +359,21 @@ function renderCustStampTable(){
   }
 }
 function addStampTo(custId){
+  var scard=dbGetStampCard();
+  var goal=scard.goal||10;
+  // 付与前のスタンプ数を確認
+  var custs=dbGetCustomers();
+  var beforeStamps=0;
+  for(var i=0;i<custs.length;i++){if(custs[i].id===custId){beforeStamps=custs[i].stamps||0;break;}}
   var updated=dbAddStamp(custId,1);
   renderCustStampTable();
-  var scard=dbGetStampCard();
-  showToast((updated?updated.name+'さん':'')+'にスタンプを付与しました（計'+(updated?updated.stamps:'-')+'個）');
-  if(updated&&updated.stamps>=scard.goal)setTimeout(function(){showToast('🎁 '+updated.name+'さんが特典に到達しました！');},1500);
+  // ゴール達成してリセットされた場合
+  if(beforeStamps+1>=goal){
+    var cycles=updated?updated.cycles||1:1;
+    showToast('🎁 満了！'+(cycles>1?cycles+'枚目のカードへ':'特典をお渡しください'));
+  } else {
+    showToast((updated?updated.name+'さん':'')+'にスタンプを付与しました（'+( updated?updated.stamps:'-')+'/'+goal+'個）');
+  }
 }
 function removeStampFrom(custId){
   var updated=dbRemoveStamp(custId);
@@ -361,6 +381,17 @@ function removeStampFrom(custId){
   showToast((updated?updated.name+'さん':'')+'のスタンプを1個減らしました（計'+(updated?updated.stamps:'-')+'個）');
 }
 
+function resetAllStamps(){
+  if(!confirm('全顧客のスタンプ数と達成回数を0にリセットしますか？'))return;
+  var db=dbLoad();
+  for(var i=0;i<db.customers.length;i++){
+    db.customers[i].stamps=0;
+    db.customers[i].cycles=0;
+  }
+  dbSave(db);
+  renderCustStampTable();
+  showToast('全スタンプをリセットしました');
+}
 function saveAll(){
   var policy={
     enabled:document.getElementById('scEnabled').checked,
