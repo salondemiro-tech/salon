@@ -4,51 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>スタンプカード設定 - Salon Manager</title>
-<script>
-var SK='salon_db';
-var DDB={salon:{id:null,name:'',email:'',password:''},settings:{openTime:'10:00',closeTime:'19:00',intervalMin:30,slotMin:30,closedDows:[2],weeklyClose:[{dow:3,start:'12:00',end:'13:00'}],bookingWeeks:8,lastMin:'same1h',deadline:'前日24時まで'},menus:[{id:'m1',name:'フェイシャルトリートメント',duration:90,price:12000,type:'main',public:true},{id:'m2',name:'ボディケア',duration:60,price:8000,type:'main',public:true},{id:'m3',name:'フェイシャル＋アイ',duration:120,price:16000,type:'main',public:true},{id:'m4',name:'目元ケア',duration:30,price:3000,type:'option',public:true},{id:'m5',name:'ヘッドスパ',duration:20,price:2500,type:'option',public:true},{id:'m6',name:'デコルテケア',duration:15,price:2000,type:'option',public:true}],customers:[{id:'c1',name:'山田 花子',phone:'090-1234-5678',email:'hanako_demo',isLine:false,stamps:0},{id:'c2',name:'田中 美咲',phone:'090-2222-3333',email:'misaki_demo',isLine:false,stamps:0}],appointments:[],closeBlocks:[],cancelPolicy:{text:'',rates:[]},stampCard:{enabled:true,goal:10,reward:'次回施術10%OFF',bonusStamps:[{at:5,reward:'オプション1品無料'}],color:'#b5845a'}};
-function dbLoad(){
-  var r=localStorage.getItem(SK);
-  if(!r){localStorage.setItem(SK,JSON.stringify(DDB));return JSON.parse(JSON.stringify(DDB));}
-  var s=JSON.parse(r);
-  return {
-    salon:Object.assign({},DDB.salon,s.salon||{}),
-    settings:Object.assign({},DDB.settings,s.settings||{}),
-    menus:s.menus||DDB.menus,
-    customers:s.customers||JSON.parse(JSON.stringify(DDB.customers)),
-    appointments:s.appointments||[],
-    closeBlocks:s.closeBlocks||[],
-    cancelPolicy:s.cancelPolicy||DDB.cancelPolicy,
-    stampCard:Object.assign({},DDB.stampCard,s.stampCard||{})
-  };
-}
-function dbSave(db){localStorage.setItem(SK,JSON.stringify(db));}
-function dbGetSalon(){return dbLoad().salon;}
-function dbGetCustomers(){return dbLoad().customers;}
-function dbGetStampCard(){return dbLoad().stampCard;}
-function dbSaveStampCard(sc){var db=dbLoad();db.stampCard=sc;dbSave(db);}
-function dbAddStamp(custId,count){
-  count=count||1;
-  var db=dbLoad();
-  var sc=db.stampCard||{goal:10};
-  var goal=sc.goal||10;
-  for(var i=0;i<db.customers.length;i++){
-    if(db.customers[i].id===custId){
-      db.customers[i].stamps=(db.customers[i].stamps||0)+count;
-      // ゴール達成したら自動リセット＋cycles++
-      if(db.customers[i].stamps>=goal){
-        db.customers[i].cycles=(db.customers[i].cycles||0)+1;
-        db.customers[i].stamps=0;
-      }
-      dbSave(db);
-      return db.customers[i];
-    }
-  }
-  return null;
-}
-function dbRemoveStamp(custId){var db=dbLoad();for(var i=0;i<db.customers.length;i++){if(db.customers[i].id===custId){var cur=db.customers[i].stamps||0;db.customers[i].stamps=Math.max(0,cur-1);dbSave(db);return db.customers[i];}}return null;}
-function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length;i++){if(db.customers[i].id===custId){db.customers[i].stamps=0;dbSave(db);return db.customers[i];}}return null;}
-</script>
+<script src="shared_db.js"></script>
 <style>
   :root{--accent:#b5845a;--accent-light:#f5ede4;--surface:#f5f4f0;--border:rgba(0,0,0,0.12);--text:#1a1a18;--muted:#73726c;--green:#7b9e87;--green-light:#e8f2eb;--red:#c47b7b;--red-light:#faeaea;--blue:#7a8fbf;--blue-light:#eaeefc;--gold:#c9a84c;--gold-light:#fdf6e3;--bg:#ffffff;color-scheme:light;}
   *{box-sizing:border-box;margin:0;padding:0;color-scheme:light;}
@@ -65,7 +21,6 @@ function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length
   .topbar{display:flex;align-items:center;justify-content:space-between;padding:14px 24px;border-bottom:1px solid var(--border);}
   .topbar-title{font-size:16px;font-weight:600;}.topbar-sub{font-size:11px;color:var(--muted);margin-top:2px;}
   .save-btn{padding:7px 20px;font-size:12px;background:var(--accent);color:#fff;border:none;border-radius:8px;cursor:pointer;font-weight:600;font-family:inherit;}
-  .save-btn:hover{opacity:.85;}
   .content{flex:1;overflow-y:auto;padding:24px;}
   .section{background:#fff;border:1px solid var(--border);border-radius:12px;margin-bottom:20px;overflow:hidden;}
   .section-header{padding:14px 20px;border-bottom:1px solid var(--border);background:var(--surface);display:flex;align-items:center;justify-content:space-between;}
@@ -84,38 +39,31 @@ function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length
   .fg{margin-bottom:16px;}
   .fg label{font-size:11px;color:var(--muted);font-weight:600;display:block;margin-bottom:5px;letter-spacing:.04em;}
   .fg input,.fg select{width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;}
-  .fg input:focus,.fg select:focus{outline:none;border-color:var(--accent);}
+  .fg input:focus{outline:none;border-color:var(--accent);}
   .num-input{text-align:center;font-size:16px!important;font-weight:600!important;width:100px!important;}
-  /* スタンププレビュー */
   .stamp-preview{background:var(--gold-light);border:1px solid var(--gold);border-radius:12px;padding:20px;margin-top:8px;}
   .sp-title{font-size:11px;font-weight:600;color:#7a5800;letter-spacing:.06em;margin-bottom:14px;}
   .sp-card{background:#fff;border-radius:10px;padding:16px;border:1px solid rgba(201,168,76,.3);box-shadow:0 2px 8px rgba(201,168,76,.15);}
   .sp-card-title{font-size:14px;font-weight:600;color:var(--text);margin-bottom:4px;}
   .sp-card-sub{font-size:11px;color:var(--muted);margin-bottom:14px;}
   .sp-grid{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:12px;}
-  .sp-stamp{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid;transition:all .2s;}
+  .sp-stamp{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:16px;border:2px solid;}
   .sp-stamp.filled{color:#fff;}
   .sp-stamp.empty{background:#f5f5f5;border-color:#e0e0e0;color:transparent;}
-  .sp-stamp.bonus{position:relative;}
-  .sp-stamp.bonus::after{content:'★';position:absolute;top:-6px;right:-6px;font-size:9px;color:var(--gold);background:#fff;border-radius:50%;width:14px;height:14px;display:flex;align-items:center;justify-content:center;border:1px solid var(--gold);}
-  .sp-reward{background:var(--accent-light);border:1px solid var(--accent);border-radius:8px;padding:8px 12px;font-size:12px;color:var(--accent-dark);font-weight:600;text-align:center;}
+  .sp-reward{background:var(--accent-light);border:1px solid var(--accent);border-radius:8px;padding:8px 12px;font-size:12px;color:#7a5535;font-weight:600;text-align:center;}
   .sp-progress{font-size:11px;color:var(--muted);text-align:center;margin-top:8px;}
-  /* ボーナス設定 */
   .bonus-list{display:flex;flex-direction:column;gap:8px;}
   .bonus-row{display:flex;flex-wrap:wrap;align-items:center;gap:6px;padding:10px 14px;background:var(--surface);border-radius:8px;border:1px solid var(--border);}
   .bonus-row-label{font-size:12px;color:var(--muted);white-space:nowrap;}
   .bonus-row input{flex:1;min-width:0;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;}
-  .bonus-row input:focus{outline:none;border-color:var(--accent);}
   .bonus-row input.num{width:56px;flex:none;text-align:center;}
   .bonus-del{width:26px;height:26px;display:flex;align-items:center;justify-content:center;border:1px solid var(--border);border-radius:6px;background:none;cursor:pointer;font-size:12px;color:var(--muted);flex-shrink:0;}
   .bonus-del:hover{border-color:var(--red);color:var(--red);}
   .add-bonus-btn{width:100%;padding:8px;border:1px dashed var(--border);border-radius:8px;background:none;cursor:pointer;font-size:12px;color:var(--muted);font-family:inherit;margin-top:8px;}
   .add-bonus-btn:hover{border-color:var(--accent);color:var(--accent);}
-  /* カラーピッカー */
   .color-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;}
   .color-chip{width:32px;height:32px;border-radius:50%;cursor:pointer;border:3px solid transparent;transition:all .15s;}
   .color-chip.selected{border-color:#333;transform:scale(1.15);}
-  /* 顧客スタンプ管理 */
   .cust-stamp-table{width:100%;border-collapse:collapse;}
   .cust-stamp-table th{font-size:11px;color:var(--muted);font-weight:500;padding:7px 8px;text-align:left;border-bottom:1px solid var(--border);background:var(--surface);}
   .cust-stamp-table td{padding:8px;border-bottom:1px solid var(--border);font-size:13px;vertical-align:middle;}
@@ -124,17 +72,11 @@ function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length
   .stamp-dots{display:flex;gap:3px;flex-wrap:wrap;max-width:120px;}
   .stamp-dot{width:10px;height:10px;border-radius:50%;background:var(--border);flex-shrink:0;}
   .stamp-dot.on{background:var(--accent);}
-  .stamp-count{font-size:11px;color:var(--muted);}
-  .add-stamp-btn{display:block;width:100%;padding:5px 8px;font-size:11px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap;margin-bottom:4px;}
-  .add-stamp-btn:hover{opacity:.85;}
-  .reset-stamp-btn{display:block;width:100%;padding:5px 8px;font-size:11px;background:none;color:var(--red);border:1px solid var(--red);border-radius:6px;cursor:pointer;font-family:inherit;white-space:nowrap;}
-  .reward-badge{display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;background:var(--gold-light);color:#7a5800;font-weight:600;border:1px solid var(--gold);}
-  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#2e5c3a;color:#fff;font-size:12px;padding:9px 20px;border-radius:20px;opacity:0;transition:all .3s;z-index:200;white-space:nowrap;}
-  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
   .exp-chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;}
   .exp-chip{padding:7px 14px;border:1.5px solid var(--border);border-radius:20px;font-size:12px;cursor:pointer;transition:all .15s;white-space:nowrap;}
-  .exp-chip:hover{border-color:var(--accent);color:var(--accent);}
   .exp-chip.selected{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600;}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#2e5c3a;color:#fff;font-size:12px;padding:9px 20px;border-radius:20px;opacity:0;transition:all .3s;z-index:200;white-space:nowrap;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 </style>
 </head>
 <body>
@@ -153,21 +95,19 @@ function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length
   <div class="main">
     <div class="topbar">
       <div><div class="topbar-title">スタンプカード設定</div><div class="topbar-sub">顧客のスタンプカードと特典を管理します</div></div>
-      <button class="save-btn" onclick="saveAll()">保存する</button>
+      <button class="save-btn" id="saveBtn">保存する</button>
     </div>
     <div class="content">
-
-      <!-- 基本設定 -->
       <div class="section">
         <div class="section-header">
           <div><div class="section-title">スタンプカード基本設定</div><div class="section-sub">顧客アプリに表示されるスタンプカードの設定</div></div>
-          <label class="tgl"><input type="checkbox" id="scEnabled" onchange="toggleEnabled()"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>
+          <label class="tgl"><input type="checkbox" id="scEnabled"><div class="tgl-track"></div><div class="tgl-thumb"></div></label>
         </div>
         <div class="section-body" id="scBody">
           <div class="field-row">
             <div class="fg">
               <label>ゴールスタンプ数（何個で特典？）</label>
-              <input type="number" class="num-input" id="scGoal" min="3" max="50" value="10" oninput="updatePreview()">
+              <input type="number" class="num-input" id="scGoal" min="3" max="50" value="10">
             </div>
             <div class="fg">
               <label>スタンプカラー</label>
@@ -176,7 +116,7 @@ function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length
           </div>
           <div class="fg">
             <label>ゴール達成特典</label>
-            <textarea id="scReward" placeholder="例：次回施術10%OFF" oninput="updatePreview()" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;line-height:1.6;"></textarea>
+            <textarea id="scReward" placeholder="例：次回施術10%OFF" rows="3" style="width:100%;padding:9px 12px;border:1.5px solid var(--border);border-radius:8px;font-size:13px;font-family:inherit;resize:vertical;line-height:1.6;"></textarea>
           </div>
           <div class="stamp-preview">
             <div class="sp-title">顧客アプリでの表示プレビュー</div>
@@ -191,16 +131,14 @@ function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length
         </div>
       </div>
 
-      <!-- ボーナス特典 -->
       <div class="section">
         <div class="section-header"><div><div class="section-title">途中ボーナス特典</div><div class="section-sub">指定スタンプ数到達時に追加特典を設定できます（任意）</div></div></div>
         <div class="section-body">
           <div class="bonus-list" id="bonusList"></div>
-          <button class="add-bonus-btn" onclick="addBonus()">＋ ボーナス特典を追加</button>
+          <button class="add-bonus-btn" id="addBonusBtn">＋ ボーナス特典を追加</button>
         </div>
       </div>
 
-      <!-- 有効期限 -->
       <div class="section">
         <div class="section-header"><div><div class="section-title">スタンプカードの有効期限</div><div class="section-sub">最初のスタンプ取得日から起算します</div></div></div>
         <div class="section-body">
@@ -209,17 +147,6 @@ function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length
         </div>
       </div>
 
-      <!-- データリセット（テスト用） -->
-      <div class="section" style="border-color:#c47b7b;">
-        <div class="section-header" style="background:#faeaea;">
-          <div><div class="section-title" style="color:#c47b7b;">🔧 テストデータのリセット</div><div class="section-sub">localStorageの古いスタンプデータをリセットします（テスト時のみ使用）</div></div>
-        </div>
-        <div class="section-body">
-          <button onclick="resetAllStamps()" style="padding:8px 16px;background:#c47b7b;color:#fff;border:none;border-radius:8px;font-size:12px;cursor:pointer;font-family:inherit;">全顧客のスタンプを0にリセット</button>
-        </div>
-      </div>
-
-      <!-- 顧客スタンプ管理 -->
       <div class="section">
         <div class="section-header"><div><div class="section-title">顧客スタンプ管理</div><div class="section-sub">来店時にスタンプを付与します。</div></div></div>
         <div class="section-body">
@@ -229,184 +156,201 @@ function dbResetStamps(custId){var db=dbLoad();for(var i=0;i<db.customers.length
           </table>
         </div>
       </div>
-
     </div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
-var STAMP_COLORS=['#b5845a','#7b9e87','#7a8fbf','#c47b7b','#c9a84c','#9b7bb5','#5a9e9e','#1a1a18'];
-var EXP_OPTS=[{v:'3m',l:'3ヶ月'},{v:'6m',l:'6ヶ月'},{v:'12m',l:'12ヶ月'},{v:'none',l:'無期限'}];
-var selectedExp='none';
-var sc=dbGetStampCard();
-var bonusRows=(function(){var r=sc.bonusStamps||[];var out=[];for(var i=0;i<r.length;i++)out.push({id:i+1,at:r[i].at,reward:r[i].reward});return out;})();
-var bonusNextId=bonusRows.length+10;
-var selectedColor=sc.color||'#b5845a';
+var STAMP_COLORS = ['#b5845a','#7b9e87','#7a8fbf','#c47b7b','#c9a84c','#9b7bb5','#5a9e9e','#1a1a18'];
+var EXP_OPTS = [{v:'3m',l:'3ヶ月'},{v:'6m',l:'6ヶ月'},{v:'12m',l:'12ヶ月'},{v:'none',l:'無期限'}];
+var selectedExp = 'none';
+var bonusRows = [];
+var bonusNextId = 10;
+var selectedColor = '#b5845a';
+var currentGoal = 10;
 
-function init(){
-  document.getElementById('scEnabled').checked=sc.enabled!==false;
-  document.getElementById('scGoal').value=sc.goal||10;
-  document.getElementById('scReward').value=sc.reward||'';
-  selectedExp=sc.expiry||'none';
-  renderColorChips();renderExpChips();renderBonusList();renderCustStampTable();updatePreview();toggleEnabled();
+function toggleEnabled() {
+  var on = document.getElementById('scEnabled').checked;
+  document.getElementById('scBody').style.opacity = on ? '1' : '0.4';
+  document.getElementById('scBody').style.pointerEvents = on ? 'auto' : 'none';
 }
 
-function toggleEnabled(){
-  var on=document.getElementById('scEnabled').checked;
-  document.getElementById('scBody').style.opacity=on?'1':'0.4';
-  document.getElementById('scBody').style.pointerEvents=on?'auto':'none';
-}
-
-function renderColorChips(){
-  var html='';
-  for(var i=0;i<STAMP_COLORS.length;i++){
-    var c=STAMP_COLORS[i];
-    html+='<div class="color-chip '+(selectedColor===c?'selected':'')+'" style="background:'+c+';" onclick="setColor(\'' + c + '\')"></div>';
+function renderColorChips() {
+  var html = '';
+  for (var i = 0; i < STAMP_COLORS.length; i++) {
+    var c = STAMP_COLORS[i];
+    html += '<div class="color-chip ' + (selectedColor === c ? 'selected' : '') + '" style="background:' + c + ';" data-color="' + c + '"></div>';
   }
-  document.getElementById('colorChips').innerHTML=html;
+  document.getElementById('colorChips').innerHTML = html;
+  document.querySelectorAll('#colorChips .color-chip').forEach(function(el) {
+    el.addEventListener('click', function() { setColor(this.getAttribute('data-color')); });
+  });
 }
-function setColor(c){selectedColor=c;renderColorChips();updatePreview();}
+function setColor(c) { selectedColor = c; renderColorChips(); updatePreview(); }
 
-function renderExpChips(){
-  var html='';
-  for(var i=0;i<EXP_OPTS.length;i++){
-    var o=EXP_OPTS[i];
-    html+='<div class="exp-chip '+(selectedExp===o.v?'selected':'')+'" onclick="setExp(\''+o.v+'\')">'+o.l+'</div>';
+function renderExpChips() {
+  var html = '';
+  for (var i = 0; i < EXP_OPTS.length; i++) {
+    var o = EXP_OPTS[i];
+    html += '<div class="exp-chip ' + (selectedExp === o.v ? 'selected' : '') + '" data-exp="' + o.v + '">' + o.l + '</div>';
   }
-  document.getElementById('expChips').innerHTML=html;
+  document.getElementById('expChips').innerHTML = html;
+  document.querySelectorAll('#expChips .exp-chip').forEach(function(el) {
+    el.addEventListener('click', function() { setExp(this.getAttribute('data-exp')); });
+  });
 }
-function setExp(v){selectedExp=v;renderExpChips();}
+function setExp(v) { selectedExp = v; renderExpChips(); }
 
-function updatePreview(){
-  var goal=parseInt(document.getElementById('scGoal').value,10)||10;
-  var reward=document.getElementById('scReward').value||'特典';
-  var demoFilled=Math.min(4,goal);
-  var salonName=dbGetSalon().name||'Salon ✦ Name';
-  document.getElementById('prevSalonName').textContent=salonName;
-  document.getElementById('prevSubText').textContent='スタンプカード　'+goal+'個でプレゼント🎁';
-  var html='';
-  var bonusAts=[];for(var j=0;j<bonusRows.length;j++)bonusAts.push(bonusRows[j].at);
-  for(var i=1;i<=goal;i++){
-    var filled=i<=demoFilled;
-    var isBonus=false;for(var k=0;k<bonusAts.length;k++){if(bonusAts[k]===i){isBonus=true;break;}}
-    html+='<div class="sp-stamp '+(filled?'filled':'empty')+(isBonus?' bonus':'')+'" style="'+(filled?'background:'+selectedColor+';border-color:'+selectedColor+';':'')+'">'+( filled?'✦':'')+'</div>';
+function updatePreview() {
+  var goal = parseInt(document.getElementById('scGoal').value, 10) || 10;
+  var reward = document.getElementById('scReward').value || '特典';
+  var demoFilled = Math.min(4, goal);
+  var html = '';
+  var bonusAts = bonusRows.map(function(r) { return r.at; });
+  for (var i = 1; i <= goal; i++) {
+    var filled = i <= demoFilled;
+    var isBonus = bonusAts.indexOf(i) >= 0;
+    html += '<div class="sp-stamp ' + (filled ? 'filled' : 'empty') + '" style="' + (filled ? 'background:' + selectedColor + ';border-color:' + selectedColor + ';' : '') + '">' + (filled ? '✦' : '') + '</div>';
   }
-  document.getElementById('prevStampGrid').innerHTML=html;
-  document.getElementById('prevReward').textContent='🎁 '+goal+'個達成で：'+reward;
-  document.getElementById('prevProgress').textContent=demoFilled+' / '+goal+' スタンプ（デモ表示）';
+  document.getElementById('prevStampGrid').innerHTML = html;
+  document.getElementById('prevReward').textContent = '🎁 ' + goal + '個達成で：' + reward;
+  document.getElementById('prevProgress').textContent = demoFilled + ' / ' + goal + ' スタンプ（デモ表示）';
+  dbGetSalon(function(salon) {
+    document.getElementById('prevSalonName').textContent = (salon && salon.name) ? salon.name : 'Salon ✦ Name';
+  });
+  document.getElementById('prevSubText').textContent = 'スタンプカード　' + goal + '個でプレゼント🎁';
 }
 
-function renderBonusList(){
-  var goal=parseInt(document.getElementById('scGoal').value,10)||10;
-  var list=document.getElementById('bonusList');
-  if(bonusRows.length===0){list.innerHTML='<div style="font-size:12px;color:var(--muted);padding:4px 0;">ボーナス特典は設定されていません</div>';return;}
-  var html='';
-  for(var i=0;i<bonusRows.length;i++){
-    var r=bonusRows[i];
-    html+='<div class="bonus-row">'
-      +'<span class="bonus-row-label">スタンプ</span>'
-      +'<input class="num" type="number" value="'+r.at+'" min="1" max="'+(goal-1)+'" onchange="updateBonus('+r.id+',\'at\',this.value)" style="width:64px;text-align:center;">'
-      +'<span class="bonus-row-label">個達成で</span>'
-      +'<input type="text" value="'+r.reward+'" placeholder="例：オプション1品無料" onchange="updateBonus('+r.id+',\'reward\',this.value)">'
-      +'<button class="bonus-del" onclick="delBonus('+r.id+')">✕</button>'
-      +'</div>';
-  }
-  list.innerHTML=html;
+function renderBonusList() {
+  var goal = parseInt(document.getElementById('scGoal').value, 10) || 10;
+  var list = document.getElementById('bonusList');
+  if (bonusRows.length === 0) { list.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:4px 0;">ボーナス特典は設定されていません</div>'; return; }
+  list.innerHTML = '';
+  bonusRows.forEach(function(r) {
+    var row = document.createElement('div');
+    row.className = 'bonus-row';
+    row.innerHTML = '<span class="bonus-row-label">スタンプ</span>'
+      + '<input class="num" type="number" value="' + r.at + '" min="1" max="' + (goal-1) + '" style="width:64px;text-align:center;">'
+      + '<span class="bonus-row-label">個達成で</span>'
+      + '<input type="text" value="' + r.reward + '" placeholder="例：オプション1品無料">'
+      + '<button class="bonus-del">✕</button>';
+    var inputs = row.querySelectorAll('input');
+    var delBtn = row.querySelector('.bonus-del');
+    (function(rid) {
+      inputs[0].addEventListener('change', function() { updateBonus(rid, 'at', this.value); });
+      inputs[1].addEventListener('change', function() { updateBonus(rid, 'reward', this.value); });
+      delBtn.addEventListener('click', function() { delBonus(rid); });
+    })(r.id);
+    list.appendChild(row);
+  });
 }
-function addBonus(){
-  var goal=parseInt(document.getElementById('scGoal').value,10)||10;
-  bonusRows.push({id:bonusNextId++,at:Math.max(1,Math.floor(goal/2)),reward:''});
-  renderBonusList();updatePreview();
+function addBonus() {
+  var goal = parseInt(document.getElementById('scGoal').value, 10) || 10;
+  bonusRows.push({ id: bonusNextId++, at: Math.max(1, Math.floor(goal/2)), reward: '' });
+  renderBonusList(); updatePreview();
 }
-function delBonus(id){
-  var r=[];for(var i=0;i<bonusRows.length;i++){if(bonusRows[i].id!==id)r.push(bonusRows[i]);}bonusRows=r;
-  renderBonusList();updatePreview();
+function delBonus(id) {
+  bonusRows = bonusRows.filter(function(r) { return r.id !== id; });
+  renderBonusList(); updatePreview();
 }
-function updateBonus(id,f,v){
-  for(var i=0;i<bonusRows.length;i++){if(bonusRows[i].id===id){bonusRows[i][f]=f==='at'?parseInt(v)||1:v;break;}}
+function updateBonus(id, f, v) {
+  for (var i = 0; i < bonusRows.length; i++) { if (bonusRows[i].id === id) { bonusRows[i][f] = f === 'at' ? parseInt(v) || 1 : v; break; } }
   updatePreview();
 }
 
-function renderCustStampTable(){
-  var custs=dbGetCustomers();
-  var scard=dbGetStampCard();
-  var goal=scard.goal||10;
-  var tbody=document.getElementById('custStampTable');
-  if(!custs.length){tbody.innerHTML='<tr><td colspan="3" style="text-align:center;color:var(--muted);font-size:12px;padding:16px;">顧客が登録されていません</td></tr>';return;}
-  tbody.innerHTML='';
-  for(var i=0;i<custs.length;i++){
-    var c=custs[i],stamps=c.stamps||0,pct=Math.min(stamps,goal);
-    var dots='';
-    for(var d=0;d<Math.min(goal,10);d++){dots+='<div class="stamp-dot '+(d<pct?'on':'')+'" style="'+(d<pct?'background:'+selectedColor:'')+';"></div>';}
-    var rewardReady=stamps>=goal;
-    var tr=document.createElement('tr');
-    var cyclesText=(c.cycles&&c.cycles>0)?'<br><span style="font-size:10px;background:var(--accent-light);color:var(--accent);padding:1px 6px;border-radius:10px;font-weight:600;">'+(c.cycles+1)+'枚目のカード</span>':'';
-    tr.innerHTML='<td style="white-space:nowrap;font-size:13px;font-weight:600;min-width:60px;">'+c.name+cyclesText+'</td>'
-      +'<td><div class="stamp-bar"><div class="stamp-dots">'+dots+'</div><span class="stamp-count" style="font-size:11px;white-space:nowrap;">'+stamps+'個</span></div></td>'
-      +'<td style="font-size:11px;color:var(--muted);min-width:80px;">顧客カルテから付与</td>';
-    // イベントリスナーで登録（onclickの文字列エスケープ問題を回避）
-    (function(custId){
-      var addBtn=tr.querySelector('.add-stamp-btn');
-      if(addBtn)addBtn.addEventListener('click',function(){addStampTo(custId);});
-      var resetBtn=tr.querySelector('.reset-stamp-btn');
-      if(resetBtn)resetBtn.addEventListener('click',function(){removeStampFrom(custId);});
-    })(c.id);
+function renderCustStampTable(customers, stampCard) {
+  var goal = (stampCard && stampCard.goal) ? stampCard.goal : 10;
+  var tbody = document.getElementById('custStampTable');
+  if (!customers || !customers.length) {
+    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);font-size:12px;padding:16px;">顧客が登録されていません</td></tr>';
+    return;
+  }
+  tbody.innerHTML = '';
+  customers.forEach(function(c) {
+    var stamps = c.stamps || 0;
+    var pct = Math.min(stamps, goal);
+    var dots = '';
+    for (var d = 0; d < Math.min(goal, 10); d++) {
+      dots += '<div class="stamp-dot ' + (d < pct ? 'on' : '') + '" style="' + (d < pct ? 'background:' + selectedColor : '') + ';"></div>';
+    }
+    var tr = document.createElement('tr');
+    tr.innerHTML = '<td style="font-size:13px;font-weight:600;">' + c.name + '</td>'
+      + '<td><div class="stamp-bar"><div class="stamp-dots">' + dots + '</div><span style="font-size:11px;color:var(--muted);">' + stamps + '個</span></div></td>'
+      + '<td><button style="padding:4px 10px;font-size:11px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;margin-bottom:3px;display:block;">＋スタンプ</button>'
+      + '<button style="padding:4px 10px;font-size:11px;background:none;color:var(--red);border:1px solid var(--red);border-radius:6px;cursor:pointer;font-family:inherit;display:block;">リセット</button></td>';
+    var btns = tr.querySelectorAll('button');
+    (function(custId, custName) {
+      btns[0].addEventListener('click', function() { addStampTo(custId, custName, goal); });
+      btns[1].addEventListener('click', function() { resetStampsFor(custId, custName); });
+    })(c.id, c.name);
     tbody.appendChild(tr);
-  }
-}
-function addStampTo(custId){
-  var scard=dbGetStampCard();
-  var goal=scard.goal||10;
-  // 付与前のスタンプ数を確認
-  var custs=dbGetCustomers();
-  var beforeStamps=0;
-  for(var i=0;i<custs.length;i++){if(custs[i].id===custId){beforeStamps=custs[i].stamps||0;break;}}
-  var updated=dbAddStamp(custId,1);
-  renderCustStampTable();
-  // ゴール達成してリセットされた場合
-  if(beforeStamps+1>=goal){
-    var cycles=updated?updated.cycles||1:1;
-    showToast('🎁 満了！'+(cycles>1?cycles+'枚目のカードへ':'特典をお渡しください'));
-  } else {
-    showToast((updated?updated.name+'さん':'')+'にスタンプを付与しました（'+( updated?updated.stamps:'-')+'/'+goal+'個）');
-  }
-}
-function removeStampFrom(custId){
-  var updated=dbRemoveStamp(custId);
-  renderCustStampTable();
-  showToast((updated?updated.name+'さん':'')+'のスタンプを1個減らしました（計'+(updated?updated.stamps:'-')+'個）');
+  });
 }
 
-function resetAllStamps(){
-  if(!confirm('全顧客のスタンプ数と達成回数を0にリセットしますか？'))return;
-  var db=dbLoad();
-  for(var i=0;i<db.customers.length;i++){
-    db.customers[i].stamps=0;
-    db.customers[i].cycles=0;
-  }
-  dbSave(db);
-  renderCustStampTable();
-  showToast('全スタンプをリセットしました');
+function addStampTo(custId, custName, goal) {
+  dbAddStamp(custId, 1, function(err) {
+    if (err) { showToast('エラーが発生しました'); return; }
+    reloadCustTable();
+    showToast(custName + 'さんにスタンプを付与しました');
+  });
 }
-function saveAll(){
-  var policy={
-    enabled:document.getElementById('scEnabled').checked,
-    goal:parseInt(document.getElementById('scGoal').value,10)||10,
-    reward:document.getElementById('scReward').value,
-    bonusStamps:(function(){var r=[];for(var i=0;i<bonusRows.length;i++)r.push({at:bonusRows[i].at,reward:bonusRows[i].reward});return r;})(),
-    color:selectedColor,
-    expiry:selectedExp
+
+function resetStampsFor(custId, custName) {
+  if (!confirm(custName + 'さんのスタンプをリセットしますか？')) return;
+  dbResetStamps(custId, function(err) {
+    if (err) { showToast('エラーが発生しました'); return; }
+    reloadCustTable();
+    showToast(custName + 'さんのスタンプをリセットしました');
+  });
+}
+
+function reloadCustTable() {
+  dbGetCustomers(function(customers) {
+    dbGetStampCard(function(sc) {
+      renderCustStampTable(customers, sc);
+    });
+  });
+}
+
+function saveAll() {
+  var policy = {
+    enabled: document.getElementById('scEnabled').checked,
+    goal: parseInt(document.getElementById('scGoal').value, 10) || 10,
+    reward: document.getElementById('scReward').value,
+    bonusStamps: bonusRows.map(function(r) { return { at: r.at, reward: r.reward }; }),
+    color: selectedColor,
+    expiry: selectedExp
   };
-  dbSaveStampCard(policy);
-  renderCustStampTable();
-  updatePreview();
-  showToast('スタンプカード設定を保存しました');
+  dbSaveStampCard(policy, function(err) {
+    if (err) { showToast('保存に失敗しました'); return; }
+    reloadCustTable();
+    updatePreview();
+    showToast('スタンプカード設定を保存しました');
+  });
 }
 
-function showToast(msg){var t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(function(){t.classList.remove('show');},3000);}
+function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 3000); }
 
-window.addEventListener('DOMContentLoaded',init);
+onFbReady(function() {
+  dbGetStampCard(function(sc) {
+    document.getElementById('scEnabled').checked = sc.enabled !== false;
+    document.getElementById('scGoal').value = sc.goal || 10;
+    document.getElementById('scReward').value = sc.reward || '';
+    selectedExp = sc.expiry || 'none';
+    selectedColor = sc.color || '#b5845a';
+    bonusRows = (sc.bonusStamps || []).map(function(r, i) { return { id: i+1, at: r.at, reward: r.reward }; });
+    bonusNextId = bonusRows.length + 10;
+    renderColorChips(); renderExpChips(); renderBonusList(); updatePreview(); toggleEnabled();
+    reloadCustTable();
+  });
+
+  document.getElementById('saveBtn').addEventListener('click', saveAll);
+  document.getElementById('addBonusBtn').addEventListener('click', addBonus);
+  document.getElementById('scEnabled').addEventListener('change', toggleEnabled);
+  document.getElementById('scGoal').addEventListener('input', function() { updatePreview(); renderBonusList(); });
+  document.getElementById('scReward').addEventListener('input', updatePreview);
+});
 </script>
 </body>
 </html>

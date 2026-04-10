@@ -4,15 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Salon Manager - ログイン</title>
-<script>
-const STORAGE_KEY='salon_db';
-const DEFAULT_DB={salon:{id:null,name:'',email:'',password:''},settings:{openTime:'10:00',closeTime:'19:00',intervalMin:30,slotMin:30,closedDows:[2],weeklyClose:[{dow:3,start:'12:00',end:'13:00'}],bookingWeeks:8,lastMin:'same1h',deadline:'前日24時まで'},menus:[{id:'m1',name:'フェイシャルトリートメント',duration:90,price:12000,type:'main',public:true},{id:'m2',name:'ボディケア',duration:60,price:8000,type:'main',public:true},{id:'m3',name:'フェイシャル＋アイ',duration:120,price:16000,type:'main',public:true},{id:'m4',name:'目元ケア',duration:30,price:3000,type:'option',public:true},{id:'m5',name:'ヘッドスパ',duration:20,price:2500,type:'option',public:true},{id:'m6',name:'デコルテケア',duration:15,price:2000,type:'option',public:true}],customers:[{id:'c1',name:'山田 花子',phone:'090-1234-5678',email:'hanako@example.com',isLine:false,stamps:0},{id:'c2',name:'田中 美咲',phone:'090-2222-3333',email:'misaki@example.com',isLine:false,stamps:0}],appointments:[{id:'a1',customerId:'c2',name:'田中 美咲',date:'2026-04-02',start:'11:00',durationMin:120,intervalMin:30,menu:'フェイシャル＋アイ',status:'active'},{id:'a2',customerId:'c1',name:'山田 花子',date:'2026-04-03',start:'14:00',durationMin:90,intervalMin:30,menu:'フェイシャルトリートメント',status:'active'},{id:'a3',customerId:'c1',name:'山田 花子',date:'2026-04-04',start:'10:00',durationMin:60,intervalMin:20,menu:'ボディケア',status:'active'}],closeBlocks:[{id:'b1',date:'2026-04-03',start:'15:30',end:'16:30',reason:'外出'}],cancelPolicy:{text:'・3日前まで：無料\n・2日前〜前日：ご予約料金の50%\n・当日：ご予約料金の100%\n・無断キャンセル：ご予約料金の100%',rates:[{id:1,label:'3日前から',percent:0},{id:2,label:'前日から',percent:50},{id:3,label:'当日',percent:100},{id:4,label:'無断キャンセル',percent:100}],qrUrl:'',showOnBook:true,showOnCancel:true},stampCard:{enabled:true,goal:10,reward:'次回施術10%OFF',bonusStamps:[{at:5,reward:'オプション1品無料'}],color:'#b5845a'}};
-function dbLoad(){var raw=localStorage.getItem(STORAGE_KEY);if(!raw){localStorage.setItem(STORAGE_KEY,JSON.stringify(DEFAULT_DB));return JSON.parse(JSON.stringify(DEFAULT_DB));}var saved=JSON.parse(raw);var merged=Object.assign({},DEFAULT_DB,saved);merged.settings=Object.assign({},DEFAULT_DB.settings,saved.settings||{});merged.stampCard=Object.assign({},DEFAULT_DB.stampCard,saved.stampCard||{});merged.salon=Object.assign({},DEFAULT_DB.salon,saved.salon||{});return merged;}
-function dbSave(db){localStorage.setItem(STORAGE_KEY,JSON.stringify(db));}
-function dbGetSalon(){return dbLoad().salon;}
-function dbSaveSalon(salon){var db=dbLoad();db.salon=salon;dbSave(db);}
-function validatePassword(pw){if(!pw||pw.length<8)return{ok:false,msg:'8文字以上で入力してください'};if(!/[a-zA-Z]/.test(pw))return{ok:false,msg:'英字を含めてください'};if(!/[0-9]/.test(pw))return{ok:false,msg:'数字を含めてください'};return{ok:true};}
-</script>
+<script src="shared_db.js"></script>
 <style>
 :root{--accent:#b5845a;--accent-light:#f5ede4;--accent-dark:#7a5535;--bg:#ffffff;--surface:#f8f7f4;--surface2:#f0ede8;--border:rgba(0,0,0,0.10);--text:#1a1a18;--muted:#73726c;--green:#7b9e87;--green-light:#e8f2eb;--red:#c47b7b;--red-light:#faeaea;--red-text:#6b1f1f;color-scheme:light;}
 *{box-sizing:border-box;margin:0;padding:0;color-scheme:light;}
@@ -41,56 +33,49 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
 .code-box{width:44px;height:52px;border:2px solid var(--border);border-radius:9px;font-size:20px;font-weight:600;text-align:center;font-family:inherit;background:#fff!important;color:var(--text)!important;transition:border-color .15s;}
 .code-box:focus{outline:none;border-color:var(--accent);}.code-box.filled{border-color:var(--accent);background:var(--accent-light)!important;}
 .step-badge{display:inline-block;background:var(--accent-light);color:var(--accent);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;margin-bottom:14px;}
-/* ダッシュボード */
 .dash{display:none;width:100%;max-width:500px;}
 .dash-card{background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.12);overflow:hidden;}
 .dash-top{background:var(--accent);padding:20px 24px;display:flex;align-items:center;justify-content:space-between;}
 .dash-top h2{font-size:16px;font-weight:600;color:#fff;margin:0;}.dash-top p{font-size:11px;color:rgba(255,255,255,.8);margin-top:2px;}
 .out-btn{padding:5px 14px;border:1.5px solid rgba(255,255,255,.6);border-radius:6px;background:none;color:#fff;font-size:12px;cursor:pointer;font-family:inherit;}
-.notif{padding:16px 20px;border-bottom:1px solid var(--border);}
-.notif h3{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:10px;}
-.ni{display:flex;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;align-items:flex-start;}.ni:last-child{border-bottom:none;}
-.dot{width:8px;height:8px;border-radius:50%;flex-shrink:0;margin-top:3px;}.dot.new{background:var(--green);}.dot.cancel{background:var(--red);}.dot.change{background:var(--accent);}
-.ni-text{flex:1;line-height:1.6;}.ni-time{font-size:10px;color:var(--muted);white-space:nowrap;}
 .nav-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);}
 .nav-item{padding:16px 12px;text-align:center;background:#fff;cursor:pointer;text-decoration:none;color:inherit;display:block;transition:background .15s;}
 .nav-item:hover{background:var(--accent-light);}.nav-item-icon{font-size:22px;margin-bottom:4px;}.nav-item-label{font-size:11px;color:var(--muted);}
 .setting-area{padding:16px 20px;display:none;}
 .setting-area h3{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:12px;}
+.loading{text-align:center;padding:40px;color:var(--muted);font-size:14px;}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#2e5c3a;color:#fff;font-size:12px;padding:9px 20px;border-radius:20px;opacity:0;transition:all .3s;z-index:300;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 </style>
 </head>
 <body>
 <div id="authWrap" style="width:100%;max-width:400px;">
+  <div id="vLoading" class="card"><div class="loading">読み込み中...</div></div>
 
   <!-- ログイン -->
-  <div id="vLogin" class="card">
+  <div id="vLogin" class="card" style="display:none;">
     <div class="logo"><div class="logo-mark">🌸 Salon Manager</div><div class="logo-sub">サロン管理システム</div></div>
-    <div class="hint">【デモ】登録後の店名・メール・パスワードでログインできます</div>
-    <div class="fg"><label>店名</label><input id="lName" placeholder="例：Salon ✦ Name" oninput="chkLogin()"></div>
-    <div class="fg"><label>メールアドレス</label><input id="lEmail" type="email" placeholder="例：salon@example.com" oninput="chkLogin()"></div>
+    <div class="fg"><label>メールアドレス</label><input id="lEmail" type="email" placeholder="例：salon@example.com"></div>
     <div class="fg"><label>パスワード</label>
-      <div class="pw-wrap"><input id="lPass" type="password" placeholder="パスワード" oninput="chkLogin()">
-      <button class="pw-eye" type="button" onclick="togglePw('lPass',this)">👁</button></div>
+      <div class="pw-wrap"><input id="lPass" type="password" placeholder="パスワード">
+      <button class="pw-eye" id="lPassEye" type="button">👁</button></div>
     </div>
-    <div class="err" id="loginErr">店名・メールアドレス・パスワードが一致しません。</div>
-    <button class="btn" id="loginBtn" onclick="doLogin()" disabled>ログイン</button>
-    <button class="text-link" onclick="show('vForgot')">パスワードを忘れた方はこちら</button>
+    <div class="err" id="loginErr">メールアドレスまたはパスワードが正しくありません。</div>
+    <button class="btn" id="loginBtn" disabled>ログイン</button>
+    <button class="text-link" id="toForgotBtn">パスワードを忘れた方はこちら</button>
     <div class="divider"><span>または</span></div>
-    <button class="link-btn" onclick="show('vReg')">初めての方はこちら（新規登録）</button>
+    <button class="link-btn" id="toRegBtn">初めての方はこちら（新規登録）</button>
   </div>
 
   <!-- 新規登録 -->
   <div id="vReg" class="card" style="display:none;">
     <h2>新規登録</h2>
-    <div class="hint">デモ用：入力後「123456」で認証できます</div>
-    <div class="fg"><label>店名</label><input id="rName" placeholder="例：Salon ✦ Name" oninput="chkReg()"></div>
-    <div class="fg"><label>メールアドレス</label><input id="rEmail" type="email" placeholder="例：salon@example.com" oninput="chkReg()">
+    <div class="fg"><label>店名</label><input id="rName" placeholder="例：Salon ✦ Name"></div>
+    <div class="fg"><label>メールアドレス</label><input id="rEmail" type="email" placeholder="例：salon@example.com">
       <div style="font-size:11px;color:var(--muted);margin-top:4px;">認証コード・通知が届きます</div></div>
-    <div class="err" id="regErr">このメールアドレスはすでに登録されています。</div>
-    <button class="btn" id="regBtn" onclick="goVerify()" disabled>認証コードをメールに送る</button>
-    <button class="link-btn" onclick="show('vLogin')">← ログインに戻る</button>
+    <div class="err" id="regErr"></div>
+    <button class="btn" id="regBtn" disabled>認証コードをメールに送る</button>
+    <button class="link-btn" id="toLoginFromRegBtn">← ログインに戻る</button>
   </div>
 
   <!-- 認証コード（新規） -->
@@ -101,20 +86,20 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
       <span id="verifyEmail" style="font-weight:600;color:var(--text);"></span><br>に6桁のコードを送信しました</p>
     <div class="hint">デモ用コード：<strong style="color:var(--accent);">123456</strong></div>
     <div class="code-row">
-      <input class="code-box" id="vc1" maxlength="1" inputmode="numeric" oninput="ci(this,'vc2','verifyBtn')" onkeydown="cb(event,this,'')">
-      <input class="code-box" id="vc2" maxlength="1" inputmode="numeric" oninput="ci(this,'vc3','verifyBtn')" onkeydown="cb(event,this,'vc1')">
-      <input class="code-box" id="vc3" maxlength="1" inputmode="numeric" oninput="ci(this,'vc4','verifyBtn')" onkeydown="cb(event,this,'vc2')">
-      <input class="code-box" id="vc4" maxlength="1" inputmode="numeric" oninput="ci(this,'vc5','verifyBtn')" onkeydown="cb(event,this,'vc3')">
-      <input class="code-box" id="vc5" maxlength="1" inputmode="numeric" oninput="ci(this,'vc6','verifyBtn')" onkeydown="cb(event,this,'vc4')">
-      <input class="code-box" id="vc6" maxlength="1" inputmode="numeric" oninput="ci(this,'','verifyBtn')" onkeydown="cb(event,this,'vc5')">
+      <input class="code-box" id="vc1" maxlength="1" inputmode="numeric">
+      <input class="code-box" id="vc2" maxlength="1" inputmode="numeric">
+      <input class="code-box" id="vc3" maxlength="1" inputmode="numeric">
+      <input class="code-box" id="vc4" maxlength="1" inputmode="numeric">
+      <input class="code-box" id="vc5" maxlength="1" inputmode="numeric">
+      <input class="code-box" id="vc6" maxlength="1" inputmode="numeric">
     </div>
     <div id="vErr" style="text-align:center;font-size:12px;color:var(--red);display:none;margin-bottom:8px;">コードが正しくありません。</div>
     <div style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:16px;">
       <span id="vTimerTxt">再送信まで <span id="vSec">60</span>秒</span>
-      <button id="vResendBtn" style="display:none;background:none;border:none;font-size:12px;color:var(--accent);cursor:pointer;font-family:inherit;" onclick="resendVerify()">再送信する</button>
+      <button id="vResendBtn" style="display:none;background:none;border:none;font-size:12px;color:var(--accent);cursor:pointer;font-family:inherit;">再送信する</button>
     </div>
-    <button class="btn" id="verifyBtn" onclick="verifyCode()" disabled>次へ：パスワードを設定する →</button>
-    <button class="link-btn" onclick="show('vReg')">← 戻る</button>
+    <button class="btn" id="verifyBtn" disabled>次へ：パスワードを設定する →</button>
+    <button class="link-btn" id="toRegFromVerifyBtn">← 戻る</button>
   </div>
 
   <!-- パスワード設定（新規 STEP2） -->
@@ -123,29 +108,29 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
     <div class="step-badge">STEP 2 / 2　パスワード設定</div>
     <p style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:16px;line-height:1.7;">ログイン時に使用するパスワードを設定してください</p>
     <div class="fg"><label>パスワード</label>
-      <div class="pw-wrap"><input id="sp1" type="password" placeholder="8文字以上・英字・数字を含む" oninput="checkPwStrength()">
-      <button class="pw-eye" type="button" onclick="togglePw('sp1',this)">👁</button></div>
+      <div class="pw-wrap"><input id="sp1" type="password" placeholder="8文字以上・英字・数字を含む">
+      <button class="pw-eye" id="sp1Eye" type="button">👁</button></div>
       <div class="strength-bar"><div class="strength-fill" id="strengthFill" style="width:0%;background:#ddd;"></div></div>
       <div class="pw-rule" id="pwRule">8文字以上、英字・数字を含めてください</div>
     </div>
     <div class="fg"><label>パスワード（確認）</label>
-      <div class="pw-wrap"><input id="sp2" type="password" placeholder="もう一度入力" oninput="checkPwMatch()">
-      <button class="pw-eye" type="button" onclick="togglePw('sp2',this)">👁</button></div>
+      <div class="pw-wrap"><input id="sp2" type="password" placeholder="もう一度入力">
+      <button class="pw-eye" id="sp2Eye" type="button">👁</button></div>
       <div class="pw-rule" id="pwMatchRule"></div>
     </div>
     <div class="err" id="spErr"></div>
-    <button class="btn" id="spBtn" onclick="completeRegister()" disabled>登録を完了する</button>
+    <button class="btn" id="spBtn" disabled>登録を完了する</button>
   </div>
 
   <!-- パスワード忘れ -->
   <div id="vForgot" class="card" style="display:none;">
     <h2>パスワードの再設定</h2>
     <p style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:16px;line-height:1.7;">登録済みの店名とメールアドレスを入力してください。再設定用コードをお送りします。</p>
-    <div class="fg"><label>店名</label><input id="fgName" placeholder="例：Salon ✦ Name" oninput="chkForgot()"></div>
-    <div class="fg"><label>メールアドレス</label><input id="fgEmail" type="email" placeholder="例：salon@example.com" oninput="chkForgot()"></div>
+    <div class="fg"><label>店名</label><input id="fgName" placeholder="例：Salon ✦ Name"></div>
+    <div class="fg"><label>メールアドレス</label><input id="fgEmail" type="email" placeholder="例：salon@example.com"></div>
     <div class="err" id="fgErr">店名またはメールアドレスが一致しません。</div>
-    <button class="btn" id="fgBtn" onclick="goForgotVerify()" disabled>再設定コードを送る</button>
-    <button class="link-btn" onclick="show('vLogin')">← ログインに戻る</button>
+    <button class="btn" id="fgBtn" disabled>再設定コードを送る</button>
+    <button class="link-btn" id="toLoginFromForgotBtn">← ログインに戻る</button>
   </div>
 
   <!-- 再設定コード認証 -->
@@ -153,36 +138,35 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
     <h2>再設定コードを入力</h2>
     <div class="hint">デモ用コード：<strong style="color:var(--accent);">123456</strong></div>
     <div class="code-row">
-      <input class="code-box" id="fc1" maxlength="1" inputmode="numeric" oninput="ci(this,'fc2','fvBtn')" onkeydown="cb(event,this,'')">
-      <input class="code-box" id="fc2" maxlength="1" inputmode="numeric" oninput="ci(this,'fc3','fvBtn')" onkeydown="cb(event,this,'fc1')">
-      <input class="code-box" id="fc3" maxlength="1" inputmode="numeric" oninput="ci(this,'fc4','fvBtn')" onkeydown="cb(event,this,'fc2')">
-      <input class="code-box" id="fc4" maxlength="1" inputmode="numeric" oninput="ci(this,'fc5','fvBtn')" onkeydown="cb(event,this,'fc3')">
-      <input class="code-box" id="fc5" maxlength="1" inputmode="numeric" oninput="ci(this,'fc6','fvBtn')" onkeydown="cb(event,this,'fc4')">
-      <input class="code-box" id="fc6" maxlength="1" inputmode="numeric" oninput="ci(this,'','fvBtn')" onkeydown="cb(event,this,'fc5')">
+      <input class="code-box" id="fc1" maxlength="1" inputmode="numeric">
+      <input class="code-box" id="fc2" maxlength="1" inputmode="numeric">
+      <input class="code-box" id="fc3" maxlength="1" inputmode="numeric">
+      <input class="code-box" id="fc4" maxlength="1" inputmode="numeric">
+      <input class="code-box" id="fc5" maxlength="1" inputmode="numeric">
+      <input class="code-box" id="fc6" maxlength="1" inputmode="numeric">
     </div>
     <div id="fcErr" style="text-align:center;font-size:12px;color:var(--red);display:none;margin-bottom:8px;">コードが正しくありません。</div>
-    <button class="btn" id="fvBtn" onclick="forgotVerifyCode()" disabled>次へ：新しいパスワードを設定する</button>
-    <button class="link-btn" onclick="show('vForgot')">← 戻る</button>
+    <button class="btn" id="fvBtn" disabled>次へ：新しいパスワードを設定する</button>
+    <button class="link-btn" id="toForgotFromVerifyBtn">← 戻る</button>
   </div>
 
   <!-- 新パスワード設定（再設定） -->
   <div id="vResetPass" class="card" style="display:none;">
     <h2>新しいパスワードを設定</h2>
     <div class="fg"><label>新しいパスワード</label>
-      <div class="pw-wrap"><input id="rp1" type="password" placeholder="8文字以上・英字・数字を含む" oninput="checkRpStrength()">
-      <button class="pw-eye" type="button" onclick="togglePw('rp1',this)">👁</button></div>
+      <div class="pw-wrap"><input id="rp1" type="password" placeholder="8文字以上・英字・数字を含む">
+      <button class="pw-eye" id="rp1Eye" type="button">👁</button></div>
       <div class="strength-bar"><div class="strength-fill" id="rpStrFill" style="width:0%;background:#ddd;"></div></div>
       <div class="pw-rule" id="rpRule">8文字以上、英字・数字を含めてください</div>
     </div>
     <div class="fg"><label>パスワード（確認）</label>
-      <div class="pw-wrap"><input id="rp2" type="password" placeholder="もう一度入力" oninput="checkRpMatch()">
-      <button class="pw-eye" type="button" onclick="togglePw('rp2',this)">👁</button></div>
+      <div class="pw-wrap"><input id="rp2" type="password" placeholder="もう一度入力">
+      <button class="pw-eye" id="rp2Eye" type="button">👁</button></div>
       <div class="pw-rule" id="rpMatchRule"></div>
     </div>
     <div class="err" id="rpErr"></div>
-    <button class="btn" id="rpBtn" onclick="completeReset()" disabled>パスワードを更新する</button>
+    <button class="btn" id="rpBtn" disabled>パスワードを更新する</button>
   </div>
-
 </div>
 
 <!-- ダッシュボード -->
@@ -190,13 +174,7 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
   <div class="dash-card">
     <div class="dash-top">
       <div><h2 id="dName">—</h2><p id="dEmail">—</p></div>
-      <button class="out-btn" onclick="doLogout()">ログアウト</button>
-    </div>
-    <div class="notif">
-      <h3>最新の通知</h3>
-      <div class="ni"><div class="dot new"></div><div class="ni-text">山田 花子さんが「フェイシャルトリートメント」を予約しました。4月5日 11:00〜</div><div class="ni-time">10分前</div></div>
-      <div class="ni"><div class="dot cancel"></div><div class="ni-text">田中 美咲さんが4月2日の予約をキャンセルしました。</div><div class="ni-time">1時間前</div></div>
-      <div class="ni"><div class="dot change"></div><div class="ni-text">伊藤 里奈さんが4月3日 14:00→15:00 に変更しました。</div><div class="ni-time">昨日</div></div>
+      <button class="out-btn" id="logoutBtn">ログアウト</button>
     </div>
     <div class="nav-grid">
       <a class="nav-item" href="salon_calendar_v7.html"><div class="nav-item-icon">📅</div><div class="nav-item-label">カレンダー</div></a>
@@ -207,7 +185,7 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
       <a class="nav-item" href="stamp_settings.html"><div class="nav-item-icon">🎫</div><div class="nav-item-label">スタンプ設定</div></a>
     </div>
     <div style="padding:12px 20px;border-top:1px solid var(--border);">
-      <button onclick="toggleSetting()" style="background:none;border:none;font-size:12px;color:var(--muted);cursor:pointer;font-family:inherit;">⚙ サロン設定 / パスワード変更</button>
+      <button id="toggleSettingBtn" style="background:none;border:none;font-size:12px;color:var(--muted);cursor:pointer;font-family:inherit;">⚙ サロン設定 / パスワード変更</button>
     </div>
     <div class="setting-area" id="settingArea">
       <h3>サロン情報</h3>
@@ -217,206 +195,404 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
       <div class="fg"><label>現在のパスワード</label><input id="epOldPass" type="password" placeholder="現在のパスワード"></div>
       <div class="fg"><label>新しいパスワード</label><input id="epNewPass" type="password" placeholder="8文字以上・英数字混在"></div>
       <div class="err" id="epErr" style="margin-bottom:8px;"></div>
-      <button class="btn" onclick="saveProfile()">保存する</button>
+      <button class="btn" id="saveProfileBtn">保存する</button>
     </div>
   </div>
 </div>
 <div class="toast" id="toast"></div>
 
 <script>
-let curId=null,verifyTmr=null,regTmp={name:'',email:''};
+var verifyTmr = null;
+var regTmp = { name: '', email: '' };
+var forgotSalon = null;
+var ALL_VIEWS = ['vLoading','vLogin','vReg','vVerify','vSetPass','vForgot','vForgotVerify','vResetPass'];
 
-window.addEventListener('DOMContentLoaded',()=>{
-  const salon=dbGetSalon();
-  if(salon&&salon.id){curId=salon.id;enterDash(salon);}
-});
+function show(id) {
+  for (var i = 0; i < ALL_VIEWS.length; i++) {
+    var el = document.getElementById(ALL_VIEWS[i]);
+    if (el) el.style.display = 'none';
+  }
+  document.getElementById('authWrap').style.display = 'block';
+  document.getElementById('vDash').style.display = 'none';
+  var target = document.getElementById(id);
+  if (target) target.style.display = 'block';
+}
 
-const ALL_VIEWS=['vLogin','vReg','vVerify','vSetPass','vForgot','vForgotVerify','vResetPass'];
-function show(id){
-  ALL_VIEWS.forEach(function(v){
-    var el=document.getElementById(v);
-    if(el) el.style.display='none';
-  });
-  document.getElementById('authWrap').style.display='block';
-  document.getElementById('vDash').style.display='none';
-  var target=document.getElementById(id);
-  if(target) target.style.display='block';
+function enterDash(salon) {
+  document.getElementById('authWrap').style.display = 'none';
+  document.getElementById('vDash').style.display = 'block';
+  document.getElementById('dName').textContent = salon.name;
+  document.getElementById('dEmail').textContent = salon.email;
+  document.getElementById('epName').value = salon.name;
+  document.getElementById('epEmail').value = salon.email;
+  document.getElementById('epOldPass').value = '';
+  document.getElementById('epNewPass').value = '';
 }
 
 // ログイン
-function chkLogin(){
-  document.getElementById('loginBtn').disabled=!(gv('lName')&&gv('lEmail')&&gv('lPass'));
+function chkLogin() {
+  var e = gv('lEmail'), p = gv('lPass');
+  document.getElementById('loginBtn').disabled = !(e && p);
   document.getElementById('loginErr').classList.remove('show');
 }
-function doLogin(){
-  const n=gv('lName'),e=gv('lEmail'),p=gv('lPass');
-  const salon=dbGetSalon();
-  if(!salon||salon.name!==n||salon.email!==e||salon.password!==p){document.getElementById('loginErr').classList.add('show');return;}
-  curId=salon.id;enterDash(salon);
+
+function doLogin() {
+  var e = gv('lEmail'), p = gv('lPass');
+  document.getElementById('loginBtn').disabled = true;
+  document.getElementById('loginBtn').textContent = '確認中...';
+  dbFindSalonByEmail(e, function(salon) {
+    document.getElementById('loginBtn').disabled = false;
+    document.getElementById('loginBtn').textContent = 'ログイン';
+    if (!salon || salon.password !== p) {
+      document.getElementById('loginErr').classList.add('show');
+      return;
+    }
+    setCurrentSalonId(salon.id);
+    enterDash(salon);
+  });
 }
 
 // 新規登録
-function chkReg(){document.getElementById('regBtn').disabled=!(gv('rName')&&gv('rEmail'));document.getElementById('regErr').classList.remove('show');}
-function goVerify(){
-  const n=gv('rName'),e=gv('rEmail');
-  const salon=dbGetSalon();
-  if(salon&&salon.id&&salon.email===e){document.getElementById('regErr').classList.add('show');return;}
-  regTmp={name:n,email:e};
-  document.getElementById('verifyEmail').textContent=e;
-  clearBoxes(['vc1','vc2','vc3','vc4','vc5','vc6']);
-  document.getElementById('verifyBtn').disabled=true;
-  document.getElementById('vErr').style.display='none';
-  show('vVerify');
-  startTimer('vSec','vTimerTxt','vResendBtn');
+function chkReg() {
+  document.getElementById('regBtn').disabled = !(gv('rName') && gv('rEmail'));
+  document.getElementById('regErr').classList.remove('show');
 }
-function verifyCode(){
-  if(getCode(['vc1','vc2','vc3','vc4','vc5','vc6'])!=='123456'){document.getElementById('vErr').style.display='block';return;}
+
+function goVerify() {
+  var n = gv('rName'), e = gv('rEmail');
+  document.getElementById('regBtn').disabled = true;
+  document.getElementById('regBtn').textContent = '確認中...';
+  dbFindSalonByEmail(e, function(existing) {
+    document.getElementById('regBtn').disabled = false;
+    document.getElementById('regBtn').textContent = '認証コードをメールに送る';
+    if (existing) {
+      showErrEl('regErr', 'このメールアドレスはすでに登録されています。');
+      return;
+    }
+    regTmp = { name: n, email: e };
+    document.getElementById('verifyEmail').textContent = e;
+    clearBoxes(['vc1','vc2','vc3','vc4','vc5','vc6']);
+    document.getElementById('verifyBtn').disabled = true;
+    document.getElementById('vErr').style.display = 'none';
+    show('vVerify');
+    startTimer('vSec', 'vTimerTxt', 'vResendBtn');
+  });
+}
+
+function verifyCode() {
+  if (getCode(['vc1','vc2','vc3','vc4','vc5','vc6']) !== '123456') {
+    document.getElementById('vErr').style.display = 'block'; return;
+  }
   clearInterval(verifyTmr);
-  document.getElementById('sp1').value='';document.getElementById('sp2').value='';
-  document.getElementById('spBtn').disabled=true;
-  document.getElementById('pwRule').textContent='8文字以上、英字・数字を含めてください';
-  document.getElementById('pwRule').className='pw-rule';
-  document.getElementById('pwMatchRule').textContent='';
-  document.getElementById('strengthFill').style.width='0%';
+  document.getElementById('sp1').value = '';
+  document.getElementById('sp2').value = '';
+  document.getElementById('spBtn').disabled = true;
+  document.getElementById('strengthFill').style.width = '0%';
   document.getElementById('spErr').classList.remove('show');
   show('vSetPass');
 }
-function resendVerify(){clearBoxes(['vc1','vc2','vc3','vc4','vc5','vc6']);document.getElementById('verifyBtn').disabled=true;document.getElementById('vErr').style.display='none';startTimer('vSec','vTimerTxt','vResendBtn');}
+
+function resendVerify() {
+  clearBoxes(['vc1','vc2','vc3','vc4','vc5','vc6']);
+  document.getElementById('verifyBtn').disabled = true;
+  document.getElementById('vErr').style.display = 'none';
+  startTimer('vSec', 'vTimerTxt', 'vResendBtn');
+}
 
 // パスワード設定（新規）
-function checkPwStrength(){
-  const pw=gv('sp1'),r=validatePassword(pw);
-  let s=0;if(pw.length>=8)s++;if(/[a-zA-Z]/.test(pw))s++;if(/[0-9]/.test(pw))s++;if(pw.length>=12)s++;
-  const cl=['#ddd','#c47b7b','#d4b483','#7b9e87','#b5845a'];
-  document.getElementById('strengthFill').style.width=(s*25)+'%';
-  document.getElementById('strengthFill').style.background=cl[s];
-  const rule=document.getElementById('pwRule');
-  rule.textContent=r.ok?'✓ 使用できるパスワードです':r.msg;
-  rule.className=r.ok?'pw-rule ok':'pw-rule';
+function checkPwStrength() {
+  var pw = gv('sp1'), r = validatePassword(pw);
+  var s = 0;
+  if (pw.length >= 8) s++;
+  if (/[a-zA-Z]/.test(pw)) s++;
+  if (/[0-9]/.test(pw)) s++;
+  if (pw.length >= 12) s++;
+  var cl = ['#ddd','#c47b7b','#d4b483','#7b9e87','#b5845a'];
+  document.getElementById('strengthFill').style.width = (s * 25) + '%';
+  document.getElementById('strengthFill').style.background = cl[s];
+  var rule = document.getElementById('pwRule');
+  rule.textContent = r.ok ? '✓ 使用できるパスワードです' : r.msg;
+  rule.className = r.ok ? 'pw-rule ok' : 'pw-rule';
   checkPwMatch();
 }
-function checkPwMatch(){
-  const p1=gv('sp1'),p2=gv('sp2'),v1=validatePassword(p1),rule=document.getElementById('pwMatchRule');
-  if(!p2){rule.textContent='';document.getElementById('spBtn').disabled=true;return;}
-  const ok=p1===p2&&v1.ok;
-  rule.textContent=ok?'✓ パスワードが一致しています':(p1!==p2?'パスワードが一致しません':v1.msg);
-  rule.className=ok?'pw-rule ok':'pw-rule';
-  document.getElementById('spBtn').disabled=!ok;
+
+function checkPwMatch() {
+  var p1 = gv('sp1'), p2 = gv('sp2'), v1 = validatePassword(p1);
+  var rule = document.getElementById('pwMatchRule');
+  if (!p2) { rule.textContent = ''; document.getElementById('spBtn').disabled = true; return; }
+  var ok = p1 === p2 && v1.ok;
+  rule.textContent = ok ? '✓ パスワードが一致しています' : (p1 !== p2 ? 'パスワードが一致しません' : v1.msg);
+  rule.className = ok ? 'pw-rule ok' : 'pw-rule';
+  document.getElementById('spBtn').disabled = !ok;
 }
-function completeRegister(){
-  const pw=gv('sp1'),vr=validatePassword(pw);
-  if(!vr.ok){showErrEl('spErr',vr.msg);return;}
-  if(pw!==gv('sp2')){showErrEl('spErr','パスワードが一致しません');return;}
-  const ns={id:'s'+Date.now(),name:regTmp.name,email:regTmp.email,password:pw};
-  dbSaveSalon(ns);curId=ns.id;enterDash(ns);showToast('登録が完了しました！');
+
+function completeRegister() {
+  var pw = gv('sp1'), vr = validatePassword(pw);
+  if (!vr.ok) { showErrEl('spErr', vr.msg); return; }
+  if (pw !== gv('sp2')) { showErrEl('spErr', 'パスワードが一致しません'); return; }
+  document.getElementById('spBtn').disabled = true;
+  document.getElementById('spBtn').textContent = '登録中...';
+  dbRegisterSalon(regTmp.name, regTmp.email, pw, function(err, salon) {
+    if (err) {
+      document.getElementById('spBtn').disabled = false;
+      document.getElementById('spBtn').textContent = '登録を完了する';
+      showErrEl('spErr', '登録に失敗しました。もう一度お試しください。');
+      return;
+    }
+    enterDash(salon);
+    showToast('登録が完了しました！');
+  });
 }
 
 // パスワード忘れ
-function chkForgot(){document.getElementById('fgBtn').disabled=!(gv('fgName')&&gv('fgEmail'));document.getElementById('fgErr').classList.remove('show');}
-function goForgotVerify(){
-  const n=gv('fgName'),e=gv('fgEmail'),salon=dbGetSalon();
-  if(!salon||salon.name!==n||salon.email!==e){document.getElementById('fgErr').classList.add('show');return;}
-  clearBoxes(['fc1','fc2','fc3','fc4','fc5','fc6']);
-  document.getElementById('fvBtn').disabled=true;document.getElementById('fcErr').style.display='none';
-  show('vForgotVerify');
+function chkForgot() {
+  document.getElementById('fgBtn').disabled = !(gv('fgName') && gv('fgEmail'));
+  document.getElementById('fgErr').classList.remove('show');
 }
-function forgotVerifyCode(){
-  if(getCode(['fc1','fc2','fc3','fc4','fc5','fc6'])!=='123456'){document.getElementById('fcErr').style.display='block';return;}
-  document.getElementById('rp1').value='';document.getElementById('rp2').value='';
-  document.getElementById('rpBtn').disabled=true;
-  document.getElementById('rpStrFill').style.width='0%';
-  document.getElementById('rpRule').textContent='8文字以上、英字・数字を含めてください';
-  document.getElementById('rpRule').className='pw-rule';
-  document.getElementById('rpMatchRule').textContent='';
+
+function goForgotVerify() {
+  var n = gv('fgName'), e = gv('fgEmail');
+  document.getElementById('fgBtn').disabled = true;
+  dbFindSalonByEmail(e, function(salon) {
+    document.getElementById('fgBtn').disabled = false;
+    if (!salon || salon.name !== n) {
+      document.getElementById('fgErr').classList.add('show'); return;
+    }
+    forgotSalon = salon;
+    clearBoxes(['fc1','fc2','fc3','fc4','fc5','fc6']);
+    document.getElementById('fvBtn').disabled = true;
+    document.getElementById('fcErr').style.display = 'none';
+    show('vForgotVerify');
+  });
+}
+
+function forgotVerifyCode() {
+  if (getCode(['fc1','fc2','fc3','fc4','fc5','fc6']) !== '123456') {
+    document.getElementById('fcErr').style.display = 'block'; return;
+  }
+  document.getElementById('rp1').value = '';
+  document.getElementById('rp2').value = '';
+  document.getElementById('rpBtn').disabled = true;
+  document.getElementById('rpStrFill').style.width = '0%';
   document.getElementById('rpErr').classList.remove('show');
   show('vResetPass');
 }
-function checkRpStrength(){
-  const pw=gv('rp1'),r=validatePassword(pw);
-  let s=0;if(pw.length>=8)s++;if(/[a-zA-Z]/.test(pw))s++;if(/[0-9]/.test(pw))s++;if(pw.length>=12)s++;
-  const cl=['#ddd','#c47b7b','#d4b483','#7b9e87','#b5845a'];
-  document.getElementById('rpStrFill').style.width=(s*25)+'%';
-  document.getElementById('rpStrFill').style.background=cl[s];
-  const rule=document.getElementById('rpRule');
-  rule.textContent=r.ok?'✓ 使用できるパスワードです':r.msg;
-  rule.className=r.ok?'pw-rule ok':'pw-rule';
+
+function checkRpStrength() {
+  var pw = gv('rp1'), r = validatePassword(pw);
+  var s = 0;
+  if (pw.length >= 8) s++;
+  if (/[a-zA-Z]/.test(pw)) s++;
+  if (/[0-9]/.test(pw)) s++;
+  if (pw.length >= 12) s++;
+  var cl = ['#ddd','#c47b7b','#d4b483','#7b9e87','#b5845a'];
+  document.getElementById('rpStrFill').style.width = (s * 25) + '%';
+  document.getElementById('rpStrFill').style.background = cl[s];
+  var rule = document.getElementById('rpRule');
+  rule.textContent = r.ok ? '✓ 使用できるパスワードです' : r.msg;
+  rule.className = r.ok ? 'pw-rule ok' : 'pw-rule';
   checkRpMatch();
 }
-function checkRpMatch(){
-  const p1=gv('rp1'),p2=gv('rp2'),v1=validatePassword(p1),rule=document.getElementById('rpMatchRule');
-  if(!p2){rule.textContent='';document.getElementById('rpBtn').disabled=true;return;}
-  const ok=p1===p2&&v1.ok;
-  rule.textContent=ok?'✓ 一致しています':(p1!==p2?'パスワードが一致しません':v1.msg);
-  rule.className=ok?'pw-rule ok':'pw-rule';
-  document.getElementById('rpBtn').disabled=!ok;
+
+function checkRpMatch() {
+  var p1 = gv('rp1'), p2 = gv('rp2'), v1 = validatePassword(p1);
+  var rule = document.getElementById('rpMatchRule');
+  if (!p2) { rule.textContent = ''; document.getElementById('rpBtn').disabled = true; return; }
+  var ok = p1 === p2 && v1.ok;
+  rule.textContent = ok ? '✓ 一致しています' : (p1 !== p2 ? 'パスワードが一致しません' : v1.msg);
+  rule.className = ok ? 'pw-rule ok' : 'pw-rule';
+  document.getElementById('rpBtn').disabled = !ok;
 }
-function completeReset(){
-  const pw=gv('rp1'),vr=validatePassword(pw);
-  if(!vr.ok){showErrEl('rpErr',vr.msg);return;}
-  if(pw!==gv('rp2')){showErrEl('rpErr','パスワードが一致しません');return;}
-  const salon=dbGetSalon();salon.password=pw;dbSaveSalon(salon);
-  show('vLogin');showToast('パスワードを更新しました。ログインしてください。');
+
+function completeReset() {
+  var pw = gv('rp1'), vr = validatePassword(pw);
+  if (!vr.ok) { showErrEl('rpErr', vr.msg); return; }
+  if (pw !== gv('rp2')) { showErrEl('rpErr', 'パスワードが一致しません'); return; }
+  if (!forgotSalon) return;
+  document.getElementById('rpBtn').disabled = true;
+  dbSaveSalon(Object.assign({}, forgotSalon, { password: pw }), function(err) {
+    document.getElementById('rpBtn').disabled = false;
+    if (err) { showErrEl('rpErr', '更新に失敗しました'); return; }
+    show('vLogin');
+    showToast('パスワードを更新しました。ログインしてください。');
+  });
 }
 
 // ダッシュボード
-function enterDash(s){
-  document.getElementById('authWrap').style.display='none';
-  document.getElementById('vDash').style.display='block';
-  document.getElementById('dName').textContent=s.name;
-  document.getElementById('dEmail').textContent=s.email;
-  document.getElementById('epName').value=s.name;
-  document.getElementById('epEmail').value=s.email;
-  document.getElementById('epOldPass').value='';document.getElementById('epNewPass').value='';
+function toggleSetting() {
+  var a = document.getElementById('settingArea');
+  a.style.display = a.style.display === 'block' ? 'none' : 'block';
 }
-function toggleSetting(){const a=document.getElementById('settingArea');a.style.display=a.style.display==='block'?'none':'block';}
-function saveProfile(){
-  const n=gv('epName'),e=gv('epEmail'),oldPw=gv('epOldPass'),newPw=gv('epNewPass');
-  if(!n||!e){showErrEl('epErr','店名とメールを入力してください');return;}
-  const salon=dbGetSalon();
-  if(oldPw||newPw){
-    if(salon.password!==oldPw){showErrEl('epErr','現在のパスワードが正しくありません');return;}
-    const vr=validatePassword(newPw);if(!vr.ok){showErrEl('epErr',vr.msg);return;}
-    salon.password=newPw;
-  }
-  salon.name=n;salon.email=e;dbSaveSalon(salon);
-  document.getElementById('dName').textContent=n;document.getElementById('dEmail').textContent=e;
-  document.getElementById('epOldPass').value='';document.getElementById('epNewPass').value='';
-  document.getElementById('epErr').classList.remove('show');
-  showToast('保存しました');
+
+function saveProfile() {
+  var n = gv('epName'), e = gv('epEmail');
+  var oldPw = document.getElementById('epOldPass').value;
+  var newPw = document.getElementById('epNewPass').value;
+  if (!n || !e) { showErrEl('epErr', '店名とメールを入力してください'); return; }
+  dbGetSalon(function(salon) {
+    if (!salon) return;
+    if (oldPw || newPw) {
+      if (salon.password !== oldPw) { showErrEl('epErr', '現在のパスワードが正しくありません'); return; }
+      var vr = validatePassword(newPw);
+      if (!vr.ok) { showErrEl('epErr', vr.msg); return; }
+      salon.password = newPw;
+    }
+    salon.name = n; salon.email = e;
+    dbSaveSalon(salon, function(err) {
+      if (err) { showErrEl('epErr', '保存に失敗しました'); return; }
+      document.getElementById('dName').textContent = n;
+      document.getElementById('dEmail').textContent = e;
+      document.getElementById('epOldPass').value = '';
+      document.getElementById('epNewPass').value = '';
+      document.getElementById('epErr').classList.remove('show');
+      showToast('保存しました');
+    });
+  });
 }
-function doLogout(){
-  curId=null;
-  document.getElementById('vDash').style.display='none';
-  document.getElementById('authWrap').style.display='block';
-  document.querySelectorAll('#authWrap>div').forEach(el=>el.style.display='none');
-  document.getElementById('vLogin').style.display='block';
-  ['lName','lEmail','lPass'].forEach(id=>document.getElementById(id).value='');
-  document.getElementById('loginBtn').disabled=true;
+
+function doLogout() {
+  dbLogout();
+  document.getElementById('vDash').style.display = 'none';
+  document.getElementById('authWrap').style.display = 'block';
+  document.getElementById('lEmail').value = '';
+  document.getElementById('lPass').value = '';
+  document.getElementById('loginBtn').disabled = true;
+  show('vLogin');
   showToast('ログアウトしました');
 }
 
 // コード入力
-function ci(el,nxt,btnId){
-  el.value=el.value.replace(/[^0-9]/g,'');el.classList.toggle('filled',!!el.value);
-  if(el.value&&nxt)document.getElementById(nxt)&&document.getElementById(nxt).focus();
-  if(btnId){const ids=Array.from(el.closest('.code-row').querySelectorAll('.code-box')).map(b=>b.id);document.getElementById(btnId).disabled=!ids.every(id=>document.getElementById(id).value);}
+function setupCodeBoxes(ids, btnId) {
+  for (var i = 0; i < ids.length; i++) {
+    (function(idx) {
+      var el = document.getElementById(ids[idx]);
+      el.addEventListener('input', function() {
+        this.value = this.value.replace(/[^0-9]/g, '');
+        this.classList.toggle('filled', !!this.value);
+        if (this.value && idx < ids.length - 1) {
+          document.getElementById(ids[idx + 1]).focus();
+        }
+        if (btnId) {
+          var allFilled = true;
+          for (var j = 0; j < ids.length; j++) {
+            if (!document.getElementById(ids[j]).value) { allFilled = false; break; }
+          }
+          document.getElementById(btnId).disabled = !allFilled;
+        }
+      });
+      el.addEventListener('keydown', function(e) {
+        if (e.key === 'Backspace' && !this.value && idx > 0) {
+          document.getElementById(ids[idx - 1]).focus();
+        }
+      });
+    })(i);
+  }
 }
-function cb(e,el,prv){if(e.key==='Backspace'&&!el.value&&prv)document.getElementById(prv)&&document.getElementById(prv).focus();}
-function getCode(ids){return ids.map(id=>document.getElementById(id).value).join('');}
-function clearBoxes(ids){ids.forEach(id=>{const el=document.getElementById(id);el.value='';el.classList.remove('filled');});}
 
-// タイマー
-function startTimer(secId,txtId,btnId){
-  clearInterval(verifyTmr);let c=60;
-  document.getElementById(secId).textContent=c;document.getElementById(txtId).style.display='inline';document.getElementById(btnId).style.display='none';
-  verifyTmr=setInterval(()=>{c--;document.getElementById(secId).textContent=c;if(c<=0){clearInterval(verifyTmr);document.getElementById(txtId).style.display='none';document.getElementById(btnId).style.display='inline';}},1000);
+function getCode(ids) {
+  return ids.map(function(id) { return document.getElementById(id).value; }).join('');
 }
 
-// ユーティリティ
-function gv(id){return document.getElementById(id).value.trim();}
-function showErrEl(id,msg){const el=document.getElementById(id);el.textContent=msg;el.classList.add('show');}
-function togglePw(id,btn){const el=document.getElementById(id);el.type=el.type==='password'?'text':'password';btn.textContent=el.type==='password'?'👁':'🙈';}
-function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),3000);}
+function clearBoxes(ids) {
+  ids.forEach(function(id) {
+    var el = document.getElementById(id);
+    el.value = ''; el.classList.remove('filled');
+  });
+}
+
+function startTimer(secId, txtId, btnId) {
+  clearInterval(verifyTmr);
+  var c = 60;
+  document.getElementById(secId).textContent = c;
+  document.getElementById(txtId).style.display = 'inline';
+  document.getElementById(btnId).style.display = 'none';
+  verifyTmr = setInterval(function() {
+    c--;
+    document.getElementById(secId).textContent = c;
+    if (c <= 0) {
+      clearInterval(verifyTmr);
+      document.getElementById(txtId).style.display = 'none';
+      document.getElementById(btnId).style.display = 'inline';
+    }
+  }, 1000);
+}
+
+function gv(id) { return document.getElementById(id).value.trim(); }
+function showErrEl(id, msg) { var el = document.getElementById(id); el.textContent = msg; el.classList.add('show'); }
+function togglePw(inputId, btn) {
+  var el = document.getElementById(inputId);
+  el.type = el.type === 'password' ? 'text' : 'password';
+  btn.textContent = el.type === 'password' ? '👁' : '🙈';
+}
+function showToast(msg) {
+  var t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  setTimeout(function() { t.classList.remove('show'); }, 3000);
+}
+
+// イベントリスナー設定
+onFbReady(function() {
+  // ログイン確認
+  dbSalonExists(function(exists) {
+    if (exists) {
+      dbGetSalon(function(salon) {
+        if (salon) { enterDash(salon); } else { show('vLogin'); }
+      });
+    } else {
+      show('vLogin');
+    }
+  });
+
+  // ログイン
+  document.getElementById('lEmail').addEventListener('input', chkLogin);
+  document.getElementById('lPass').addEventListener('input', chkLogin);
+  document.getElementById('loginBtn').addEventListener('click', doLogin);
+  document.getElementById('lPassEye').addEventListener('click', function() { togglePw('lPass', this); });
+
+  // 新規登録
+  document.getElementById('rName').addEventListener('input', chkReg);
+  document.getElementById('rEmail').addEventListener('input', chkReg);
+  document.getElementById('regBtn').addEventListener('click', goVerify);
+  document.getElementById('toRegBtn').addEventListener('click', function() { show('vReg'); });
+  document.getElementById('toLoginFromRegBtn').addEventListener('click', function() { show('vLogin'); });
+
+  // 認証コード
+  setupCodeBoxes(['vc1','vc2','vc3','vc4','vc5','vc6'], 'verifyBtn');
+  document.getElementById('verifyBtn').addEventListener('click', verifyCode);
+  document.getElementById('vResendBtn').addEventListener('click', resendVerify);
+  document.getElementById('toRegFromVerifyBtn').addEventListener('click', function() { show('vReg'); });
+
+  // パスワード設定
+  document.getElementById('sp1').addEventListener('input', checkPwStrength);
+  document.getElementById('sp2').addEventListener('input', checkPwMatch);
+  document.getElementById('sp1Eye').addEventListener('click', function() { togglePw('sp1', this); });
+  document.getElementById('sp2Eye').addEventListener('click', function() { togglePw('sp2', this); });
+  document.getElementById('spBtn').addEventListener('click', completeRegister);
+
+  // パスワード忘れ
+  document.getElementById('fgName').addEventListener('input', chkForgot);
+  document.getElementById('fgEmail').addEventListener('input', chkForgot);
+  document.getElementById('fgBtn').addEventListener('click', goForgotVerify);
+  document.getElementById('toForgotBtn').addEventListener('click', function() { show('vForgot'); });
+  document.getElementById('toLoginFromForgotBtn').addEventListener('click', function() { show('vLogin'); });
+
+  // 再設定コード
+  setupCodeBoxes(['fc1','fc2','fc3','fc4','fc5','fc6'], 'fvBtn');
+  document.getElementById('fvBtn').addEventListener('click', forgotVerifyCode);
+  document.getElementById('toForgotFromVerifyBtn').addEventListener('click', function() { show('vForgot'); });
+
+  // 新パスワード
+  document.getElementById('rp1').addEventListener('input', checkRpStrength);
+  document.getElementById('rp2').addEventListener('input', checkRpMatch);
+  document.getElementById('rp1Eye').addEventListener('click', function() { togglePw('rp1', this); });
+  document.getElementById('rp2Eye').addEventListener('click', function() { togglePw('rp2', this); });
+  document.getElementById('rpBtn').addEventListener('click', completeReset);
+
+  // ダッシュボード
+  document.getElementById('logoutBtn').addEventListener('click', doLogout);
+  document.getElementById('toggleSettingBtn').addEventListener('click', toggleSetting);
+  document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
+});
 </script>
 </body>
 </html>
