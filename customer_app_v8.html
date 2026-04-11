@@ -390,8 +390,42 @@ function getBookingRange() {
 function canBook(ds, sm, td, excId) {
   var s = cachedSettings || {}, a = cachedAppointments, bl = cachedCloseBlocks;
   var em = sm + td, dow = new Date(ds).getDay();
+  var now = new Date();
+  var todayStr = fmtD(now);
+  var nowMin = now.getHours() * 60 + now.getMinutes();
+
+  // 過去の日付は不可
+  if (ds < todayStr) return { ok: false, reason: '受付期間外' };
+
+  // 受付期間チェック
   var rng = getBookingRange();
-  if (ds < rng.fromStr || ds > rng.toStr) return { ok: false, reason: '受付期間外' };
+  if (ds > rng.toStr) return { ok: false, reason: '受付期間外' };
+
+  // 直前受付制限チェック（lastMin設定）
+  var lastMin = s.lastMin || 'same1h';
+  if (ds === todayStr) {
+    // 当日の制限
+    var limitMin = nowMin;
+    if (lastMin === '1week' || lastMin === '3days' || lastMin === '1day') {
+      // 当日不可
+      return { ok: false, reason: '当日受付不可' };
+    } else if (lastMin === 'same3h') {
+      limitMin = nowMin + 180;
+    } else if (lastMin === 'same1h') {
+      limitMin = nowMin + 60;
+    } else if (lastMin === 'same30m') {
+      limitMin = nowMin + 30;
+    }
+    if (sm < limitMin) return { ok: false, reason: '受付期限超過' };
+  } else {
+    // 当日以外の直前制限
+    var apptDate = new Date(ds + 'T00:00:00');
+    var diffDays = Math.floor((apptDate - new Date(todayStr + 'T00:00:00')) / 86400000);
+    if (lastMin === '1week' && diffDays < 7) return { ok: false, reason: '受付期限超過' };
+    if (lastMin === '3days' && diffDays < 3) return { ok: false, reason: '受付期限超過' };
+    if (lastMin === '1day' && diffDays < 1) return { ok: false, reason: '受付期限超過' };
+  }
+
   var cd = s.closedDows || [];
   for (var i = 0; i < cd.length; i++) { if (cd[i] === dow) return { ok: false, reason: '定休日' }; }
   if (sm < toMin(s.openTime || '10:00')) return { ok: false, reason: '営業時間外' };
@@ -402,7 +436,7 @@ function canBook(ds, sm, td, excId) {
   for (var l = 0; l < a.length; l++) {
     if (a[l].status !== 'active') continue;
     if (a[l].id === excId) continue;
-    if (a[l].date === ds) { var as = toMin(a[l].start), ae = as + a[l].durationMin + a[l].intervalMin; if (sm < ae && em + (s.intervalMin || 0) > as) return { ok: false, reason: '予約済み' }; }
+    if (a[l].date === ds) { var as2 = toMin(a[l].start), ae2 = as2 + a[l].durationMin + a[l].intervalMin; if (sm < ae2 && em + (s.intervalMin || 0) > as2) return { ok: false, reason: '予約済み' }; }
   }
   return { ok: true };
 }
@@ -857,17 +891,19 @@ function showToast(msg) { var t = document.getElementById('toast'); t.textConten
 
 // ===== 初期化 =====
 onFbReady(function() {
-  // 全データ取得
-  dbGetSettings(function(s) { cachedSettings = s;
-    dbGetMenus(function(m) { cachedMenus = m;
-      dbGetCustomers(function(c) { cachedCustomers = c;
-        dbGetAppointments(function(a) { cachedAppointments = a;
-          dbGetCloseBlocks(function(b) { cachedCloseBlocks = b;
-            dbGetSalon(function(salon) { cachedSalon = salon;
-              if (salon && salon.name) document.getElementById('salonNameLogin').textContent = salon.name;
-              dbGetStampCard(function(sc) { cachedStampCard = sc;
-                dbGetCancelPolicy(function(pol) { cachedCancelPolicy = pol;
-                  goScreen('s-s1');
+  // サロンIDがない場合（別デバイスからのアクセス）、Firestoreから自動取得
+  function loadAllData() {
+    dbGetSettings(function(s) { cachedSettings = s;
+      dbGetMenus(function(m) { cachedMenus = m;
+        dbGetCustomers(function(c) { cachedCustomers = c;
+          dbGetAppointments(function(a) { cachedAppointments = a;
+            dbGetCloseBlocks(function(b) { cachedCloseBlocks = b;
+              dbGetSalon(function(salon) { cachedSalon = salon;
+                if (salon && salon.name) document.getElementById('salonNameLogin').textContent = salon.name;
+                dbGetStampCard(function(sc) { cachedStampCard = sc;
+                  dbGetCancelPolicy(function(pol) { cachedCancelPolicy = pol;
+                    goScreen('s-s1');
+                  });
                 });
               });
             });
@@ -875,7 +911,21 @@ onFbReady(function() {
         });
       });
     });
-  });
+  }
+
+  // サロンIDがない場合はFirestoreから最初のサロンを取得してIDをセット
+  var salonId = getCurrentSalonId();
+  if (!salonId) {
+    window.db.collection('salons').limit(1).get().then(function(snap) {
+      if (!snap.empty) {
+        var firstSalon = snap.docs[0].data();
+        setCurrentSalonId(firstSalon.id);
+      }
+      loadAllData();
+    }).catch(function() { loadAllData(); });
+  } else {
+    loadAllData();
+  }
 
   // イベントリスナー設定
   document.getElementById('lSei').addEventListener('input', chkLogin);
