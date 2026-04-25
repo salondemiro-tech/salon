@@ -154,20 +154,14 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
   <div id="s-s1" style="display:none;flex-direction:column;flex:1;">
     <div class="scr">
       <div class="logo"><div class="logon" id="salonNameLogin">Salon ✦ Name</div><div class="logos">ご予約はこちらから</div></div>
-      <div class="dhint">【デモ用】姓「山田」名「花子」でログインできます</div>
-      <div class="fg"><label class="flbl">お名前</label>
-        <div style="display:flex;gap:8px;">
-          <input class="finp" id="lSei" placeholder="姓（山田）">
-          <input class="finp" id="lMei" placeholder="名（花子）">
-        </div>
-      </div>
       <div class="fg"><label class="flbl">メールアドレス</label>
-        <input class="finp" id="lEmail" placeholder="メールアドレス（任意）">
+        <input class="finp" id="lEmail" type="email" placeholder="例：hanako@example.com">
       </div>
-      <div id="loginErr" class="errmsg">名前が一致しません。</div>
-      <div class="divrow"><span>または</span></div>
-      <button class="linebtn" id="lineLoginBtn">LINEでログイン</button>
-      <div class="linenote">当サロンの公式LINEを友だち追加して連携されます</div>
+      <div class="fg"><label class="flbl">パスワード</label>
+        <input class="finp" id="lPass" type="password" placeholder="パスワード">
+      </div>
+      <div id="loginErr" class="errmsg"></div>
+      <button class="text-link-btn" id="toForgotBtn" style="background:none;border:none;font-size:12px;color:var(--ac);cursor:pointer;font-family:inherit;text-decoration:underline;display:block;text-align:right;margin-bottom:8px;">パスワードをお忘れの方</button>
     </div>
     <div class="bbar">
       <button class="pbtn" id="loginBtn" disabled>ログイン</button>
@@ -179,7 +173,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
   <div id="s-reg" style="display:none;flex-direction:column;flex:1;">
     <div class="ahead"><div class="ahtop"><button class="backbtn" id="regBackBtn">‹</button><div class="htitle">新規会員登録</div></div></div>
     <div class="scr">
-      <div class="dhint">デモ用：入力後「123456」で認証</div>
       <div class="fg"><label class="flbl">お名前</label>
         <div style="display:flex;gap:8px;">
           <input class="finp" id="rSei" placeholder="姓">
@@ -187,36 +180,33 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
         </div>
       </div>
       <div class="fg"><label class="flbl">電話番号</label><input type="tel" class="finp" id="rPhone" placeholder="09012345678"></div>
-      <div class="fg"><label class="flbl">メールアドレス</label><input class="finp" id="rEmail" placeholder="メールアドレス"></div>
-      <div id="regDupErr" class="errmsg">このメールアドレスはすでに登録されています。</div>
+      <div class="fg"><label class="flbl">メールアドレス</label><input class="finp" id="rEmail" type="email" placeholder="メールアドレス"></div>
+      <div class="fg"><label class="flbl">パスワード</label><input class="finp" id="rPass" type="password" placeholder="8文字以上・英字・数字を含む"></div>
+      <div class="fg"><label class="flbl">パスワード（確認）</label><input class="finp" id="rPass2" type="password" placeholder="もう一度入力"></div>
+      <div id="regErr" class="errmsg"></div>
     </div>
-    <div class="bbar"><button class="pbtn" id="regBtn" disabled>認証コードをメールに送る</button></div>
+    <div class="bbar"><button class="pbtn" id="regBtn" disabled>登録する</button></div>
   </div>
 
-  <!-- S2 認証コード -->
-  <div id="s-s2" style="display:none;flex-direction:column;flex:1;">
-    <div class="ahead"><div class="ahtop"><button class="backbtn" id="s2BackBtn">‹</button><div class="htitle">メール認証</div></div></div>
+  <!-- S-FORGOT パスワード再設定 -->
+  <div id="s-forgot" style="display:none;flex-direction:column;flex:1;">
+    <div class="ahead"><div class="ahtop"><button class="backbtn" id="forgotBackBtn">‹</button><div class="htitle">パスワード再設定</div></div></div>
     <div class="scr">
-      <div style="text-align:center;margin-bottom:16px;font-size:13px;color:var(--mu);line-height:1.7;">6桁のコードを入力してください</div>
-      <div class="dhint">デモ用コード：<strong style="color:var(--ac);">123456</strong></div>
-      <div class="codes">
-        <input class="cbox" id="c1" maxlength="1">
-        <input class="cbox" id="c2" maxlength="1">
-        <input class="cbox" id="c3" maxlength="1">
-        <input class="cbox" id="c4" maxlength="1">
-        <input class="cbox" id="c5" maxlength="1">
-        <input class="cbox" id="c6" maxlength="1">
-      </div>
-      <div id="cErr" style="text-align:center;font-size:12px;color:var(--rd);display:none;margin-bottom:8px;">コードが正しくありません。</div>
-      <div style="text-align:center;margin-top:14px;">
-        <span id="cTimer" style="font-size:13px;color:var(--mu);">再送信まで <span id="tCount">60</span>秒</span>
-        <button id="cResend" style="display:none;background:none;border:none;font-size:13px;color:var(--ac);cursor:pointer;font-family:inherit;">再送信する</button>
-      </div>
+      <p style="font-size:13px;color:var(--mu);line-height:1.7;margin-bottom:16px;">登録済みのメールアドレスに再設定用のリンクをお送りします。</p>
+      <div class="fg"><label class="flbl">メールアドレス</label><input class="finp" id="fgEmail" type="email" placeholder="メールアドレス"></div>
+      <div id="fgErr" class="errmsg"></div>
     </div>
-    <div class="bbar">
-      <button class="pbtn" id="s2Btn" disabled>登録を完了する</button>
-      <button class="gbtn" id="s2BackBtn2">← 戻る</button>
+    <div class="bbar"><button class="pbtn" id="fgBtn" disabled>再設定メールを送る</button></div>
+  </div>
+
+  <!-- S-FORGOT-SENT 送信完了 -->
+  <div id="s-forgot-sent" style="display:none;flex-direction:column;flex:1;">
+    <div class="scr" style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
+      <div style="font-size:48px;margin-bottom:16px;">📧</div>
+      <div style="font-size:16px;font-weight:600;margin-bottom:8px;">メールを送信しました</div>
+      <div style="font-size:13px;color:var(--mu);text-align:center;line-height:1.8;">パスワード再設定用のリンクをお送りしました。メールをご確認ください。</div>
     </div>
+    <div class="bbar"><button class="pbtn" id="toLoginFromSentBtn">ログイン画面に戻る</button></div>
   </div>
 
   <!-- S3 メニュー選択 -->
@@ -448,7 +438,7 @@ function hasSlot(ds, td, excId) {
 }
 
 function goScreen(id) {
-  var all = ['s-loading','s-s1','s-reg','s-s2','s-s3','s-s4','s-s5','s-s6','s-s7','s-stamp'];
+  var all = ['s-loading','s-s1','s-reg','s-s2','s-s3','s-s4','s-s5','s-s6','s-s7','s-stamp','s-forgot','s-forgot-sent'];
   all.forEach(function(sid) { var el = document.getElementById(sid); if (el) el.style.display = 'none'; });
   var t = document.getElementById(id);
   if (t) t.style.display = 'flex';
@@ -462,96 +452,125 @@ function goScreen(id) {
 
 // ===== ログイン =====
 function chkLogin() {
-  var s = document.getElementById('lSei').value.trim();
-  var m = document.getElementById('lMei').value.trim();
-  document.getElementById('loginBtn').disabled = !(s && m);
+  var e = document.getElementById('lEmail').value.trim();
+  var p = document.getElementById('lPass').value;
+  document.getElementById('loginBtn').disabled = !(e && p);
   document.getElementById('loginErr').classList.remove('show');
 }
 
 function doLogin() {
-  var sei = document.getElementById('lSei').value.trim();
-  var mei = document.getElementById('lMei').value.trim();
-  var email = document.getElementById('lEmail').value.trim();
-  var fn = sei + ' ' + mei;
-  var cust = null;
-  for (var i = 0; i < cachedCustomers.length; i++) {
-    var c = cachedCustomers[i];
-    if (c.name === fn) {
-      if (!email || c.email === email || c.email === email.toLowerCase()) { cust = c; break; }
-    }
-  }
-  if (!cust) { document.getElementById('loginErr').classList.add('show'); return; }
-  custId = cust.id; st.name = cust.name; st.phone = cust.phone; st.email = cust.email; st.isLine = false;
-  goScreen('s-s3');
+  var e = document.getElementById('lEmail').value.trim();
+  var p = document.getElementById('lPass').value;
+  document.getElementById('loginBtn').disabled = true;
+  document.getElementById('loginBtn').textContent = '確認中...';
+  window.auth.signInWithEmailAndPassword(e, p)
+    .then(function(cred) {
+      var uid = cred.user.uid;
+      // 顧客データを取得
+      var cust = null;
+      for (var i = 0; i < cachedCustomers.length; i++) {
+        if (cachedCustomers[i].authUid === uid || cachedCustomers[i].email === e) {
+          cust = cachedCustomers[i]; break;
+        }
+      }
+      if (cust) {
+        custId = cust.id; st.name = cust.name; st.phone = cust.phone; st.email = cust.email;
+        goScreen('s-s3');
+      } else {
+        // 顧客データがない場合はメールで検索
+        dbFindCustomer({ email: e }, function(found) {
+          if (found) {
+            custId = found.id; st.name = found.name; st.phone = found.phone; st.email = found.email;
+          }
+          goScreen('s-s3');
+        });
+      }
+    })
+    .catch(function(err) {
+      document.getElementById('loginBtn').disabled = false;
+      document.getElementById('loginBtn').textContent = 'ログイン';
+      var msg = 'メールアドレスまたはパスワードが正しくありません';
+      document.getElementById('loginErr').textContent = msg;
+      document.getElementById('loginErr').classList.add('show');
+    });
 }
 
-function lineLogin() {
-  var cust = null;
-  for (var i = 0; i < cachedCustomers.length; i++) { if (cachedCustomers[i].name === '山田 花子') { cust = cachedCustomers[i]; break; } }
-  if (cust) { custId = cust.id; st.name = cust.name; st.phone = cust.phone; st.email = cust.email; }
-  st.isLine = true; goScreen('s-s3');
+// ===== パスワード再設定 =====
+function chkForgot() {
+  document.getElementById('fgBtn').disabled = !document.getElementById('fgEmail').value.trim();
+  document.getElementById('fgErr').classList.remove('show');
+}
+
+function doForgot() {
+  var e = document.getElementById('fgEmail').value.trim();
+  document.getElementById('fgBtn').disabled = true;
+  window.auth.sendPasswordResetEmail(e)
+    .then(function() { goScreen('s-forgot-sent'); })
+    .catch(function() {
+      document.getElementById('fgErr').textContent = 'メールアドレスが見つかりません';
+      document.getElementById('fgErr').classList.add('show');
+      document.getElementById('fgBtn').disabled = false;
+    });
 }
 
 // ===== 新規登録 =====
 function chkReg() {
-  var ok = document.getElementById('rSei').value.trim() && document.getElementById('rMei').value.trim() && document.getElementById('rPhone').value.trim() && document.getElementById('rEmail').value.trim();
+  var ok = document.getElementById('rSei').value.trim()
+    && document.getElementById('rMei').value.trim()
+    && document.getElementById('rPhone').value.trim()
+    && document.getElementById('rEmail').value.trim()
+    && document.getElementById('rPass').value
+    && document.getElementById('rPass2').value;
   document.getElementById('regBtn').disabled = !ok;
-  document.getElementById('regDupErr').classList.remove('show');
+  document.getElementById('regErr').classList.remove('show');
 }
 
-function goVerify() {
-  st.name = document.getElementById('rSei').value.trim() + ' ' + document.getElementById('rMei').value.trim();
-  st.phone = document.getElementById('rPhone').value.trim();
-  st.email = document.getElementById('rEmail').value.trim();
-  var ids = ['c1','c2','c3','c4','c5','c6'];
-  ids.forEach(function(id) { var el = document.getElementById(id); el.value = ''; el.classList.remove('filled'); });
-  document.getElementById('s2Btn').disabled = true;
-  document.getElementById('cErr').style.display = 'none';
-  goScreen('s-s2'); startTimer();
-}
-
-function setupCodeBoxes() {
-  var ids = ['c1','c2','c3','c4','c5','c6'];
-  ids.forEach(function(id, idx) {
-    var el = document.getElementById(id);
-    el.addEventListener('input', function() {
-      this.value = this.value.replace(/[^0-9]/g, '');
-      this.classList.toggle('filled', !!this.value);
-      if (this.value && idx < 5) document.getElementById(ids[idx+1]).focus();
-      var done = ids.every(function(i) { return !!document.getElementById(i).value; });
-      document.getElementById('s2Btn').disabled = !done;
+function doRegister() {
+  var sei = document.getElementById('rSei').value.trim();
+  var mei = document.getElementById('rMei').value.trim();
+  var phone = document.getElementById('rPhone').value.trim();
+  var email = document.getElementById('rEmail').value.trim();
+  var pass = document.getElementById('rPass').value;
+  var pass2 = document.getElementById('rPass2').value;
+  if (pass !== pass2) {
+    document.getElementById('regErr').textContent = 'パスワードが一致しません';
+    document.getElementById('regErr').classList.add('show'); return;
+  }
+  var vr = validatePassword(pass);
+  if (!vr.ok) {
+    document.getElementById('regErr').textContent = vr.msg;
+    document.getElementById('regErr').classList.add('show'); return;
+  }
+  document.getElementById('regBtn').disabled = true;
+  document.getElementById('regBtn').textContent = '登録中...';
+  window.auth.createUserWithEmailAndPassword(email, pass)
+    .then(function(cred) {
+      // 確認メールを送信
+      cred.user.sendEmailVerification();
+      var uid = cred.user.uid;
+      var name = sei + ' ' + mei;
+      var nc = { name: name, phone: phone, email: email, authUid: uid, isLine: false, stamps: 0 };
+      dbAddCustomer(nc, function(err, c) {
+        document.getElementById('regBtn').disabled = false;
+        document.getElementById('regBtn').textContent = '登録する';
+        if (err) {
+          document.getElementById('regErr').textContent = '登録に失敗しました';
+          document.getElementById('regErr').classList.add('show'); return;
+        }
+        cachedCustomers.push(c);
+        custId = c.id; st.name = name; st.phone = phone; st.email = email;
+        goScreen('s-s3'); showToast('会員登録が完了しました！');
+      });
+    })
+    .catch(function(err) {
+      document.getElementById('regBtn').disabled = false;
+      document.getElementById('regBtn').textContent = '登録する';
+      var msg = '登録に失敗しました';
+      if (err.code === 'auth/email-already-in-use') msg = 'このメールアドレスはすでに登録されています';
+      if (err.code === 'auth/weak-password') msg = 'パスワードは6文字以上で入力してください';
+      document.getElementById('regErr').textContent = msg;
+      document.getElementById('regErr').classList.add('show');
     });
-    el.addEventListener('keydown', function(e) {
-      if (e.key === 'Backspace' && !this.value && idx > 0) document.getElementById(ids[idx-1]).focus();
-    });
-  });
-}
-
-function verify() {
-  var ids = ['c1','c2','c3','c4','c5','c6'];
-  var code = ids.map(function(id) { return document.getElementById(id).value; }).join('');
-  if (code !== '123456') { document.getElementById('cErr').style.display = 'block'; return; }
-  clearInterval(tmr);
-  var nc = { name: st.name, phone: st.phone, email: st.email, isLine: false, stamps: 0 };
-  dbAddCustomer(nc, function(err, c) {
-    if (err) { showToast('登録に失敗しました'); return; }
-    cachedCustomers.push(c);
-    custId = c.id; goScreen('s-s3'); showToast('会員登録が完了しました！');
-  });
-}
-
-function startTimer() {
-  clearInterval(tmr); var c = 60;
-  document.getElementById('tCount').textContent = c;
-  document.getElementById('cTimer').style.display = 'inline';
-  document.getElementById('cResend').style.display = 'none';
-  tmr = setInterval(function() { c--; document.getElementById('tCount').textContent = c; if (c <= 0) { clearInterval(tmr); document.getElementById('cTimer').style.display = 'none'; document.getElementById('cResend').style.display = 'inline'; } }, 1000);
-}
-
-function resend() {
-  var ids = ['c1','c2','c3','c4','c5','c6'];
-  ids.forEach(function(id) { var el = document.getElementById(id); el.value = ''; el.classList.remove('filled'); });
-  document.getElementById('s2Btn').disabled = true; document.getElementById('cErr').style.display = 'none'; startTimer();
 }
 
 // ===== メニュー =====
@@ -886,7 +905,13 @@ function openChg(id) {
 
 function startChange() { closeModals(); goScreen('s-s4'); }
 function closeModals() { document.getElementById('canModal').classList.remove('show'); document.getElementById('chgModal').classList.remove('show'); }
-function doLogout() { custId = null; st = { name: '', phone: '', email: '', isLine: false, menus: [], options: [], selDate: null, selTime: null, agreed: false }; goScreen('s-s1'); showToast('ログアウトしました'); }
+function doLogout() {
+  if (window.auth) window.auth.signOut();
+  custId = null;
+  st = { name: '', phone: '', email: '', isLine: false, menus: [], options: [], selDate: null, selTime: null, agreed: false };
+  goScreen('s-s1');
+  showToast('ログアウトしました');
+}
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 3000); }
 
 // ===== 初期化 =====
@@ -913,38 +938,80 @@ onFbReady(function() {
     });
   }
 
-  // サロンIDがない場合はFirestoreから最初のサロンを取得してIDをセット
-  var salonId = getCurrentSalonId();
-  if (!salonId) {
-    window.db.collection('salons').limit(1).get().then(function(snap) {
-      if (!snap.empty) {
-        var firstSalon = snap.docs[0].data();
-        setCurrentSalonId(firstSalon.id);
-      }
-      loadAllData();
-    }).catch(function() { loadAllData(); });
-  } else {
-    loadAllData();
+  // サロンIDをFirestoreから自動取得してデータ読み込み
+  function loadAllData(cb) {
+    var salonId = getCurrentSalonId();
+    function doLoad() {
+      dbGetSettings(function(s) { cachedSettings = s;
+        dbGetMenus(function(m) { cachedMenus = m;
+          dbGetCustomers(function(c) { cachedCustomers = c;
+            dbGetAppointments(function(a) { cachedAppointments = a;
+              dbGetCloseBlocks(function(b) { cachedCloseBlocks = b;
+                dbGetSalon(function(salon) { cachedSalon = salon;
+                  if (salon && salon.name) document.getElementById('salonNameLogin').textContent = salon.name;
+                  dbGetStampCard(function(sc) { cachedStampCard = sc;
+                    dbGetCancelPolicy(function(pol) { cachedCancelPolicy = pol;
+                      if (cb) cb();
+                    });
+                  });
+                });
+              });
+            });
+          });
+        });
+      });
+    }
+    if (!salonId) {
+      window.db.collection('salons').limit(1).get().then(function(snap) {
+        if (!snap.empty) setCurrentSalonId(snap.docs[0].data().id);
+        doLoad();
+      }).catch(function() { doLoad(); });
+    } else {
+      doLoad();
+    }
   }
 
-  // イベントリスナー設定
-  document.getElementById('lSei').addEventListener('input', chkLogin);
-  document.getElementById('lMei').addEventListener('input', chkLogin);
+  // Firebase Auth 状態監視（自動ログイン）
+  window.auth.onAuthStateChanged(function(user) {
+    loadAllData(function() {
+      if (user) {
+        dbFindCustomer({ email: user.email }, function(found) {
+          if (found) {
+            custId = found.id; st.name = found.name; st.phone = found.phone; st.email = found.email;
+            goScreen('s-s3');
+          } else {
+            if (window.auth) window.auth.signOut();
+            goScreen('s-s1');
+          }
+        });
+      } else {
+        goScreen('s-s1');
+      }
+    });
+  });
+
+  // ログイン
   document.getElementById('lEmail').addEventListener('input', chkLogin);
+  document.getElementById('lPass').addEventListener('input', chkLogin);
   document.getElementById('loginBtn').addEventListener('click', doLogin);
-  document.getElementById('lineLoginBtn').addEventListener('click', lineLogin);
   document.getElementById('toRegBtn').addEventListener('click', function() { goScreen('s-reg'); });
+  document.getElementById('toForgotBtn').addEventListener('click', function() { goScreen('s-forgot'); });
+
+  // 新規登録
   document.getElementById('regBackBtn').addEventListener('click', function() { goScreen('s-s1'); });
   document.getElementById('rSei').addEventListener('input', chkReg);
   document.getElementById('rMei').addEventListener('input', chkReg);
   document.getElementById('rPhone').addEventListener('input', chkReg);
   document.getElementById('rEmail').addEventListener('input', chkReg);
-  document.getElementById('regBtn').addEventListener('click', goVerify);
-  document.getElementById('s2BackBtn').addEventListener('click', function() { goScreen('s-reg'); });
-  document.getElementById('s2BackBtn2').addEventListener('click', function() { goScreen('s-reg'); });
-  setupCodeBoxes();
-  document.getElementById('s2Btn').addEventListener('click', verify);
-  document.getElementById('cResend').addEventListener('click', resend);
+  document.getElementById('rPass').addEventListener('input', chkReg);
+  document.getElementById('rPass2').addEventListener('input', chkReg);
+  document.getElementById('regBtn').addEventListener('click', doRegister);
+
+  // パスワード再設定
+  document.getElementById('forgotBackBtn').addEventListener('click', function() { goScreen('s-s1'); });
+  document.getElementById('fgEmail').addEventListener('input', chkForgot);
+  document.getElementById('fgBtn').addEventListener('click', doForgot);
+  document.getElementById('toLoginFromSentBtn').addEventListener('click', function() { goScreen('s-s1'); });
   document.getElementById('s3Btn').addEventListener('click', function() { goScreen('s-s4'); });
   document.getElementById('toHistFromMenuBtn').addEventListener('click', function() { goScreen('s-s7'); });
   document.getElementById('toStampFromMenuBtn').addEventListener('click', function() { goScreen('s-stamp'); });
