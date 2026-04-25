@@ -32,11 +32,14 @@ var FIREBASE_CONFIG = {
 
   loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js', function() {
     loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js', function() {
-      firebase.initializeApp(FIREBASE_CONFIG);
-      window.db = firebase.firestore();
-      window._fbReady = true;
-      for (var i = 0; i < window._fbReadyCbs.length; i++) { window._fbReadyCbs[i](); }
-      window._fbReadyCbs = [];
+      loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js', function() {
+        firebase.initializeApp(FIREBASE_CONFIG);
+        window.db = firebase.firestore();
+        window.auth = firebase.auth();
+        window._fbReady = true;
+        for (var i = 0; i < window._fbReadyCbs.length; i++) { window._fbReadyCbs[i](); }
+        window._fbReadyCbs = [];
+      });
     });
   });
 })();
@@ -430,4 +433,72 @@ function validatePassword(pw) {
 // -------------------- ログアウト --------------------
 function dbLogout() {
   clearCurrentSalonId();
+  if (window.auth) window.auth.signOut();
+}
+
+// -------------------- Firebase Authentication --------------------
+// サロン新規登録（Firebase Auth + Firestore）
+function dbAuthRegister(name, email, password, cb) {
+  window.auth.createUserWithEmailAndPassword(email, password)
+    .then(function(cred) {
+      var uid = cred.user.uid;
+      var salon = { id: uid, name: name, email: email };
+      var batch = window.db.batch();
+      batch.set(salonDoc(uid), salon);
+      batch.set(salonDoc(uid).collection('config').doc('settings'), DEFAULT_SETTINGS);
+      batch.set(salonDoc(uid).collection('config').doc('stampCard'), DEFAULT_STAMP_CARD);
+      batch.set(salonDoc(uid).collection('config').doc('cancelPolicy'), DEFAULT_CANCEL_POLICY);
+      DEFAULT_MENUS.forEach(function(m) {
+        batch.set(salonCol(uid, 'menus').doc(m.id), m);
+      });
+      return batch.commit().then(function() {
+        setCurrentSalonId(uid);
+        // メール確認送信
+        cred.user.sendEmailVerification();
+        if (cb) cb(null, salon);
+      });
+    })
+    .catch(function(e) {
+      var msg = 'エラーが発生しました';
+      if (e.code === 'auth/email-already-in-use') msg = 'このメールアドレスはすでに登録されています';
+      if (e.code === 'auth/invalid-email') msg = 'メールアドレスの形式が正しくありません';
+      if (e.code === 'auth/weak-password') msg = 'パスワードは6文字以上で入力してください';
+      if (cb) cb({ message: msg });
+    });
+}
+
+// サロンログイン（Firebase Auth）
+function dbAuthLogin(email, password, cb) {
+  window.auth.signInWithEmailAndPassword(email, password)
+    .then(function(cred) {
+      var uid = cred.user.uid;
+      setCurrentSalonId(uid);
+      salonDoc(uid).get().then(function(doc) {
+        if (cb) cb(null, doc.exists ? doc.data() : { id: uid, email: email, name: '' });
+      });
+    })
+    .catch(function(e) {
+      var msg = 'メールアドレスまたはパスワードが正しくありません';
+      if (cb) cb({ message: msg });
+    });
+}
+
+// パスワードリセットメール送信
+function dbAuthSendPasswordReset(email, cb) {
+  window.auth.sendPasswordResetEmail(email)
+    .then(function() { if (cb) cb(null); })
+    .catch(function(e) {
+      var msg = 'メールアドレスが見つかりません';
+      if (cb) cb({ message: msg });
+    });
+}
+
+// ログイン状態の確認
+function dbAuthGetCurrentUser() {
+  return window.auth ? window.auth.currentUser : null;
+}
+
+// 認証状態の変化を監視
+function dbAuthOnStateChanged(cb) {
+  if (window.auth) window.auth.onAuthStateChanged(cb);
 }
