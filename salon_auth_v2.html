@@ -176,7 +176,7 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
 var verifyTmr = null;
 var regTmp = { name: '', email: '' };
 var forgotSalon = null;
-var ALL_VIEWS = ['vLoading','vLogin','vReg','vVerify','vSetPass','vForgot','vForgotVerify','vResetPass'];
+var ALL_VIEWS = ['vLoading','vLogin','vReg','vVerify','vSetPass','vForgot','vForgotSent','vForgotVerify','vResetPass'];
 
 function show(id) {
   for (var i = 0; i < ALL_VIEWS.length; i++) {
@@ -192,11 +192,10 @@ function show(id) {
 function enterDash(salon) {
   document.getElementById('authWrap').style.display = 'none';
   document.getElementById('vDash').style.display = 'block';
-  document.getElementById('dName').textContent = salon.name;
-  document.getElementById('dEmail').textContent = salon.email;
-  document.getElementById('epName').value = salon.name;
-  document.getElementById('epEmail').value = salon.email;
-  document.getElementById('epOldPass').value = '';
+  document.getElementById('dName').textContent = salon.name || '';
+  document.getElementById('dEmail').textContent = salon.email || '';
+  document.getElementById('epName').value = salon.name || '';
+  document.getElementById('epEmail').value = salon.email || '';
   document.getElementById('epNewPass').value = '';
 }
 
@@ -427,7 +426,14 @@ function showToast(msg) {
 // イベントリスナー設定
 onFbReady(function() {
   // Firebase Auth の状態監視（自動ログイン）
+  // タイムアウト保険：5秒以内に応答がなければログイン画面を表示
+  var authResolved = false;
+  setTimeout(function() {
+    if (!authResolved) { show('vLogin'); }
+  }, 5000);
+
   dbAuthOnStateChanged(function(user) {
+    authResolved = true;
     if (user) {
       setCurrentSalonId(user.uid);
       dbGetSalon(function(salon) {
