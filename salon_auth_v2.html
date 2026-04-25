@@ -50,7 +50,7 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
 </head>
 <body>
 <div id="authWrap" style="width:100%;max-width:400px;">
-  <div id="vLoading" class="card"><div class="loading">読み込み中...</div></div>
+  <div id="vLoading" class="card"><div class="loading">読み込み中...<div id="debugLog" style="font-size:10px;color:#999;margin-top:8px;text-align:left;"></div></div></div>
 
   <!-- ログイン -->
   <div id="vLogin" class="card" style="display:none;">
@@ -462,10 +462,18 @@ function showToast(msg) {
   setTimeout(function() { t.classList.remove('show'); }, 3000);
 }
 
+function dbg(msg) {
+  var el = document.getElementById('debugLog');
+  if (el) el.innerHTML += msg + '<br>';
+}
+dbg('script start');
+
 // onFbReadyが呼ばれない場合のフォールバック（2秒後）
 setTimeout(function() {
+  dbg('fallback check');
   var loading = document.getElementById('vLoading');
   if (loading && loading.style.display !== 'none') {
+    dbg('fallback triggered');
     var all = ['vLoading','vLogin','vReg','vVerify','vSetPass','vVerifyWait','vForgot','vForgotSent','vForgotVerify','vResetPass'];
     for (var i = 0; i < all.length; i++) {
       var el = document.getElementById(all[i]);
@@ -480,6 +488,7 @@ setTimeout(function() {
 
 // イベントリスナー設定
 onFbReady(function() {
+  dbg('onFbReady called');
   // Firebase Auth の状態監視（自動ログイン）
   // タイムアウト保険：5秒以内に応答がなければログイン画面を表示
   var authResolved = false;
