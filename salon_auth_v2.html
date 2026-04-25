@@ -29,9 +29,6 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
 .link-btn:hover{border-color:var(--accent);color:var(--accent);}
 .text-link{background:none;border:none;font-size:12px;color:var(--accent);cursor:pointer;font-family:inherit;text-decoration:underline;display:block;text-align:center;margin-top:12px;}
 .divider{display:flex;align-items:center;gap:10px;margin:14px 0;}.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border);}.divider span{font-size:12px;color:var(--muted);}
-.code-row{display:flex;justify-content:center;gap:8px;margin:20px 0;}
-.code-box{width:44px;height:52px;border:2px solid var(--border);border-radius:9px;font-size:20px;font-weight:600;text-align:center;font-family:inherit;background:#fff!important;color:var(--text)!important;transition:border-color .15s;}
-.code-box:focus{outline:none;border-color:var(--accent);}.code-box.filled{border-color:var(--accent);background:var(--accent-light)!important;}
 .step-badge{display:inline-block;background:var(--accent-light);color:var(--accent);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;margin-bottom:14px;}
 .dash{display:none;width:100%;max-width:500px;}
 .dash-card{background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.12);overflow:hidden;}
@@ -50,9 +47,8 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
 </head>
 <body>
 <div id="authWrap" style="width:100%;max-width:400px;">
-  <div id="vLoading" class="card"><div class="loading">読み込み中...<div id="debugLog" style="font-size:10px;color:#999;margin-top:8px;text-align:left;"></div></div></div>
+  <div id="vLoading" class="card"><div class="loading">読み込み中...</div></div>
 
-  <!-- ログイン -->
   <div id="vLogin" class="card" style="display:none;">
     <div class="logo"><div class="logo-mark">🌸 Salon Manager</div><div class="logo-sub">サロン管理システム</div></div>
     <div class="fg"><label>メールアドレス</label><input id="lEmail" type="email" placeholder="例：salon@example.com"></div>
@@ -60,53 +56,25 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
       <div class="pw-wrap"><input id="lPass" type="password" placeholder="パスワード">
       <button class="pw-eye" id="lPassEye" type="button">👁</button></div>
     </div>
-    <div class="err" id="loginErr">メールアドレスまたはパスワードが正しくありません。</div>
+    <div class="err" id="loginErr"></div>
     <button class="btn" id="loginBtn" disabled>ログイン</button>
     <button class="text-link" id="toForgotBtn">パスワードを忘れた方はこちら</button>
     <div class="divider"><span>または</span></div>
     <button class="link-btn" id="toRegBtn">初めての方はこちら（新規登録）</button>
   </div>
 
-  <!-- 新規登録 -->
   <div id="vReg" class="card" style="display:none;">
     <h2>新規登録</h2>
     <div class="fg"><label>店名</label><input id="rName" placeholder="例：Salon ✦ Name"></div>
-    <div class="fg"><label>メールアドレス</label><input id="rEmail" type="email" placeholder="例：salon@example.com">
-      <div style="font-size:11px;color:var(--muted);margin-top:4px;">認証コード・通知が届きます</div></div>
+    <div class="fg"><label>メールアドレス</label><input id="rEmail" type="email" placeholder="例：salon@example.com"></div>
     <div class="err" id="regErr"></div>
-    <button class="btn" id="regBtn" disabled>認証コードをメールに送る</button>
+    <button class="btn" id="regBtn" disabled>次へ：パスワードを設定する</button>
     <button class="link-btn" id="toLoginFromRegBtn">← ログインに戻る</button>
   </div>
 
-  <!-- 認証コード（新規） -->
-  <div id="vVerify" class="card" style="display:none;">
-    <h2>メール認証</h2>
-    <div class="step-badge">STEP 1 / 2　メール認証</div>
-    <p style="font-size:13px;color:var(--muted);text-align:center;line-height:1.7;margin-bottom:8px;">
-      <span id="verifyEmail" style="font-weight:600;color:var(--text);"></span><br>に6桁のコードを送信しました</p>
-    <div class="hint">デモ用コード：<strong style="color:var(--accent);">123456</strong></div>
-    <div class="code-row">
-      <input class="code-box" id="vc1" maxlength="1" inputmode="numeric">
-      <input class="code-box" id="vc2" maxlength="1" inputmode="numeric">
-      <input class="code-box" id="vc3" maxlength="1" inputmode="numeric">
-      <input class="code-box" id="vc4" maxlength="1" inputmode="numeric">
-      <input class="code-box" id="vc5" maxlength="1" inputmode="numeric">
-      <input class="code-box" id="vc6" maxlength="1" inputmode="numeric">
-    </div>
-    <div id="vErr" style="text-align:center;font-size:12px;color:var(--red);display:none;margin-bottom:8px;">コードが正しくありません。</div>
-    <div style="text-align:center;font-size:12px;color:var(--muted);margin-bottom:16px;">
-      <span id="vTimerTxt">再送信まで <span id="vSec">60</span>秒</span>
-      <button id="vResendBtn" style="display:none;background:none;border:none;font-size:12px;color:var(--accent);cursor:pointer;font-family:inherit;">再送信する</button>
-    </div>
-    <button class="btn" id="verifyBtn" disabled>次へ：パスワードを設定する →</button>
-    <button class="link-btn" id="toRegFromVerifyBtn">← 戻る</button>
-  </div>
-
-  <!-- パスワード設定（新規 STEP2） -->
   <div id="vSetPass" class="card" style="display:none;">
     <h2>パスワードを設定</h2>
-    <div class="step-badge">STEP 2 / 2　パスワード設定</div>
-    <p style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:16px;line-height:1.7;">ログイン時に使用するパスワードを設定してください</p>
+    <div class="step-badge">STEP 1 / 2　パスワード設定</div>
     <div class="fg"><label>パスワード</label>
       <div class="pw-wrap"><input id="sp1" type="password" placeholder="8文字以上・英字・数字を含む">
       <button class="pw-eye" id="sp1Eye" type="button">👁</button></div>
@@ -122,7 +90,6 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
     <button class="btn" id="spBtn" disabled>登録を完了する</button>
   </div>
 
-  <!-- メール確認待ち -->
   <div id="vVerifyWait" class="card" style="display:none;">
     <div style="text-align:center;font-size:40px;margin:16px 0;">📧</div>
     <h2>確認メールを送信しました</h2>
@@ -133,7 +100,6 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
     <button class="text-link" id="vwLogoutBtn" style="margin-top:8px;">← 最初からやり直す</button>
   </div>
 
-  <!-- パスワード忘れ -->
   <div id="vForgot" class="card" style="display:none;">
     <h2>パスワードの再設定</h2>
     <p style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:16px;line-height:1.7;">登録済みのメールアドレスに再設定用のリンクをお送りします。</p>
@@ -143,7 +109,6 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
     <button class="link-btn" id="toLoginFromForgotBtn">← ログインに戻る</button>
   </div>
 
-  <!-- パスワード再設定メール送信完了 -->
   <div id="vForgotSent" class="card" style="display:none;">
     <h2>メールを送信しました</h2>
     <p style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:16px;line-height:1.8;">パスワード再設定用のリンクをメールに送りました。<br>メールを確認してパスワードを再設定してください。</p>
@@ -152,7 +117,6 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
   </div>
 </div>
 
-<!-- ダッシュボード -->
 <div id="vDash" class="dash">
   <div class="dash-card">
     <div class="dash-top">
@@ -184,10 +148,8 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
 <div class="toast" id="toast"></div>
 
 <script>
-var verifyTmr = null;
 var regTmp = { name: '', email: '' };
-var forgotSalon = null;
-var ALL_VIEWS = ['vLoading','vLogin','vReg','vVerify','vSetPass','vVerifyWait','vForgot','vForgotSent','vForgotVerify','vResetPass'];
+var ALL_VIEWS = ['vLoading','vLogin','vReg','vSetPass','vVerifyWait','vForgot','vForgotSent'];
 
 function show(id) {
   for (var i = 0; i < ALL_VIEWS.length; i++) {
@@ -210,7 +172,6 @@ function enterDash(salon) {
   document.getElementById('epNewPass').value = '';
 }
 
-// ログイン
 function chkLogin() {
   var e = gv('lEmail'), p = gv('lPass');
   document.getElementById('loginBtn').disabled = !(e && p);
@@ -233,13 +194,12 @@ function doLogin() {
   });
 }
 
-// 新規登録
 function chkReg() {
   document.getElementById('regBtn').disabled = !(gv('rName') && gv('rEmail'));
   document.getElementById('regErr').classList.remove('show');
 }
 
-function goVerify() {
+function goSetPass() {
   var n = gv('rName'), e = gv('rEmail');
   if (!n || !e) return;
   regTmp = { name: n, email: e };
@@ -251,7 +211,6 @@ function goVerify() {
   show('vSetPass');
 }
 
-// パスワード設定（新規）
 function checkPwStrength() {
   var pw = gv('sp1'), r = validatePassword(pw);
   var s = 0;
@@ -266,6 +225,7 @@ function checkPwStrength() {
   rule.textContent = r.ok ? '✓ 使用できるパスワードです' : r.msg;
   rule.className = r.ok ? 'pw-rule ok' : 'pw-rule';
   checkPwMatch();
+  
 }
 
 function checkPwMatch() {
@@ -279,6 +239,17 @@ function checkPwMatch() {
 }
 
 function completeRegister() {
+  var pw​​​​​​​​​​​​​​​​
+function checkPwMatch() {
+  var p1 = gv('sp1'), p2 = gv('sp2'), v1 = validatePassword(p1);
+  var rule = document.getElementById('pwMatchRule');
+  if (!p2) { rule.textContent = ''; document.getElementById('spBtn').disabled = true; return; }
+  var ok = p1 === p2 && v1.ok;
+  rule.textContent = ok ? '✓ パスワードが一致しています' : (p1 !== p2 ? 'パスワードが一致しません' : v1.msg);
+  rule.className = ok ? 'pw-rule ok' : 'pw-rule';
+  document.getElementById('spBtn').disabled = !ok;
+}
+function completeRegister() {
   var pw = gv('sp1'), vr = validatePassword(pw);
   if (!vr.ok) { showErrEl('spErr', vr.msg); return; }
   if (pw !== gv('sp2')) { showErrEl('spErr', 'パスワードが一致しません'); return; }
@@ -291,7 +262,6 @@ function completeRegister() {
       showErrEl('spErr', err.message || '登録に失敗しました。もう一度お試しください。');
       return;
     }
-    // メール確認待ち画面へ
     document.getElementById('vwEmail').textContent = regTmp.email;
     document.getElementById('vwErr').classList.remove('show');
     show('vVerifyWait');
@@ -301,7 +271,6 @@ function completeRegister() {
 function checkEmailVerified() {
   var user = dbAuthGetCurrentUser();
   if (!user) { show('vLogin'); return; }
-  // 最新の状態を取得
   user.reload().then(function() {
     var u = dbAuthGetCurrentUser();
     if (u && u.emailVerified) {
@@ -326,6 +295,8 @@ function resendVerifyEmail() {
     showToast('再送信に失敗しました');
   });
 }
+
+function chkForgot() {
   document.getElementById('fgBtn').disabled = !gv('fgEmail');
   document.getElementById('fgErr').classList.remove('show');
 }
@@ -346,7 +317,6 @@ function goForgotVerify() {
   });
 }
 
-// ダッシュボード
 function toggleSetting() {
   var a = document.getElementById('settingArea');
   a.style.display = a.style.display === 'block' ? 'none' : 'block';
@@ -358,15 +328,13 @@ function saveProfile() {
   if (!n || !e) { showErrEl('epErr', '店名とメールを入力してください'); return; }
   var user = dbAuthGetCurrentUser();
   if (!user) { showErrEl('epErr', 'ログインし直してください'); return; }
-  // パスワード変更がある場合
   if (newPw) {
     var vr = validatePassword(newPw);
     if (!vr.ok) { showErrEl('epErr', vr.msg); return; }
-    user.updatePassword(newPw).catch(function(err) {
+    user.updatePassword(newPw).catch(function() {
       showErrEl('epErr', 'パスワード変更に失敗しました。再ログインして試してください。');
     });
   }
-  // 店名・メール更新
   dbGetSalon(function(salon) {
     if (!salon) return;
     salon.name = n; salon.email = e;
@@ -374,7 +342,6 @@ function saveProfile() {
       if (err) { showErrEl('epErr', '保存に失敗しました'); return; }
       document.getElementById('dName').textContent = n;
       document.getElementById('dEmail').textContent = e;
-      document.getElementById('epOldPass').value = '';
       document.getElementById('epNewPass').value = '';
       document.getElementById('epErr').classList.remove('show');
       showToast('保存しました');
@@ -393,62 +360,6 @@ function doLogout() {
   showToast('ログアウトしました');
 }
 
-// コード入力
-function setupCodeBoxes(ids, btnId) {
-  for (var i = 0; i < ids.length; i++) {
-    (function(idx) {
-      var el = document.getElementById(ids[idx]);
-      el.addEventListener('input', function() {
-        this.value = this.value.replace(/[^0-9]/g, '');
-        this.classList.toggle('filled', !!this.value);
-        if (this.value && idx < ids.length - 1) {
-          document.getElementById(ids[idx + 1]).focus();
-        }
-        if (btnId) {
-          var allFilled = true;
-          for (var j = 0; j < ids.length; j++) {
-            if (!document.getElementById(ids[j]).value) { allFilled = false; break; }
-          }
-          document.getElementById(btnId).disabled = !allFilled;
-        }
-      });
-      el.addEventListener('keydown', function(e) {
-        if (e.key === 'Backspace' && !this.value && idx > 0) {
-          document.getElementById(ids[idx - 1]).focus();
-        }
-      });
-    })(i);
-  }
-}
-
-function getCode(ids) {
-  return ids.map(function(id) { return document.getElementById(id).value; }).join('');
-}
-
-function clearBoxes(ids) {
-  ids.forEach(function(id) {
-    var el = document.getElementById(id);
-    el.value = ''; el.classList.remove('filled');
-  });
-}
-
-function startTimer(secId, txtId, btnId) {
-  clearInterval(verifyTmr);
-  var c = 60;
-  document.getElementById(secId).textContent = c;
-  document.getElementById(txtId).style.display = 'inline';
-  document.getElementById(btnId).style.display = 'none';
-  verifyTmr = setInterval(function() {
-    c--;
-    document.getElementById(secId).textContent = c;
-    if (c <= 0) {
-      clearInterval(verifyTmr);
-      document.getElementById(txtId).style.display = 'none';
-      document.getElementById(btnId).style.display = 'inline';
-    }
-  }, 1000);
-}
-
 function gv(id) { return document.getElementById(id).value.trim(); }
 function showErrEl(id, msg) { var el = document.getElementById(id); el.textContent = msg; el.classList.add('show'); }
 function togglePw(inputId, btn) {
@@ -462,101 +373,59 @@ function showToast(msg) {
   setTimeout(function() { t.classList.remove('show'); }, 3000);
 }
 
-function dbg(msg) {
-  var el = document.getElementById('debugLog');
-  if (el) el.innerHTML += msg + '<br>';
-}
-dbg('script start');
-
-// onFbReadyが呼ばれない場合のフォールバック（2秒後）
 setTimeout(function() {
-  dbg('fallback check');
   var loading = document.getElementById('vLoading');
   if (loading && loading.style.display !== 'none') {
-    dbg('fallback triggered');
-    var all = ['vLoading','vLogin','vReg','vVerify','vSetPass','vVerifyWait','vForgot','vForgotSent','vForgotVerify','vResetPass'];
-    for (var i = 0; i < all.length; i++) {
-      var el = document.getElementById(all[i]);
+    for (var i = 0; i < ALL_VIEWS.length; i++) {
+      var el = document.getElementById(ALL_VIEWS[i]);
       if (el) el.style.display = 'none';
     }
     document.getElementById('authWrap').style.display = 'block';
-    var vDash = document.getElementById('vDash');
-    if (vDash) vDash.style.display = 'none';
+    document.getElementById('vDash').style.display = 'none';
     document.getElementById('vLogin').style.display = 'block';
   }
-}, 2000);
+}, 3000);
 
-// イベントリスナー設定
 onFbReady(function() {
-  dbg('onFbReady called');
-  // Firebase Auth の状態監視（自動ログイン）
-  // タイムアウト保険：5秒以内に応答がなければログイン画面を表示
-  var authResolved = false;
-  setTimeout(function() {
-    if (!authResolved) {
-      console.log('AUTH TIMEOUT: forcing login screen');
+  dbAuthOnStateChanged(function(user) {
+    if (user) {
+      setCurrentSalonId(user.uid);
+      if (!user.emailVerified) {
+        document.getElementById('vwEmail').textContent = user.email;
+        document.getElementById('vwErr').classList.remove('show');
+        show('vVerifyWait');
+      } else {
+        dbGetSalon(function(salon) {
+          if (salon) { enterDash(salon); } else { show('vLogin'); }
+        });
+      }
+    } else {
       show('vLogin');
     }
-  }, 5000);
+  });
 
-  try {
-    dbAuthOnStateChanged(function(user) {
-      console.log('AUTH STATE CHANGED: user=', user ? user.email : 'null');
-      authResolved = true;
-      if (user) {
-        setCurrentSalonId(user.uid);
-        if (!user.emailVerified) {
-          document.getElementById('vwEmail').textContent = user.email;
-          document.getElementById('vwErr').classList.remove('show');
-          show('vVerifyWait');
-        } else {
-          dbGetSalon(function(salon) {
-            if (salon) { enterDash(salon); } else { show('vLogin'); }
-          });
-        }
-      } else {
-        show('vLogin');
-      }
-    });
-  } catch(e) {
-    show('vLogin');
-  }
-
-  // ログイン
   document.getElementById('lEmail').addEventListener('input', chkLogin);
   document.getElementById('lPass').addEventListener('input', chkLogin);
   document.getElementById('loginBtn').addEventListener('click', doLogin);
   document.getElementById('lPassEye').addEventListener('click', function() { togglePw('lPass', this); });
-
-  // 新規登録
-  document.getElementById('rName').addEventListener('input', chkReg);
-  document.getElementById('rEmail').addEventListener('input', chkReg);
-  document.getElementById('regBtn').addEventListener('click', goVerify);
   document.getElementById('toRegBtn').addEventListener('click', function() { show('vReg'); });
   document.getElementById('toLoginFromRegBtn').addEventListener('click', function() { show('vLogin'); });
-
-  // パスワード設定（新規登録）
+  document.getElementById('rName').addEventListener('input', chkReg);
+  document.getElementById('rEmail').addEventListener('input', chkReg);
+  document.getElementById('regBtn').addEventListener('click', goSetPass);
   document.getElementById('sp1').addEventListener('input', checkPwStrength);
   document.getElementById('sp2').addEventListener('input', checkPwMatch);
   document.getElementById('sp1Eye').addEventListener('click', function() { togglePw('sp1', this); });
   document.getElementById('sp2Eye').addEventListener('click', function() { togglePw('sp2', this); });
   document.getElementById('spBtn').addEventListener('click', completeRegister);
-
-  // メール確認待ち
   document.getElementById('vwCheckBtn').addEventListener('click', checkEmailVerified);
   document.getElementById('vwResendBtn').addEventListener('click', resendVerifyEmail);
-  document.getElementById('vwLogoutBtn').addEventListener('click', function() {
-    dbLogout(); show('vLogin');
-  });
-
-  // パスワード忘れ
+  document.getElementById('vwLogoutBtn').addEventListener('click', function() { dbLogout(); show('vLogin'); });
   document.getElementById('fgEmail').addEventListener('input', chkForgot);
   document.getElementById('fgBtn').addEventListener('click', goForgotVerify);
   document.getElementById('toForgotBtn').addEventListener('click', function() { show('vForgot'); });
   document.getElementById('toLoginFromForgotBtn').addEventListener('click', function() { show('vLogin'); });
   document.getElementById('toLoginFromSentBtn').addEventListener('click', function() { show('vLogin'); });
-
-  // ダッシュボード
   document.getElementById('logoutBtn').addEventListener('click', doLogout);
   document.getElementById('toggleSettingBtn').addEventListener('click', toggleSetting);
   document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
