@@ -122,6 +122,17 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
     <button class="btn" id="spBtn" disabled>登録を完了する</button>
   </div>
 
+  <!-- メール確認待ち -->
+  <div id="vVerifyWait" class="card" style="display:none;">
+    <div style="text-align:center;font-size:40px;margin:16px 0;">📧</div>
+    <h2>確認メールを送信しました</h2>
+    <p style="font-size:13px;color:var(--muted);text-align:center;margin:14px 0 20px;line-height:1.8;"><span id="vwEmail" style="font-weight:600;color:var(--text);"></span><br>に確認メールをお送りしました。<br>メールのリンクをクリックしてから<br>下のボタンをタップしてください。</p>
+    <button class="btn" id="vwCheckBtn">確認しました →</button>
+    <div id="vwErr" class="err" style="margin-top:8px;"></div>
+    <button class="link-btn" id="vwResendBtn" style="margin-top:10px;">メールを再送信する</button>
+    <button class="text-link" id="vwLogoutBtn" style="margin-top:8px;">← 最初からやり直す</button>
+  </div>
+
   <!-- パスワード忘れ -->
   <div id="vForgot" class="card" style="display:none;">
     <h2>パスワードの再設定</h2>
@@ -176,7 +187,7 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
 var verifyTmr = null;
 var regTmp = { name: '', email: '' };
 var forgotSalon = null;
-var ALL_VIEWS = ['vLoading','vLogin','vReg','vVerify','vSetPass','vForgot','vForgotSent','vForgotVerify','vResetPass'];
+var ALL_VIEWS = ['vLoading','vLogin','vReg','vVerify','vSetPass','vVerifyWait','vForgot','vForgotSent','vForgotVerify','vResetPass'];
 
 function show(id) {
   for (var i = 0; i < ALL_VIEWS.length; i++) {
@@ -280,13 +291,41 @@ function completeRegister() {
       showErrEl('spErr', err.message || '登録に失敗しました。もう一度お試しください。');
       return;
     }
-    enterDash(salon);
-    showToast('登録が完了しました！確認メールをお送りしました。');
+    // メール確認待ち画面へ
+    document.getElementById('vwEmail').textContent = regTmp.email;
+    document.getElementById('vwErr').classList.remove('show');
+    show('vVerifyWait');
   });
 }
 
-// パスワード忘れ
-function chkForgot() {
+function checkEmailVerified() {
+  var user = dbAuthGetCurrentUser();
+  if (!user) { show('vLogin'); return; }
+  // 最新の状態を取得
+  user.reload().then(function() {
+    var u = dbAuthGetCurrentUser();
+    if (u && u.emailVerified) {
+      dbGetSalon(function(salon) {
+        if (salon) { enterDash(salon); showToast('登録が完了しました！'); }
+        else { show('vLogin'); }
+      });
+    } else {
+      showErrEl('vwErr', 'まだメールが確認されていません。メールのリンクをクリックしてから再度お試しください。');
+    }
+  }).catch(function() {
+    showErrEl('vwErr', '確認に失敗しました。もう一度お試しください。');
+  });
+}
+
+function resendVerifyEmail() {
+  var user = dbAuthGetCurrentUser();
+  if (!user) return;
+  user.sendEmailVerification().then(function() {
+    showToast('確認メールを再送信しました');
+  }).catch(function() {
+    showToast('再送信に失敗しました');
+  });
+}
   document.getElementById('fgBtn').disabled = !gv('fgEmail');
   document.getElementById('fgErr').classList.remove('show');
 }
@@ -450,16 +489,20 @@ onFbReady(function() {
       authResolved = true;
       if (user) {
         setCurrentSalonId(user.uid);
-        dbGetSalon(function(salon) {
-          console.log('GOT SALON:', salon);
-          if (salon) { enterDash(salon); } else { show('vLogin'); }
-        });
+        if (!user.emailVerified) {
+          document.getElementById('vwEmail').textContent = user.email;
+          document.getElementById('vwErr').classList.remove('show');
+          show('vVerifyWait');
+        } else {
+          dbGetSalon(function(salon) {
+            if (salon) { enterDash(salon); } else { show('vLogin'); }
+          });
+        }
       } else {
         show('vLogin');
       }
     });
   } catch(e) {
-    console.log('AUTH ERROR:', e);
     show('vLogin');
   }
 
@@ -482,6 +525,13 @@ onFbReady(function() {
   document.getElementById('sp1Eye').addEventListener('click', function() { togglePw('sp1', this); });
   document.getElementById('sp2Eye').addEventListener('click', function() { togglePw('sp2', this); });
   document.getElementById('spBtn').addEventListener('click', completeRegister);
+
+  // メール確認待ち
+  document.getElementById('vwCheckBtn').addEventListener('click', checkEmailVerified);
+  document.getElementById('vwResendBtn').addEventListener('click', resendVerifyEmail);
+  document.getElementById('vwLogoutBtn').addEventListener('click', function() {
+    dbLogout(); show('vLogin');
+  });
 
   // パスワード忘れ
   document.getElementById('fgEmail').addEventListener('input', chkForgot);
