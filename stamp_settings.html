@@ -147,15 +147,7 @@
         </div>
       </div>
 
-      <div class="section">
-        <div class="section-header"><div><div class="section-title">顧客スタンプ管理</div><div class="section-sub">来店時にスタンプを付与します。</div></div></div>
-        <div class="section-body">
-          <table class="cust-stamp-table">
-            <thead><tr><th>顧客名</th><th>スタンプ</th><th>操作</th></tr></thead>
-            <tbody id="custStampTable"></tbody>
-          </table>
-        </div>
-      </div>
+
     </div>
   </div>
 </div>
@@ -259,59 +251,7 @@ function updateBonus(id, f, v) {
   updatePreview();
 }
 
-function renderCustStampTable(customers, stampCard) {
-  var goal = (stampCard && stampCard.goal) ? stampCard.goal : 10;
-  var tbody = document.getElementById('custStampTable');
-  if (!customers || !customers.length) {
-    tbody.innerHTML = '<tr><td colspan="3" style="text-align:center;color:var(--muted);font-size:12px;padding:16px;">顧客が登録されていません</td></tr>';
-    return;
-  }
-  tbody.innerHTML = '';
-  customers.forEach(function(c) {
-    var stamps = c.stamps || 0;
-    var pct = Math.min(stamps, goal);
-    var dots = '';
-    for (var d = 0; d < Math.min(goal, 10); d++) {
-      dots += '<div class="stamp-dot ' + (d < pct ? 'on' : '') + '" style="' + (d < pct ? 'background:' + selectedColor : '') + ';"></div>';
-    }
-    var tr = document.createElement('tr');
-    tr.innerHTML = '<td style="font-size:13px;font-weight:600;">' + c.name + '</td>'
-      + '<td><div class="stamp-bar"><div class="stamp-dots">' + dots + '</div><span style="font-size:11px;color:var(--muted);">' + stamps + '個</span></div></td>'
-      + '<td><button style="padding:4px 10px;font-size:11px;background:var(--accent);color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;margin-bottom:3px;display:block;">＋スタンプ</button>'
-      + '<button style="padding:4px 10px;font-size:11px;background:none;color:var(--red);border:1px solid var(--red);border-radius:6px;cursor:pointer;font-family:inherit;display:block;">リセット</button></td>';
-    var btns = tr.querySelectorAll('button');
-    (function(custId, custName) {
-      btns[0].addEventListener('click', function() { addStampTo(custId, custName, goal); });
-      btns[1].addEventListener('click', function() { resetStampsFor(custId, custName); });
-    })(c.id, c.name);
-    tbody.appendChild(tr);
-  });
-}
 
-function addStampTo(custId, custName, goal) {
-  dbAddStamp(custId, 1, function(err) {
-    if (err) { showToast('エラーが発生しました'); return; }
-    reloadCustTable();
-    showToast(custName + 'さんにスタンプを付与しました');
-  });
-}
-
-function resetStampsFor(custId, custName) {
-  if (!confirm(custName + 'さんのスタンプをリセットしますか？')) return;
-  dbResetStamps(custId, function(err) {
-    if (err) { showToast('エラーが発生しました'); return; }
-    reloadCustTable();
-    showToast(custName + 'さんのスタンプをリセットしました');
-  });
-}
-
-function reloadCustTable() {
-  dbGetCustomers(function(customers) {
-    dbGetStampCard(function(sc) {
-      renderCustStampTable(customers, sc);
-    });
-  });
-}
 
 function saveAll() {
   var policy = {
@@ -324,7 +264,6 @@ function saveAll() {
   };
   dbSaveStampCard(policy, function(err) {
     if (err) { showToast('保存に失敗しました'); return; }
-    reloadCustTable();
     updatePreview();
     showToast('スタンプカード設定を保存しました');
   });
@@ -342,7 +281,6 @@ onFbReady(function() {
     bonusRows = (sc.bonusStamps || []).map(function(r, i) { return { id: i+1, at: r.at, reward: r.reward }; });
     bonusNextId = bonusRows.length + 10;
     renderColorChips(); renderExpChips(); renderBonusList(); updatePreview(); toggleEnabled();
-    reloadCustTable();
   });
 
   document.getElementById('saveBtn').addEventListener('click', saveAll);
