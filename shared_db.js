@@ -15,14 +15,14 @@ var FIREBASE_CONFIG = {
 };
 
 // -------------------- Firebase SDK読み込み --------------------
-// CDN経由でFirebaseを読み込む（HTMLのheadでshared_db.jsより先に読み込み不要・このファイルが管理）
 (function() {
-  function loadScript(src, cb) {
-    var s = document.createElement('script');
-    s.src = src;
-    s.onload = cb;
-    document.head.appendChild(s);
-  }
+  var loaded = 0;
+  var total = 3;
+  var scripts = [
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js',
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js'
+  ];
 
   window._fbReady = false;
   window._fbReadyCbs = [];
@@ -30,17 +30,29 @@ var FIREBASE_CONFIG = {
     if (window._fbReady) { cb(); } else { window._fbReadyCbs.push(cb); }
   };
 
-  loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js', function() {
-    loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js', function() {
-      loadScript('https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js', function() {
-        firebase.initializeApp(FIREBASE_CONFIG);
-        window.db = firebase.firestore();
-        window.auth = firebase.auth();
-        window._fbReady = true;
-        for (var i = 0; i < window._fbReadyCbs.length; i++) { window._fbReadyCbs[i](); }
-        window._fbReadyCbs = [];
-      });
-    });
+  function onAllLoaded() {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    window.db = firebase.firestore();
+    window.auth = firebase.auth();
+    window._fbReady = true;
+    for (var i = 0; i < window._fbReadyCbs.length; i++) { window._fbReadyCbs[i](); }
+    window._fbReadyCbs = [];
+  }
+
+  // app-compatを先に読み込み、残り2つを並列で読み込む
+  function loadScript(src, cb) {
+    var s = document.createElement('script');
+    s.src = src;
+    s.onload = cb;
+    s.onerror = cb; // エラー時も次へ進む
+    document.head.appendChild(s);
+  }
+
+  loadScript(scripts[0], function() {
+    var done = 0;
+    function check() { done++; if (done === 2) onAllLoaded(); }
+    loadScript(scripts[1], check);
+    loadScript(scripts[2], check);
   });
 })();
 

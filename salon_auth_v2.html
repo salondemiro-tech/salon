@@ -423,15 +423,14 @@ function showToast(msg) {
   setTimeout(function() { t.classList.remove('show'); }, 3000);
 }
 
-// onFbReadyが呼ばれない場合のフォールバック（8秒後）
+// onFbReadyが呼ばれない場合のフォールバック（3秒後）
 setTimeout(function() {
   var loading = document.getElementById('vLoading');
   if (loading && loading.style.display !== 'none') {
-    console.log('FALLBACK: onFbReady never called');
     document.getElementById('vLoading').style.display = 'none';
     document.getElementById('vLogin').style.display = 'block';
   }
-}, 8000);
+}, 3000);
 
 // イベントリスナー設定
 onFbReady(function() {
