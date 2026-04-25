@@ -6,64 +6,68 @@
 <title>Salon Manager - ログイン</title>
 <script src="shared_db.js"></script>
 <style>
-:root{--accent:#b5845a;--accent-light:#f5ede4;--accent-dark:#7a5535;--bg:#ffffff;--surface:#f8f7f4;--surface2:#f0ede8;--border:rgba(0,0,0,0.10);--text:#1a1a18;--muted:#73726c;--green:#7b9e87;--green-light:#e8f2eb;--red:#c47b7b;--red-light:#faeaea;--red-text:#6b1f1f;color-scheme:light;}
-*{box-sizing:border-box;margin:0;padding:0;color-scheme:light;}
-body{font-family:'Georgia',serif;background:var(--surface2);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;color:var(--text);}
-input{background:#fff!important;color:var(--text)!important;}
-.card{width:100%;max-width:400px;background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.12);padding:32px;}
-.logo{text-align:center;margin-bottom:24px;}.logo-mark{font-size:26px;color:var(--accent);font-weight:600;}.logo-sub{font-size:11px;color:var(--muted);margin-top:4px;}
-h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-bottom:20px;}
-.hint{font-size:11px;color:var(--muted);background:var(--surface);border-radius:8px;padding:8px 12px;text-align:center;margin-bottom:16px;line-height:1.6;}
-.fg{margin-bottom:14px;}.fg label{font-size:12px;color:var(--muted);font-weight:600;display:block;margin-bottom:5px;}
-.fg input{width:100%;padding:11px 13px;border:1.5px solid var(--border);border-radius:9px;font-size:14px;font-family:inherit;transition:border-color .15s;}
-.fg input:focus{outline:none;border-color:var(--accent);}
-.pw-wrap{position:relative;}.pw-wrap input{padding-right:44px;}
-.pw-eye{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;color:var(--muted);padding:4px;}
-.pw-rule{font-size:11px;color:var(--muted);margin-top:4px;line-height:1.6;}.pw-rule.ok{color:var(--green);}
-.strength-bar{height:4px;border-radius:2px;margin-top:6px;background:var(--border);overflow:hidden;}
-.strength-fill{height:100%;border-radius:2px;transition:width .3s,background .3s;}
-.err{font-size:12px;color:var(--red-text);background:var(--red-light);border-radius:7px;padding:8px 11px;margin-top:8px;display:none;}.err.show{display:block;}
-.btn{width:100%;padding:13px;background:var(--accent);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;margin-top:4px;transition:opacity .15s;}
-.btn:hover{opacity:.88;}.btn:disabled{background:#ddd;color:#aaa;cursor:not-allowed;opacity:1;}
-.link-btn{width:100%;padding:11px;background:none;border:1.5px solid var(--border);border-radius:10px;font-size:13px;cursor:pointer;font-family:inherit;color:var(--muted);margin-top:10px;transition:all .15s;}
-.link-btn:hover{border-color:var(--accent);color:var(--accent);}
-.text-link{background:none;border:none;font-size:12px;color:var(--accent);cursor:pointer;font-family:inherit;text-decoration:underline;display:block;text-align:center;margin-top:12px;}
-.divider{display:flex;align-items:center;gap:10px;margin:14px 0;}.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--border);}.divider span{font-size:12px;color:var(--muted);}
-.step-badge{display:inline-block;background:var(--accent-light);color:var(--accent);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;margin-bottom:14px;}
+:root{--ac:#b5845a;--al:#f5ede4;--ad:#7a5535;--bg:#fff;--sf:#f8f7f4;--s2:#f0ede8;--bd:rgba(0,0,0,.10);--tx:#1a1a18;--mu:#73726c;--gn:#7b9e87;--rd:#c47b7b;--rl:#faeaea;--rt:#6b1f1f;}
+*{box-sizing:border-box;margin:0;padding:0;}
+body{font-family:'Georgia',serif;background:var(--s2);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;color:var(--tx);}
+input{background:#fff!important;color:var(--tx)!important;}
+.card{width:100%;max-width:400px;background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.12);padding:32px;}
+.logo{text-align:center;margin-bottom:24px;}
+.logo-mark{font-size:26px;color:var(--ac);font-weight:600;}
+.logo-sub{font-size:11px;color:var(--mu);margin-top:4px;}
+h2{font-size:17px;font-weight:600;color:var(--ac);text-align:center;margin-bottom:20px;}
+.fg{margin-bottom:14px;}
+.fg label{font-size:12px;color:var(--mu);font-weight:600;display:block;margin-bottom:5px;}
+.fg input{width:100%;padding:11px 13px;border:1.5px solid var(--bd);border-radius:9px;font-size:14px;font-family:inherit;}
+.fg input:focus{outline:none;border-color:var(--ac);}
+.pw-wrap{position:relative;}
+.pw-wrap input{padding-right:44px;}
+.pw-eye{position:absolute;right:12px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;font-size:16px;color:var(--mu);padding:4px;}
+.pw-rule{font-size:11px;color:var(--mu);margin-top:4px;line-height:1.6;}
+.pw-rule.ok{color:var(--gn);}
+.str-bar{height:4px;border-radius:2px;margin-top:6px;background:var(--bd);overflow:hidden;}
+.str-fill{height:100%;border-radius:2px;transition:width .3s,background .3s;}
+.err{font-size:12px;color:var(--rt);background:var(--rl);border-radius:7px;padding:8px 11px;margin-top:8px;display:none;}
+.err.show{display:block;}
+.btn{width:100%;padding:13px;background:var(--ac);color:#fff;border:none;border-radius:10px;font-size:14px;font-weight:600;cursor:pointer;font-family:inherit;margin-top:4px;}
+.btn:disabled{background:#ddd;color:#aaa;cursor:not-allowed;}
+.link-btn{width:100%;padding:11px;background:none;border:1.5px solid var(--bd);border-radius:10px;font-size:13px;cursor:pointer;font-family:inherit;color:var(--mu);margin-top:10px;}
+.link-btn:hover{border-color:var(--ac);color:var(--ac);}
+.text-link{background:none;border:none;font-size:12px;color:var(--ac);cursor:pointer;font-family:inherit;text-decoration:underline;display:block;text-align:center;margin-top:12px;}
+.divider{display:flex;align-items:center;gap:10px;margin:14px 0;}
+.divider::before,.divider::after{content:'';flex:1;height:1px;background:var(--bd);}
+.divider span{font-size:12px;color:var(--mu);}
+.badge{display:inline-block;background:var(--al);color:var(--ac);font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;margin-bottom:14px;}
 .dash{display:none;width:100%;max-width:500px;}
-.dash-card{background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.12);overflow:hidden;}
-.dash-top{background:var(--accent);padding:20px 24px;display:flex;align-items:center;justify-content:space-between;}
-.dash-top h2{font-size:16px;font-weight:600;color:#fff;margin:0;}.dash-top p{font-size:11px;color:rgba(255,255,255,.8);margin-top:2px;}
+.dash-card{background:#fff;border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,.12);overflow:hidden;}
+.dash-top{background:var(--ac);padding:20px 24px;display:flex;align-items:center;justify-content:space-between;}
+.dash-top h2{font-size:16px;font-weight:600;color:#fff;margin:0;}
+.dash-top p{font-size:11px;color:rgba(255,255,255,.8);margin-top:2px;}
 .out-btn{padding:5px 14px;border:1.5px solid rgba(255,255,255,.6);border-radius:6px;background:none;color:#fff;font-size:12px;cursor:pointer;font-family:inherit;}
-.nav-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--border);}
-.nav-item{padding:16px 12px;text-align:center;background:#fff;cursor:pointer;text-decoration:none;color:inherit;display:block;transition:background .15s;}
-.nav-item:hover{background:var(--accent-light);}.nav-item-icon{font-size:22px;margin-bottom:4px;}.nav-item-label{font-size:11px;color:var(--muted);}
-.setting-area{padding:16px 20px;display:none;}
-.setting-area h3{font-size:12px;font-weight:600;color:var(--muted);letter-spacing:.06em;margin-bottom:12px;}
-.loading{text-align:center;padding:40px;color:var(--muted);font-size:14px;}
+.nav-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:1px;background:var(--bd);}
+.nav-item{padding:16px 12px;text-align:center;background:#fff;cursor:pointer;text-decoration:none;color:inherit;display:block;}
+.nav-item:hover{background:var(--al);}
+.nav-icon{font-size:22px;margin-bottom:4px;}
+.nav-lbl{font-size:11px;color:var(--mu);}
+.set-area{padding:16px 20px;display:none;}
+.set-area h3{font-size:12px;font-weight:600;color:var(--mu);letter-spacing:.06em;margin-bottom:12px;}
+.loading{text-align:center;padding:40px;color:var(--mu);font-size:14px;}
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#2e5c3a;color:#fff;font-size:12px;padding:9px 20px;border-radius:20px;opacity:0;transition:all .3s;z-index:300;}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 </style>
 </head>
 <body>
 <div id="authWrap" style="width:100%;max-width:400px;">
-  <div id="vLoading" class="card" style="display:none;"><div class="loading">読み込み中...</div></div>
-
-
+  <div id="vLoading" class="card"><div class="loading">読み込み中...</div></div>
   <div id="vLogin" class="card" style="display:none;">
     <div class="logo"><div class="logo-mark">🌸 Salon Manager</div><div class="logo-sub">サロン管理システム</div></div>
     <div class="fg"><label>メールアドレス</label><input id="lEmail" type="email" placeholder="例：salon@example.com"></div>
-    <div class="fg"><label>パスワード</label>
-      <div class="pw-wrap"><input id="lPass" type="password" placeholder="パスワード">
-      <button class="pw-eye" id="lPassEye" type="button">👁</button></div>
-    </div>
+    <div class="fg"><label>パスワード</label><div class="pw-wrap"><input id="lPass" type="password" placeholder="パスワード"><button class="pw-eye" id="lPassEye" type="button">👁</button></div></div>
     <div class="err" id="loginErr"></div>
     <button class="btn" id="loginBtn" disabled>ログイン</button>
     <button class="text-link" id="toForgotBtn">パスワードを忘れた方はこちら</button>
     <div class="divider"><span>または</span></div>
     <button class="link-btn" id="toRegBtn">初めての方はこちら（新規登録）</button>
   </div>
-
   <div id="vReg" class="card" style="display:none;">
     <h2>新規登録</h2>
     <div class="fg"><label>店名</label><input id="rName" placeholder="例：Salon ✦ Name"></div>
@@ -72,52 +76,39 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
     <button class="btn" id="regBtn" disabled>次へ：パスワードを設定する</button>
     <button class="link-btn" id="toLoginFromRegBtn">← ログインに戻る</button>
   </div>
-
   <div id="vSetPass" class="card" style="display:none;">
     <h2>パスワードを設定</h2>
-    <div class="step-badge">STEP 1 / 2　パスワード設定</div>
-    <div class="fg"><label>パスワード</label>
-      <div class="pw-wrap"><input id="sp1" type="password" placeholder="8文字以上・英字・数字を含む">
-      <button class="pw-eye" id="sp1Eye" type="button">👁</button></div>
-      <div class="strength-bar"><div class="strength-fill" id="strengthFill" style="width:0%;background:#ddd;"></div></div>
-      <div class="pw-rule" id="pwRule">8文字以上、英字・数字を含めてください</div>
-    </div>
-    <div class="fg"><label>パスワード（確認）</label>
-      <div class="pw-wrap"><input id="sp2" type="password" placeholder="もう一度入力">
-      <button class="pw-eye" id="sp2Eye" type="button">👁</button></div>
-      <div class="pw-rule" id="pwMatchRule"></div>
-    </div>
+    <div class="badge">STEP 2 / 2　パスワード設定</div>
+    <div class="fg"><label>パスワード</label><div class="pw-wrap"><input id="sp1" type="password" placeholder="8文字以上・英字・数字を含む"><button class="pw-eye" id="sp1Eye" type="button">👁</button></div><div class="str-bar"><div class="str-fill" id="strFill" style="width:0%;background:#ddd;"></div></div><div class="pw-rule" id="pwRule">8文字以上、英字・数字を含めてください</div></div>
+    <div class="fg"><label>パスワード（確認）</label><div class="pw-wrap"><input id="sp2" type="password" placeholder="もう一度入力"><button class="pw-eye" id="sp2Eye" type="button">👁</button></div><div class="pw-rule" id="pwMatchRule"></div></div>
     <div class="err" id="spErr"></div>
     <button class="btn" id="spBtn" disabled>登録を完了する</button>
+    <button class="link-btn" id="toRegFromPassBtn">← 戻る</button>
   </div>
-
   <div id="vVerifyWait" class="card" style="display:none;">
     <div style="text-align:center;font-size:40px;margin:16px 0;">📧</div>
     <h2>確認メールを送信しました</h2>
-    <p style="font-size:13px;color:var(--muted);text-align:center;margin:14px 0 20px;line-height:1.8;"><span id="vwEmail" style="font-weight:600;color:var(--text);"></span><br>に確認メールをお送りしました。<br>メールのリンクをクリックしてから<br>下のボタンをタップしてください。</p>
+    <p style="font-size:13px;color:var(--mu);text-align:center;margin:14px 0 20px;line-height:1.8;"><span id="vwEmail" style="font-weight:600;color:var(--tx);"></span><br>に確認メールをお送りしました。<br>メールのリンクをクリックしてから<br>下のボタンをタップしてください。</p>
     <button class="btn" id="vwCheckBtn">確認しました →</button>
-    <div id="vwErr" class="err" style="margin-top:8px;"></div>
-    <button class="link-btn" id="vwResendBtn" style="margin-top:10px;">メールを再送信する</button>
-    <button class="text-link" id="vwLogoutBtn" style="margin-top:8px;">← 最初からやり直す</button>
+    <div class="err" id="vwErr" style="margin-top:8px;"></div>
+    <button class="link-btn" id="vwResendBtn">メールを再送信する</button>
+    <button class="text-link" id="vwCancelBtn">← 最初からやり直す</button>
   </div>
-
   <div id="vForgot" class="card" style="display:none;">
     <h2>パスワードの再設定</h2>
-    <p style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:16px;line-height:1.7;">登録済みのメールアドレスに再設定用のリンクをお送りします。</p>
+    <p style="font-size:13px;color:var(--mu);text-align:center;margin-bottom:16px;line-height:1.7;">登録済みのメールアドレスに再設定用のリンクをお送りします。</p>
     <div class="fg"><label>メールアドレス</label><input id="fgEmail" type="email" placeholder="例：salon@example.com"></div>
     <div class="err" id="fgErr"></div>
     <button class="btn" id="fgBtn" disabled>再設定メールを送る</button>
     <button class="link-btn" id="toLoginFromForgotBtn">← ログインに戻る</button>
   </div>
-
   <div id="vForgotSent" class="card" style="display:none;">
     <h2>メールを送信しました</h2>
-    <p style="font-size:13px;color:var(--muted);text-align:center;margin-bottom:16px;line-height:1.8;">パスワード再設定用のリンクをメールに送りました。<br>メールを確認してパスワードを再設定してください。</p>
-    <div style="text-align:center;font-size:32px;margin:20px 0;">📧</div>
+    <div style="text-align:center;font-size:40px;margin:20px 0;">📧</div>
+    <p style="font-size:13px;color:var(--mu);text-align:center;margin-bottom:20px;line-height:1.8;">パスワード再設定用のリンクをメールに送りました。<br>メールを確認してパスワードを再設定してください。</p>
     <button class="btn" id="toLoginFromSentBtn">ログイン画面に戻る</button>
   </div>
 </div>
-
 <div id="vDash" class="dash">
   <div class="dash-card">
     <div class="dash-top">
@@ -125,17 +116,17 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
       <button class="out-btn" id="logoutBtn">ログアウト</button>
     </div>
     <div class="nav-grid">
-      <a class="nav-item" href="salon_calendar_v7.html"><div class="nav-item-icon">📅</div><div class="nav-item-label">カレンダー</div></a>
-      <a class="nav-item" href="customer_memo_v6.html"><div class="nav-item-icon">👤</div><div class="nav-item-label">顧客管理</div></a>
-      <a class="nav-item" href="menu_settings_v3.html"><div class="nav-item-icon">✦</div><div class="nav-item-label">メニュー</div></a>
-      <a class="nav-item" href="business_hours_v6.html"><div class="nav-item-icon">🕐</div><div class="nav-item-label">営業時間</div></a>
-      <a class="nav-item" href="cancel_policy_v3.html"><div class="nav-item-icon">📋</div><div class="nav-item-label">キャンセル規定</div></a>
-      <a class="nav-item" href="stamp_settings.html"><div class="nav-item-icon">🎫</div><div class="nav-item-label">スタンプ設定</div></a>
+      <a class="nav-item" href="salon_calendar_v7.html"><div class="nav-icon">📅</div><div class="nav-lbl">カレンダー</div></a>
+      <a class="nav-item" href="customer_memo_v6.html"><div class="nav-icon">👤</div><div class="nav-lbl">顧客管理</div></a>
+      <a class="nav-item" href="menu_settings_v3.html"><div class="nav-icon">✦</div><div class="nav-lbl">メニュー</div></a>
+      <a class="nav-item" href="business_hours_v6.html"><div class="nav-icon">🕐</div><div class="nav-lbl">営業時間</div></a>
+      <a class="nav-item" href="cancel_policy_v3.html"><div class="nav-icon">📋</div><div class="nav-lbl">キャンセル規定</div></a>
+      <a class="nav-item" href="stamp_settings.html"><div class="nav-icon">🎫</div><div class="nav-lbl">スタンプ設定</div></a>
     </div>
-    <div style="padding:12px 20px;border-top:1px solid var(--border);">
-      <button id="toggleSettingBtn" style="background:none;border:none;font-size:12px;color:var(--muted);cursor:pointer;font-family:inherit;">⚙ サロン設定 / パスワード変更</button>
+    <div style="padding:12px 20px;border-top:1px solid var(--bd);">
+      <button id="toggleSetBtn" style="background:none;border:none;font-size:12px;color:var(--mu);cursor:pointer;font-family:inherit;">⚙ サロン設定 / パスワード変更</button>
     </div>
-    <div class="setting-area" id="settingArea">
+    <div class="set-area" id="setArea">
       <h3>サロン情報</h3>
       <div class="fg"><label>店名</label><input id="epName"></div>
       <div class="fg"><label>メールアドレス</label><input id="epEmail"></div>
@@ -147,22 +138,15 @@ h2{font-size:17px;font-weight:600;color:var(--accent);text-align:center;margin-b
   </div>
 </div>
 <div class="toast" id="toast"></div>
-
 <script>
 var regTmp = { name: '', email: '' };
-var ALL_VIEWS = ['vLoading','vLogin','vReg','vSetPass','vVerifyWait','vForgot','vForgotSent'];
-
+var VIEWS = ['vLoading','vLogin','vReg','vSetPass','vVerifyWait','vForgot','vForgotSent'];
 function show(id) {
-  for (var i = 0; i < ALL_VIEWS.length; i++) {
-    var el = document.getElementById(ALL_VIEWS[i]);
-    if (el) el.style.display = 'none';
-  }
+  for (var i = 0; i < VIEWS.length; i++) { var el = document.getElementById(VIEWS[i]); if (el) el.style.display = 'none'; }
   document.getElementById('authWrap').style.display = 'block';
   document.getElementById('vDash').style.display = 'none';
-  var target = document.getElementById(id);
-  if (target) target.style.display = 'block';
+  var t = document.getElementById(id); if (t) t.style.display = 'block';
 }
-
 function enterDash(salon) {
   document.getElementById('authWrap').style.display = 'none';
   document.getElementById('vDash').style.display = 'block';
@@ -172,13 +156,12 @@ function enterDash(salon) {
   document.getElementById('epEmail').value = salon.email || '';
   document.getElementById('epNewPass').value = '';
 }
-
-function chkLogin() {
-  var e = gv('lEmail'), p = gv('lPass');
-  document.getElementById('loginBtn').disabled = !(e && p);
-  document.getElementById('loginErr').classList.remove('show');
-}
-
+function gv(id) { return document.getElementById(id).value.trim(); }
+function showErr(id, msg) { var el = document.getElementById(id); el.textContent = msg; el.classList.add('show'); }
+function hideErr(id) { document.getElementById(id).classList.remove('show'); }
+function togglePw(inputId, btn) { var el = document.getElementById(inputId); el.type = el.type === 'password' ? 'text' : 'password'; btn.textContent = el.type === 'password' ? '👁' : '🙈'; }
+function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 3000); }
+function chkLogin() { document.getElementById('loginBtn').disabled = !(gv('lEmail') && gv('lPass')); hideErr('loginErr'); }
 function doLogin() {
   var e = gv('lEmail'), p = gv('lPass');
   document.getElementById('loginBtn').disabled = true;
@@ -186,20 +169,11 @@ function doLogin() {
   dbAuthLogin(e, p, function(err, salon) {
     document.getElementById('loginBtn').disabled = false;
     document.getElementById('loginBtn').textContent = 'ログイン';
-    if (err) {
-      document.getElementById('loginErr').textContent = err.message;
-      document.getElementById('loginErr').classList.add('show');
-      return;
-    }
+    if (err) { showErr('loginErr', err.message); return; }
     enterDash(salon);
   });
 }
-
-function chkReg() {
-  document.getElementById('regBtn').disabled = !(gv('rName') && gv('rEmail'));
-  document.getElementById('regErr').classList.remove('show');
-}
-
+function chkReg() { document.getElementById('regBtn').disabled = !(gv('rName') && gv('rEmail')); hideErr('regErr'); }
 function goSetPass() {
   var n = gv('rName'), e = gv('rEmail');
   if (!n || !e) return;
@@ -207,12 +181,14 @@ function goSetPass() {
   document.getElementById('sp1').value = '';
   document.getElementById('sp2').value = '';
   document.getElementById('spBtn').disabled = true;
-  document.getElementById('strengthFill').style.width = '0%';
-  document.getElementById('spErr').classList.remove('show');
+  document.getElementById('strFill').style.width = '0%';
+  hideErr('spErr');
+  document.getElementById('pwRule').textContent = '8文字以上、英字・数字を含めてください';
+  document.getElementById('pwRule').className = 'pw-rule';
+  document.getElementById('pwMatchRule').textContent = '';
   show('vSetPass');
 }
-
-function checkPwStrength() {
+function chkPwStr() {
   var pw = gv('sp1'), r = validatePassword(pw);
   var s = 0;
   if (pw.length >= 8) s++;
@@ -220,16 +196,13 @@ function checkPwStrength() {
   if (/[0-9]/.test(pw)) s++;
   if (pw.length >= 12) s++;
   var cl = ['#ddd','#c47b7b','#d4b483','#7b9e87','#b5845a'];
-  document.getElementById('strengthFill').style.width = (s * 25) + '%';
-  document.getElementById('strengthFill').style.background = cl[s];
-  var rule = document.getElementById('pwRule');
-  rule.textContent = r.ok ? '✓ 使用できるパスワードです' : r.msg;
-  rule.className = r.ok ? 'pw-rule ok' : 'pw-rule';
-  checkPwMatch();
-  
+  document.getElementById('strFill').style.width = (s * 25) + '%';
+  document.getElementById('strFill').style.background = cl[s];
+  document.getElementById('pwRule').textContent = r.ok ? '✓ 使用できるパスワードです' : r.msg;
+  document.getElementById('pwRule').className = r.ok ? 'pw-rule ok' : 'pw-rule';
+  chkPwMatch();
 }
-
-function checkPwMatch() {
+function chkPwMatch() {
   var p1 = gv('sp1'), p2 = gv('sp2'), v1 = validatePassword(p1);
   var rule = document.getElementById('pwMatchRule');
   if (!p2) { rule.textContent = ''; document.getElementById('spBtn').disabled = true; return; }
@@ -238,37 +211,21 @@ function checkPwMatch() {
   rule.className = ok ? 'pw-rule ok' : 'pw-rule';
   document.getElementById('spBtn').disabled = !ok;
 }
-
-function completeRegister() {
-  var pw​​​​​​​​​​​​​​​​
-function checkPwMatch() {
-  var p1 = gv('sp1'), p2 = gv('sp2'), v1 = validatePassword(p1);
-  var rule = document.getElementById('pwMatchRule');
-  if (!p2) { rule.textContent = ''; document.getElementById('spBtn').disabled = true; return; }
-  var ok = p1 === p2 && v1.ok;
-  rule.textContent = ok ? '✓ パスワードが一致しています' : (p1 !== p2 ? 'パスワードが一致しません' : v1.msg);
-  rule.className = ok ? 'pw-rule ok' : 'pw-rule';
-  document.getElementById('spBtn').disabled = !ok;
-}
-function completeRegister() {
+function doRegister() {
   var pw = gv('sp1'), vr = validatePassword(pw);
-  if (!vr.ok) { showErrEl('spErr', vr.msg); return; }
-  if (pw !== gv('sp2')) { showErrEl('spErr', 'パスワードが一致しません'); return; }
+  if (!vr.ok) { showErr('spErr', vr.msg); return; }
+  if (pw !== gv('sp2')) { showErr('spErr', 'パスワードが一致しません'); return; }
   document.getElementById('spBtn').disabled = true;
   document.getElementById('spBtn').textContent = '登録中...';
   dbAuthRegister(regTmp.name, regTmp.email, pw, function(err, salon) {
     document.getElementById('spBtn').disabled = false;
     document.getElementById('spBtn').textContent = '登録を完了する';
-    if (err) {
-      showErrEl('spErr', err.message || '登録に失敗しました。もう一度お試しください。');
-      return;
-    }
+    if (err) { showErr('spErr', err.message || '登録に失敗しました'); return; }
     document.getElementById('vwEmail').textContent = regTmp.email;
-    document.getElementById('vwErr').classList.remove('show');
+    hideErr('vwErr');
     show('vVerifyWait');
   });
 }
-
 function checkEmailVerified() {
   var user = dbAuthGetCurrentUser();
   if (!user) { show('vLogin'); return; }
@@ -276,80 +233,52 @@ function checkEmailVerified() {
     var u = dbAuthGetCurrentUser();
     if (u && u.emailVerified) {
       dbGetSalon(function(salon) {
-        if (salon) { enterDash(salon); showToast('登録が完了しました！'); }
-        else { show('vLogin'); }
+        if (salon) { enterDash(salon); showToast('登録が完了しました！'); } else { show('vLogin'); }
       });
-    } else {
-      showErrEl('vwErr', 'まだメールが確認されていません。メールのリンクをクリックしてから再度お試しください。');
-    }
-  }).catch(function() {
-    showErrEl('vwErr', '確認に失敗しました。もう一度お試しください。');
-  });
+    } else { showErr('vwErr', 'まだ確認されていません。メールのリンクをクリックしてから再度タップしてください。'); }
+  }).catch(function() { showErr('vwErr', '確認に失敗しました。もう一度お試しください。'); });
 }
-
 function resendVerifyEmail() {
   var user = dbAuthGetCurrentUser();
   if (!user) return;
-  user.sendEmailVerification().then(function() {
-    showToast('確認メールを再送信しました');
-  }).catch(function() {
-    showToast('再送信に失敗しました');
-  });
+  user.sendEmailVerification().then(function() { showToast('確認メールを再送信しました'); }).catch(function() { showToast('再送信に失敗しました'); });
 }
-
-function chkForgot() {
-  document.getElementById('fgBtn').disabled = !gv('fgEmail');
-  document.getElementById('fgErr').classList.remove('show');
-}
-
-function goForgotVerify() {
+function chkForgot() { document.getElementById('fgBtn').disabled = !gv('fgEmail'); hideErr('fgErr'); }
+function doForgot() {
   var e = gv('fgEmail');
   document.getElementById('fgBtn').disabled = true;
   document.getElementById('fgBtn').textContent = '送信中...';
   dbAuthSendPasswordReset(e, function(err) {
     document.getElementById('fgBtn').disabled = false;
     document.getElementById('fgBtn').textContent = '再設定メールを送る';
-    if (err) {
-      document.getElementById('fgErr').textContent = err.message;
-      document.getElementById('fgErr').classList.add('show');
-      return;
-    }
+    if (err) { showErr('fgErr', err.message); return; }
     show('vForgotSent');
   });
 }
-
-function toggleSetting() {
-  var a = document.getElementById('settingArea');
-  a.style.display = a.style.display === 'block' ? 'none' : 'block';
-}
-
+function toggleSetting() { var a = document.getElementById('setArea'); a.style.display = a.style.display === 'block' ? 'none' : 'block'; }
 function saveProfile() {
-  var n = gv('epName'), e = gv('epEmail');
-  var newPw = document.getElementById('epNewPass').value;
-  if (!n || !e) { showErrEl('epErr', '店名とメールを入力してください'); return; }
+  var n = gv('epName'), e = gv('epEmail'), pw = document.getElementById('epNewPass').value;
+  if (!n || !e) { showErr('epErr', '店名とメールを入力してください'); return; }
   var user = dbAuthGetCurrentUser();
-  if (!user) { showErrEl('epErr', 'ログインし直してください'); return; }
-  if (newPw) {
-    var vr = validatePassword(newPw);
-    if (!vr.ok) { showErrEl('epErr', vr.msg); return; }
-    user.updatePassword(newPw).catch(function() {
-      showErrEl('epErr', 'パスワード変更に失敗しました。再ログインして試してください。');
-    });
+  if (!user) { showErr('epErr', 'ログインし直してください'); return; }
+  if (pw) {
+    var vr = validatePassword(pw);
+    if (!vr.ok) { showErr('epErr', vr.msg); return; }
+    user.updatePassword(pw).catch(function() { showErr('epErr', 'パスワード変更に失敗しました。再ログインして試してください。'); });
   }
   dbGetSalon(function(salon) {
     if (!salon) return;
     salon.name = n; salon.email = e;
     dbSaveSalon(salon, function(err) {
-      if (err) { showErrEl('epErr', '保存に失敗しました'); return; }
+      if (err) { showErr('epErr', '保存に失敗しました'); return; }
       document.getElementById('dName').textContent = n;
       document.getElementById('dEmail').textContent = e;
       document.getElementById('epNewPass').value = '';
-      document.getElementById('epErr').classList.remove('show');
+      hideErr('epErr');
       showToast('保存しました');
     });
   });
 }
-
 function doLogout() {
   dbLogout();
   document.getElementById('vDash').style.display = 'none';
@@ -360,75 +289,48 @@ function doLogout() {
   show('vLogin');
   showToast('ログアウトしました');
 }
-
-function gv(id) { return document.getElementById(id).value.trim(); }
-function showErrEl(id, msg) { var el = document.getElementById(id); el.textContent = msg; el.classList.add('show'); }
-function togglePw(inputId, btn) {
-  var el = document.getElementById(inputId);
-  el.type = el.type === 'password' ? 'text' : 'password';
-  btn.textContent = el.type === 'password' ? '👁' : '🙈';
-}
-function showToast(msg) {
-  var t = document.getElementById('toast');
-  t.textContent = msg; t.classList.add('show');
-  setTimeout(function() { t.classList.remove('show'); }, 3000);
-}
-
 setTimeout(function() {
   var loading = document.getElementById('vLoading');
-  if (loading && loading.style.display !== 'none') {
-    for (var i = 0; i < ALL_VIEWS.length; i++) {
-      var el = document.getElementById(ALL_VIEWS[i]);
-      if (el) el.style.display = 'none';
-    }
-    document.getElementById('authWrap').style.display = 'block';
-    document.getElementById('vDash').style.display = 'none';
-    document.getElementById('vLogin').style.display = 'block';
-  }
-}, 3000);
-
+  if (loading && loading.style.display !== 'none') { show('vLogin'); }
+}, 4000);
 onFbReady(function() {
   dbAuthOnStateChanged(function(user) {
     if (user) {
       setCurrentSalonId(user.uid);
       if (!user.emailVerified) {
         document.getElementById('vwEmail').textContent = user.email;
-        document.getElementById('vwErr').classList.remove('show');
+        hideErr('vwErr');
         show('vVerifyWait');
       } else {
-        dbGetSalon(function(salon) {
-          if (salon) { enterDash(salon); } else { show('vLogin'); }
-        });
+        dbGetSalon(function(salon) { if (salon) { enterDash(salon); } else { show('vLogin'); } });
       }
-    } else {
-      show('vLogin');
-    }
+    } else { show('vLogin'); }
   });
-
   document.getElementById('lEmail').addEventListener('input', chkLogin);
   document.getElementById('lPass').addEventListener('input', chkLogin);
   document.getElementById('loginBtn').addEventListener('click', doLogin);
   document.getElementById('lPassEye').addEventListener('click', function() { togglePw('lPass', this); });
+  document.getElementById('toForgotBtn').addEventListener('click', function() { show('vForgot'); });
   document.getElementById('toRegBtn').addEventListener('click', function() { show('vReg'); });
-  document.getElementById('toLoginFromRegBtn').addEventListener('click', function() { show('vLogin'); });
   document.getElementById('rName').addEventListener('input', chkReg);
   document.getElementById('rEmail').addEventListener('input', chkReg);
   document.getElementById('regBtn').addEventListener('click', goSetPass);
-  document.getElementById('sp1').addEventListener('input', checkPwStrength);
-  document.getElementById('sp2').addEventListener('input', checkPwMatch);
+  document.getElementById('toLoginFromRegBtn').addEventListener('click', function() { show('vLogin'); });
+  document.getElementById('sp1').addEventListener('input', chkPwStr);
+  document.getElementById('sp2').addEventListener('input', chkPwMatch);
   document.getElementById('sp1Eye').addEventListener('click', function() { togglePw('sp1', this); });
   document.getElementById('sp2Eye').addEventListener('click', function() { togglePw('sp2', this); });
-  document.getElementById('spBtn').addEventListener('click', completeRegister);
+  document.getElementById('spBtn').addEventListener('click', doRegister);
+  document.getElementById('toRegFromPassBtn').addEventListener('click', function() { show('vReg'); });
   document.getElementById('vwCheckBtn').addEventListener('click', checkEmailVerified);
   document.getElementById('vwResendBtn').addEventListener('click', resendVerifyEmail);
-  document.getElementById('vwLogoutBtn').addEventListener('click', function() { dbLogout(); show('vLogin'); });
+  document.getElementById('vwCancelBtn').addEventListener('click', function() { dbLogout(); show('vLogin'); });
   document.getElementById('fgEmail').addEventListener('input', chkForgot);
-  document.getElementById('fgBtn').addEventListener('click', goForgotVerify);
-  document.getElementById('toForgotBtn').addEventListener('click', function() { show('vForgot'); });
+  document.getElementById('fgBtn').addEventListener('click', doForgot);
   document.getElementById('toLoginFromForgotBtn').addEventListener('click', function() { show('vLogin'); });
   document.getElementById('toLoginFromSentBtn').addEventListener('click', function() { show('vLogin'); });
   document.getElementById('logoutBtn').addEventListener('click', doLogout);
-  document.getElementById('toggleSettingBtn').addEventListener('click', toggleSetting);
+  document.getElementById('toggleSetBtn').addEventListener('click', toggleSetting);
   document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
 });
 </script>
