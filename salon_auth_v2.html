@@ -423,26 +423,46 @@ function showToast(msg) {
   setTimeout(function() { t.classList.remove('show'); }, 3000);
 }
 
+// onFbReadyが呼ばれない場合のフォールバック（8秒後）
+setTimeout(function() {
+  var loading = document.getElementById('vLoading');
+  if (loading && loading.style.display !== 'none') {
+    console.log('FALLBACK: onFbReady never called');
+    document.getElementById('vLoading').style.display = 'none';
+    document.getElementById('vLogin').style.display = 'block';
+  }
+}, 8000);
+
 // イベントリスナー設定
 onFbReady(function() {
   // Firebase Auth の状態監視（自動ログイン）
   // タイムアウト保険：5秒以内に応答がなければログイン画面を表示
   var authResolved = false;
   setTimeout(function() {
-    if (!authResolved) { show('vLogin'); }
-  }, 5000);
-
-  dbAuthOnStateChanged(function(user) {
-    authResolved = true;
-    if (user) {
-      setCurrentSalonId(user.uid);
-      dbGetSalon(function(salon) {
-        if (salon) { enterDash(salon); } else { show('vLogin'); }
-      });
-    } else {
+    if (!authResolved) {
+      console.log('AUTH TIMEOUT: forcing login screen');
       show('vLogin');
     }
-  });
+  }, 5000);
+
+  try {
+    dbAuthOnStateChanged(function(user) {
+      console.log('AUTH STATE CHANGED: user=', user ? user.email : 'null');
+      authResolved = true;
+      if (user) {
+        setCurrentSalonId(user.uid);
+        dbGetSalon(function(salon) {
+          console.log('GOT SALON:', salon);
+          if (salon) { enterDash(salon); } else { show('vLogin'); }
+        });
+      } else {
+        show('vLogin');
+      }
+    });
+  } catch(e) {
+    console.log('AUTH ERROR:', e);
+    show('vLogin');
+  }
 
   // ログイン
   document.getElementById('lEmail').addEventListener('input', chkLogin);
