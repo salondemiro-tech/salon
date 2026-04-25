@@ -462,14 +462,21 @@ function showToast(msg) {
   setTimeout(function() { t.classList.remove('show'); }, 3000);
 }
 
-// onFbReadyが呼ばれない場合のフォールバック（3秒後）
+// onFbReadyが呼ばれない場合のフォールバック（2秒後）
 setTimeout(function() {
   var loading = document.getElementById('vLoading');
   if (loading && loading.style.display !== 'none') {
-    document.getElementById('vLoading').style.display = 'none';
+    var all = ['vLoading','vLogin','vReg','vVerify','vSetPass','vVerifyWait','vForgot','vForgotSent','vForgotVerify','vResetPass'];
+    for (var i = 0; i < all.length; i++) {
+      var el = document.getElementById(all[i]);
+      if (el) el.style.display = 'none';
+    }
+    document.getElementById('authWrap').style.display = 'block';
+    var vDash = document.getElementById('vDash');
+    if (vDash) vDash.style.display = 'none';
     document.getElementById('vLogin').style.display = 'block';
   }
-}, 3000);
+}, 2000);
 
 // イベントリスナー設定
 onFbReady(function() {
