@@ -470,33 +470,31 @@ function doLogin() {
   document.getElementById('loginBtn').textContent = '確認中...';
   authInitialized = true;
   window.auth.signInWithEmailAndPassword(e, p)
-    .then(function(cred) {
-      // サロンIDを確保してからデータ取得
-      function afterSalonId() {
-        loadAllData(function() {
-          dbFindCustomer({ email: e }, function(found) {
-            document.getElementById('loginBtn').disabled = false;
-            document.getElementById('loginBtn').textContent = 'ログイン';
-            if (found) {
-              custId = found.id; st.name = found.name; st.phone = found.phone; st.email = found.email;
-              goScreen('s-s3');
-            } else {
-              authInitialized = false;
-              window.auth.signOut();
-              document.getElementById('loginErr').textContent = '顧客情報が見つかりません';
-              document.getElementById('loginErr').classList.add('show');
-              goScreen('s-s1');
-            }
-          });
-        });
+    .then(function() {
+      // cachedCustomersからメールで顧客を探す
+      var cust = null;
+      for (var i = 0; i < cachedCustomers.length; i++) {
+        if (cachedCustomers[i].email === e) { cust = cachedCustomers[i]; break; }
       }
-      if (!getCurrentSalonId()) {
-        window.db.collection('salons').limit(1).get().then(function(snap) {
-          if (!snap.empty) setCurrentSalonId(snap.docs[0].id || snap.docs[0].data().id);
-          afterSalonId();
-        }).catch(function() { afterSalonId(); });
+      document.getElementById('loginBtn').disabled = false;
+      document.getElementById('loginBtn').textContent = 'ログイン';
+      if (cust) {
+        custId = cust.id; st.name = cust.name; st.phone = cust.phone; st.email = cust.email;
+        goScreen('s-s3');
       } else {
-        afterSalonId();
+        // キャッシュにない場合はFirestoreから直接取得
+        var salonId = getCurrentSalonId();
+        if (!salonId) { goScreen('s-s3'); return; }
+        window.db.collection('salons').doc(salonId).collection('customers')
+          .where('email', '==', e).limit(1).get()
+          .then(function(snap) {
+            if (!snap.empty) {
+              var c = snap.docs[0].data();
+              custId = c.id; st.name = c.name; st.phone = c.phone; st.email = c.email;
+              cachedCustomers.push(c);
+            }
+            goScreen('s-s3');
+          }).catch(function() { goScreen('s-s3'); });
       }
     })
     .catch(function(err) {
@@ -538,7 +536,8 @@ function chkReg() {
   document.getElementById('regBtn').disabled = !ok;
   document.getElementById('regErr').classList.remove('show');
 }
-  function doRegister() {
+
+function doRegister() {
   var sei = document.getElementById('rSei').value.trim();
   var mei = document.getElementById('rMei').value.trim();
   var phone = document.getElementById('rPhone').value.trim();
@@ -1011,25 +1010,36 @@ onFbReady(function() {
     }
   }
 
-  // Firebase Auth 状態監視（自動ログイン）
+  // Firebase Auth 状態監視（自動ログイン・リロード時）
   window.auth.onAuthStateChanged(function(user) {
     if (authInitialized) return;
     authInitialized = true;
-    loadAllData(function() {
-      if (user) {
-        dbFindCustomer({ email: user.email }, function(found) {
-          if (found) {
-            custId = found.id; st.name = found.name; st.phone = found.phone; st.email = found.email;
-            goScreen('s-s3');
-          } else {
-            if (window.auth) window.auth.signOut();
-            goScreen('s-s1');
-          }
-        });
-      } else {
-        goScreen('s-s1');
-      }
-    });
+    if (!user) { goScreen('s-s1'); return; }
+    // サロンIDを確保してからデータ読み込み
+    function afterSalonId() {
+      loadAllData(function() {
+        var email = user.email;
+        var cust = null;
+        for (var i = 0; i < cachedCustomers.length; i++) {
+          if (cachedCustomers[i].email === email) { cust = cachedCustomers[i]; break; }
+        }
+        if (cust) {
+          custId = cust.id; st.name = cust.name; st.phone = cust.phone; st.email = cust.email;
+          goScreen('s-s3');
+        } else {
+          window.auth.signOut();
+          goScreen('s-s1');
+        }
+      });
+    }
+    if (!getCurrentSalonId()) {
+      window.db.collection('salons').limit(1).get().then(function(snap) {
+        if (!snap.empty) setCurrentSalonId(snap.docs[0].id || snap.docs[0].data().id);
+        afterSalonId();
+      }).catch(function() { afterSalonId(); });
+    } else {
+      afterSalonId();
+    }
   });
 
   // ログイン
