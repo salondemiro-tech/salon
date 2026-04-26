@@ -143,6 +143,7 @@ var regTmp = { name: '', email: '' };
 var VIEWS = ['vLoading','vLogin','vReg','vSetPass','vVerifyWait','vForgot','vForgotSent'];
 function show(id) {
   for (var i = 0; i < VIEWS.length; i++) { var el = document.getElementById(VIEWS[i]); if (el) el.style.display = 'none'; }
+  if (id === 'vLogin') { startAutoFillCheck(); }
   document.getElementById('authWrap').style.display = 'block';
   document.getElementById('vDash').style.display = 'none';
   var t = document.getElementById(id); if (t) t.style.display = 'block';
