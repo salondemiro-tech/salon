@@ -61,7 +61,10 @@ var FIREBASE_CONFIG = {
 var SALON_ID_KEY = 'salon_current_id';
 
 function getCurrentSalonId() {
-  return localStorage.getItem(SALON_ID_KEY) || null;
+  var id = localStorage.getItem(SALON_ID_KEY);
+  if (id) return id;
+  // localStorageにない場合は固定サロンIDを返す
+  return 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
 }
 function setCurrentSalonId(id) {
   localStorage.setItem(SALON_ID_KEY, id);
