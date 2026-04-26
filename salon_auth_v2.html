@@ -141,18 +141,12 @@ h2{font-size:17px;font-weight:600;color:var(--ac);text-align:center;margin-botto
 <script>
 var regTmp = { name: '', email: '' };
 var VIEWS = ['vLoading','vLogin','vReg','vSetPass','vVerifyWait','vForgot','vForgotSent'];
-
 function show(id) {
-  for (var i = 0; i < VIEWS.length; i++) {
-    var el = document.getElementById(VIEWS[i]);
-    if (el) el.style.display = 'none';
-  }
+  for (var i = 0; i < VIEWS.length; i++) { var el = document.getElementById(VIEWS[i]); if (el) el.style.display = 'none'; }
   document.getElementById('authWrap').style.display = 'block';
   document.getElementById('vDash').style.display = 'none';
-  var t = document.getElementById(id);
-  if (t) t.style.display = 'block';
+  var t = document.getElementById(id); if (t) t.style.display = 'block';
 }
-
 function enterDash(salon) {
   document.getElementById('authWrap').style.display = 'none';
   document.getElementById('vDash').style.display = 'block';
@@ -162,14 +156,12 @@ function enterDash(salon) {
   document.getElementById('epEmail').value = salon.email || '';
   document.getElementById('epNewPass').value = '';
 }
-
 function gv(id) { return document.getElementById(id).value.trim(); }
 function showErr(id, msg) { var el = document.getElementById(id); el.textContent = msg; el.classList.add('show'); }
 function hideErr(id) { document.getElementById(id).classList.remove('show'); }
 function togglePw(inputId, btn) { var el = document.getElementById(inputId); el.type = el.type === 'password' ? 'text' : 'password'; btn.textContent = el.type === 'password' ? '👁' : '🙈'; }
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 3000); }
-
-// ログインボタンはdisabledなし。押したときに値を確認する
+function chkLogin() { document.getElementById('loginBtn').disabled = !(gv('lEmail') && gv('lPass')); hideErr('loginErr'); }
 function doLogin() {
   var e = gv('lEmail'), p = gv('lPass');
   if (!e || !p) { showErr('loginErr', 'メールアドレスとパスワードを入力してください'); return; }
@@ -183,9 +175,7 @@ function doLogin() {
     enterDash(salon);
   });
 }
-
 function chkReg() { document.getElementById('regBtn').disabled = !(gv('rName') && gv('rEmail')); hideErr('regErr'); }
-
 function goSetPass() {
   var n = gv('rName'), e = gv('rEmail');
   if (!n || !e) return;
@@ -200,7 +190,6 @@ function goSetPass() {
   document.getElementById('pwMatchRule').textContent = '';
   show('vSetPass');
 }
-
 function chkPwStr() {
   var pw = gv('sp1'), r = validatePassword(pw);
   var s = 0;
@@ -215,7 +204,6 @@ function chkPwStr() {
   document.getElementById('pwRule').className = r.ok ? 'pw-rule ok' : 'pw-rule';
   chkPwMatch();
 }
-
 function chkPwMatch() {
   var p1 = gv('sp1'), p2 = gv('sp2'), v1 = validatePassword(p1);
   var rule = document.getElementById('pwMatchRule');
@@ -225,7 +213,6 @@ function chkPwMatch() {
   rule.className = ok ? 'pw-rule ok' : 'pw-rule';
   document.getElementById('spBtn').disabled = !ok;
 }
-
 function doRegister() {
   var pw = gv('sp1'), vr = validatePassword(pw);
   if (!vr.ok) { showErr('spErr', vr.msg); return; }
@@ -241,7 +228,6 @@ function doRegister() {
     show('vVerifyWait');
   });
 }
-
 function checkEmailVerified() {
   var user = dbAuthGetCurrentUser();
   if (!user) { show('vLogin'); return; }
@@ -254,15 +240,12 @@ function checkEmailVerified() {
     } else { showErr('vwErr', 'まだ確認されていません。メールのリンクをクリックしてから再度タップしてください。'); }
   }).catch(function() { showErr('vwErr', '確認に失敗しました。もう一度お試しください。'); });
 }
-
 function resendVerifyEmail() {
   var user = dbAuthGetCurrentUser();
   if (!user) return;
   user.sendEmailVerification().then(function() { showToast('確認メールを再送信しました'); }).catch(function() { showToast('再送信に失敗しました'); });
 }
-
 function chkForgot() { document.getElementById('fgBtn').disabled = !gv('fgEmail'); hideErr('fgErr'); }
-
 function doForgot() {
   var e = gv('fgEmail');
   document.getElementById('fgBtn').disabled = true;
@@ -274,12 +257,7 @@ function doForgot() {
     show('vForgotSent');
   });
 }
-
-function toggleSetting() {
-  var a = document.getElementById('setArea');
-  a.style.display = a.style.display === 'block' ? 'none' : 'block';
-}
-
+function toggleSetting() { var a = document.getElementById('setArea'); a.style.display = a.style.display === 'block' ? 'none' : 'block'; }
 function saveProfile() {
   var n = gv('epName'), e = gv('epEmail'), pw = document.getElementById('epNewPass').value;
   if (!n || !e) { showErr('epErr', '店名とメールを入力してください'); return; }
@@ -303,53 +281,23 @@ function saveProfile() {
     });
   });
 }
-
 function doLogout() {
   dbLogout();
   document.getElementById('vDash').style.display = 'none';
   document.getElementById('authWrap').style.display = 'block';
   document.getElementById('lEmail').value = '';
   document.getElementById('lPass').value = '';
+  document.getElementById('loginBtn').disabled = true;
   show('vLogin');
   showToast('ログアウトしました');
 }
-
-// ========================================
-// イベントリスナー登録（Firebaseと完全に切り離す）
-// ========================================
-document.getElementById('loginBtn').addEventListener('click', doLogin);
-document.getElementById('lPassEye').addEventListener('click', function() { togglePw('lPass', this); });
-document.getElementById('toForgotBtn').addEventListener('click', function() { show('vForgot'); });
-document.getElementById('toRegBtn').addEventListener('click', function() { show('vReg'); });
-document.getElementById('rName').addEventListener('input', chkReg);
-document.getElementById('rEmail').addEventListener('input', chkReg);
-document.getElementById('regBtn').addEventListener('click', goSetPass);
-document.getElementById('toLoginFromRegBtn').addEventListener('click', function() { show('vLogin'); });
-document.getElementById('sp1').addEventListener('input', chkPwStr);
-document.getElementById('sp2').addEventListener('input', chkPwMatch);
-document.getElementById('sp1Eye').addEventListener('click', function() { togglePw('sp1', this); });
-document.getElementById('sp2Eye').addEventListener('click', function() { togglePw('sp2', this); });
-document.getElementById('spBtn').addEventListener('click', doRegister);
-document.getElementById('toRegFromPassBtn').addEventListener('click', function() { show('vReg'); });
-document.getElementById('vwCheckBtn').addEventListener('click', checkEmailVerified);
-document.getElementById('vwResendBtn').addEventListener('click', resendVerifyEmail);
-document.getElementById('vwCancelBtn').addEventListener('click', function() { dbLogout(); show('vLogin'); });
-document.getElementById('fgEmail').addEventListener('input', chkForgot);
-document.getElementById('fgBtn').addEventListener('click', doForgot);
-document.getElementById('toLoginFromForgotBtn').addEventListener('click', function() { show('vLogin'); });
-document.getElementById('toLoginFromSentBtn').addEventListener('click', function() { show('vLogin'); });
-document.getElementById('logoutBtn').addEventListener('click', doLogout);
-document.getElementById('toggleSetBtn').addEventListener('click', toggleSetting);
-document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
-
-// ========================================
-// Firebase認証（Firebaseが必要な処理だけここ）
-// ========================================
 setTimeout(function() {
   var loading = document.getElementById('vLoading');
   if (loading && loading.style.display !== 'none') { show('vLogin'); }
 }, 4000);
-
+document.getElementById('lEmail').addEventListener('input', chkLogin);
+  document.getElementById('lPass').addEventListener('input', chkLogin);
+  document.getElementById('loginBtn').addEventListener('click', doLogin);
 onFbReady(function() {
   dbAuthOnStateChanged(function(user) {
     if (user) {
@@ -359,14 +307,33 @@ onFbReady(function() {
         hideErr('vwErr');
         show('vVerifyWait');
       } else {
-        dbGetSalon(function(salon) {
-          if (salon) { enterDash(salon); } else { show('vLogin'); }
-        });
+        dbGetSalon(function(salon) { if (salon) { enterDash(salon); } else { show('vLogin'); } });
       }
-    } else {
-      show('vLogin');
-    }
+    } else { show('vLogin'); }
   });
+  document.getElementById('lPassEye').addEventListener('click', function() { togglePw('lPass', this); });
+  document.getElementById('toForgotBtn').addEventListener('click', function() { show('vForgot'); });
+  document.getElementById('toRegBtn').addEventListener('click', function() { show('vReg'); });
+  document.getElementById('rName').addEventListener('input', chkReg);
+  document.getElementById('rEmail').addEventListener('input', chkReg);
+  document.getElementById('regBtn').addEventListener('click', goSetPass);
+  document.getElementById('toLoginFromRegBtn').addEventListener('click', function() { show('vLogin'); });
+  document.getElementById('sp1').addEventListener('input', chkPwStr);
+  document.getElementById('sp2').addEventListener('input', chkPwMatch);
+  document.getElementById('sp1Eye').addEventListener('click', function() { togglePw('sp1', this); });
+  document.getElementById('sp2Eye').addEventListener('click', function() { togglePw('sp2', this); });
+  document.getElementById('spBtn').addEventListener('click', doRegister);
+  document.getElementById('toRegFromPassBtn').addEventListener('click', function() { show('vReg'); });
+  document.getElementById('vwCheckBtn').addEventListener('click', checkEmailVerified);
+  document.getElementById('vwResendBtn').addEventListener('click', resendVerifyEmail);
+  document.getElementById('vwCancelBtn').addEventListener('click', function() { dbLogout(); show('vLogin'); });
+  document.getElementById('fgEmail').addEventListener('input', chkForgot);
+  document.getElementById('fgBtn').addEventListener('click', doForgot);
+  document.getElementById('toLoginFromForgotBtn').addEventListener('click', function() { show('vLogin'); });
+  document.getElementById('toLoginFromSentBtn').addEventListener('click', function() { show('vLogin'); });
+  document.getElementById('logoutBtn').addEventListener('click', doLogout);
+  document.getElementById('toggleSetBtn').addEventListener('click', toggleSetting);
+  document.getElementById('saveProfileBtn').addEventListener('click', saveProfile);
 });
 </script>
 </body>
