@@ -91,6 +91,7 @@
   .modal input,.modal select{width:100%;padding:6px 9px;border-radius:6px;border:1px solid var(--border);font-size:12px;font-family:inherit;}
   .tr{display:flex;gap:6px;align-items:center;}.tr input{flex:1;}.tr span{font-size:11px;color:var(--muted);}
   .modal-actions{display:flex;gap:8px;margin-top:14px;}
+  .dp-btn.visited{background:#7b9e87;color:#fff;border:none;}
   .mb{flex:1;padding:7px;border-radius:7px;font-size:12px;border:1px solid var(--border);cursor:pointer;background:none;color:var(--text);font-family:inherit;}
   .mb.primary{background:var(--accent);color:#fff;border-color:var(--accent);}
   .mb.danger-btn{background:var(--cb);color:#fff;border-color:var(--cb);}
@@ -335,9 +336,11 @@ function showAppt(appt) {
     + '<div class="dp-field"><label>メモ</label><div class="val">' + (appt.memo || '（なし）') + '</div></div>'
     + '<div class="dp-actions">'
     + '<button class="dp-btn primary" id="dpChangeBtn">変更する</button>'
+    + '<button class="dp-btn visited" id="dpVisitedBtn">来店済み</button>'
     + '<button class="dp-btn danger" id="dpCancelBtn">キャンセル処理</button>'
     + '</div>';
   document.getElementById('dpChangeBtn').addEventListener('click', function() { openChangeById(appt.id); });
+  document.getElementById('dpVisitedBtn').addEventListener('click', function() { visitedAppt(appt.id); });
   document.getElementById('dpCancelBtn').addEventListener('click', function() { cancelAppt(appt.id); });
   document.getElementById('dp').classList.add('open');
 }
@@ -376,6 +379,16 @@ function saveInterval(id, forceVal) {
     closeDP(); renderCal();
   });
 }
+function visitedAppt(id) {
+  if (confirm('来店済みにしますか？')) {
+    dbUpdateAppointment(id, { status: 'visited' }, function(err) {
+      if (err) { showToast('エラーが発生しました'); return; }
+      for (var i = 0; i < cachedAppointments.length; i++) { if (cachedAppointments[i].id === id) { cachedAppointments[i].status = 'visited'; break; } }
+      closeDP(); renderCal(); showToast('来店済みにしました');
+    });
+  }
+}
+
 function cancelAppt(id) {
   if (confirm('この予約をキャンセルしますか？')) {
     dbCancelAppointment(id, function(err) {
