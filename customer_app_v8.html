@@ -509,13 +509,13 @@ function doForgot() {
       document.getElementById('fgErr').classList.add('show');
       document.getElementById('fgBtn').disabled = false;
     });
-}
+  }
 
 // ===== 新規登録 =====
 function chkReg() {
   var ok = document.getElementById('rSei').value.trim()
     && document.getElementById('rMei').value.trim()
-  && document.getElementById('rPhone').value.trim()
+    && document.getElementById('rPhone').value.trim()
     && document.getElementById('rEmail').value.trim()
     && document.getElementById('rPass').value
     && document.getElementById('rPass2').value;
@@ -922,43 +922,32 @@ function doLogout() {
 }
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 3000); }
 
-// ===== 初期化 =====
-onFbReady(function() {
-  // サロンIDを確保してから全データ読み込み
-  function loadAllData(cb) {
-    function doLoad() {
-      dbGetSettings(function(s) { cachedSettings = s;
-        dbGetMenus(function(m) { cachedMenus = m;
-          dbGetCustomers(function(c) { cachedCustomers = c;
-            dbGetAppointments(function(a) { cachedAppointments = a;
-              dbGetCloseBlocks(function(b) { cachedCloseBlocks = b;
-                dbGetSalon(function(salon) { cachedSalon = salon;
-                  if (salon && salon.name) document.getElementById('salonNameLogin').textContent = salon.name;
-                  dbGetStampCard(function(sc) { cachedStampCard = sc;
-                    dbGetCancelPolicy(function(pol) { cachedCancelPolicy = pol;
-                      if (cb) cb();
-                    });
-                  });
+// ===== 全データ読み込み（グローバル関数） =====
+function loadAllData(cb) {
+  dbGetSettings(function(s) { cachedSettings = s;
+    dbGetMenus(function(m) { cachedMenus = m;
+      dbGetCustomers(function(c) { cachedCustomers = c;
+        dbGetAppointments(function(a) { cachedAppointments = a;
+          dbGetCloseBlocks(function(b) { cachedCloseBlocks = b;
+            dbGetSalon(function(salon) { cachedSalon = salon;
+              if (salon && salon.name) document.getElementById('salonNameLogin').textContent = salon.name;
+              dbGetStampCard(function(sc) { cachedStampCard = sc;
+                dbGetCancelPolicy(function(pol) { cachedCancelPolicy = pol;
+                  if (cb) cb();
                 });
               });
             });
           });
         });
       });
-    }
-    var salonId = getCurrentSalonId();
-    if (!salonId) {
-      window.db.collection('salons').limit(1).get().then(function(snap) {
-        if (!snap.empty) {
-          var doc = snap.docs[0];
-          setCurrentSalonId(doc.id);
-        }
-        doLoad();
-      }).catch(function() { doLoad(); });
-    } else {
-      doLoad();
-    }
-  }
+    });
+  });
+}
+
+// ===== 初期化 =====
+onFbReady(function() {
+  // 顧客アプリは常にサロンIDを固定で使用
+  setCurrentSalonId('Ej3SdlceD3PZYJWd9t2dwZLHvx32');
 
   // Firebase Auth 状態監視（ページ読み込み時の自動ログイン判定）
   window.auth.onAuthStateChanged(function(user) {
