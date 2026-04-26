@@ -427,7 +427,7 @@ function canBook(ds, sm, td, excId) {
   for (var j = 0; j < wc.length; j++) { if (wc[j].dow === dow) { var ws = toMin(wc[j].start), we = toMin(wc[j].end); if (sm < we && em > ws) return { ok: false, reason: '定期クローズ' }; } }
   for (var k = 0; k < bl.length; k++) { if (bl[k].date === ds) { var bs = toMin(bl[k].start), be = toMin(bl[k].end); if (sm < be && em > bs) return { ok: false, reason: 'クローズ時間' }; } }
   for (var l = 0; l < a.length; l++) {
-    if (a[l].status !== 'active') continue;
+    if (a[l].status !== 'active' && a[l].status !== 'visited') continue;
     if (a[l].id === excId) continue;
     if (a[l].date === ds) { var as2 = toMin(a[l].start), ae2 = as2 + a[l].durationMin + a[l].intervalMin; if (sm < ae2 && em + (s.intervalMin || 0) > as2) return { ok: false, reason: '予約済み' }; }
   }
