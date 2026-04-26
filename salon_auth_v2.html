@@ -310,18 +310,6 @@ onFbReady(function() {
   document.getElementById('lEmail').addEventListener('input', chkLogin);
   document.getElementById('lPass').addEventListener('input', chkLogin);
   document.getElementById('loginBtn').addEventListener('click', doLogin);
-  // オートフィル対応
-  var afCount = 0;
-  var afTimer = setInterval(function() {
-    var em = document.getElementById('lEmail');
-    var ps = document.getElementById('lPass');
-    if (em && ps && em.value.trim() && ps.value.trim()) {
-      document.getElementById('loginBtn').disabled = false;
-      clearInterval(afTimer);
-    }
-    afCount++;
-    if (afCount > 30) { clearInterval(afTimer); }
-  }, 300);
   document.getElementById('lPassEye').addEventListener('click', function() { togglePw('lPass', this); });
   document.getElementById('toForgotBtn').addEventListener('click', function() { show('vForgot'); });
   document.getElementById('toRegBtn').addEventListener('click', function() { show('vReg'); });
