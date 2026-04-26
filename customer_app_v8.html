@@ -471,25 +471,32 @@ function doLogin() {
   authInitialized = true;
   window.auth.signInWithEmailAndPassword(e, p)
     .then(function(cred) {
-      var uid = cred.user.uid;
-      // 顧客データを取得
-      var cust = null;
-      for (var i = 0; i < cachedCustomers.length; i++) {
-        if (cachedCustomers[i].authUid === uid || cachedCustomers[i].email === e) {
-          cust = cachedCustomers[i]; break;
-        }
-      }
-      if (cust) {
-        custId = cust.id; st.name = cust.name; st.phone = cust.phone; st.email = cust.email;
-        goScreen('s-s3');
-      } else {
-        // 顧客データがない場合はメールで検索
-        dbFindCustomer({ email: e }, function(found) {
-          if (found) {
-            custId = found.id; st.name = found.name; st.phone = found.phone; st.email = found.email;
-          }
-          goScreen('s-s3');
+      // サロンIDを確保してからデータ取得
+      function afterSalonId() {
+        loadAllData(function() {
+          dbFindCustomer({ email: e }, function(found) {
+            document.getElementById('loginBtn').disabled = false;
+            document.getElementById('loginBtn').textContent = 'ログイン';
+            if (found) {
+              custId = found.id; st.name = found.name; st.phone = found.phone; st.email = found.email;
+              goScreen('s-s3');
+            } else {
+              authInitialized = false;
+              window.auth.signOut();
+              document.getElementById('loginErr').textContent = '顧客情報が見つかりません';
+              document.getElementById('loginErr').classList.add('show');
+              goScreen('s-s1');
+            }
+          });
         });
+      }
+      if (!getCurrentSalonId()) {
+        window.db.collection('salons').limit(1).get().then(function(snap) {
+          if (!snap.empty) setCurrentSalonId(snap.docs[0].id || snap.docs[0].data().id);
+          afterSalonId();
+        }).catch(function() { afterSalonId(); });
+      } else {
+        afterSalonId();
       }
     })
     .catch(function(err) {
@@ -531,8 +538,7 @@ function chkReg() {
   document.getElementById('regBtn').disabled = !ok;
   document.getElementById('regErr').classList.remove('show');
 }
-
-function doRegister() {
+  function doRegister() {
   var sei = document.getElementById('rSei').value.trim();
   var mei = document.getElementById('rMei').value.trim();
   var phone = document.getElementById('rPhone').value.trim();
