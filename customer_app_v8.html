@@ -730,7 +730,7 @@ function toggleAgree() {
 }
 
 // メール共通送信関数
-function sendEmails(type, dateLabel, timeStr, menuName, customerName, customerEmail, extraInfo) {
+function sendEmails(type, dateLabel, timeStr, menuName, customerName, customerEmail, extraInfo, qrUrl) {
   var params = {
     message_type: type,
     date: dateLabel,
@@ -738,7 +738,8 @@ function sendEmails(type, dateLabel, timeStr, menuName, customerName, customerEm
     menu_name: menuName,
     customer_name: customerName,
     customer_email: customerEmail,
-    extra_info: extraInfo || ''
+    extra_info: extraInfo || '',
+    qr_url: qrUrl || ''
   };
   emailjs.send('service_5nw670b', 'template_fu91vih', params).catch(function() {});
   emailjs.send('service_5nw670b', 'template_3d97ydi', params).catch(function() {});
@@ -764,15 +765,10 @@ function sendCancelEmails(appt) {
     var totalPrice = getMenuTotalPrice(appt.menu);
     var percent = totalPrice > 0 ? Math.round(fee / totalPrice * 100) : 0;
     var feeLabel = '¥' + fee.toLocaleString() + '（' + percent + '%）';
-    var qrMsg = (pol.qrMsg || '')
-      .replace('{顧客名}', appt.name)
-      .replace('{予約日時}', toDateLabel(appt.date) + ' ' + appt.start)
-      .replace('{メニュー}', appt.menu)
-      .replace('{キャンセル料}', feeLabel)
-      .replace('{QRリンク}', pol.qrUrl || '');
-    extraInfo = '■ キャンセル料：' + feeLabel + '\n' + qrMsg;
+    extraInfo = '■ キャンセル料：' + feeLabel;
   }
-  sendEmails('キャンセル', toDateLabel(appt.date), appt.start, appt.menu, appt.name, st.email, extraInfo);
+  var qrUrl = fee > 0 ? (cachedCancelPolicy && cachedCancelPolicy.qrUrl || '') : '';
+  sendEmails('キャンセル', toDateLabel(appt.date), appt.start, appt.menu, appt.name, st.email, extraInfo, qrUrl);
 }
 
 // 予約変更通知メール
