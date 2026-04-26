@@ -5,6 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>予約アプリ</title>
 <script src="shared_db.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@emailjs/browser@4/dist/email.min.js"></script>
+<script>
+  (function() { emailjs.init({ publicKey: 'Qd0moAUvgbNGlNjGJ' }); })();
+</script>
 <style>
 :root{--ac:#b5845a;--al:#f5ede4;--ad:#7a5535;--bg:#fff;--sf:#f8f7f4;--s2:#f0ede8;--bd:rgba(0,0,0,.10);--tx:#1a1a18;--mu:#73726c;--hi:#b0afa9;--gn:#7b9e87;--gl:#e8f2eb;--gt:#1e4d2b;--rd:#c47b7b;--rl:#faeaea;--rt:#6b1f1f;--lg:#06C755;--go:#c9a84c;--gol:#fdf6e3;}
 *{box-sizing:border-box;margin:0;padding:0;}
@@ -348,7 +352,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
 </div>
 </div>
 <div class="toast" id="toast"></div>
-
 <script>
 var DOWS = ['日','月','火','水','木','金','土'];
 var st = { name: '', phone: '', email: '', isLine: false, menus: [], options: [], selDate: null, selTime: null, agreed: false };
@@ -731,6 +734,22 @@ function toggleAgree() {
   document.getElementById('s5Btn').disabled = !st.agreed;
 }
 
+function sendBookingEmails(mn, dateStr, timeStr) {
+  var p = dateStr.split('-'), dow = DOWS[new Date(dateStr).getDay()];
+  var dateLabel = parseInt(p[1]) + '月' + parseInt(p[2]) + '日（' + dow + '）';
+  var params = {
+    customer_name: st.name,
+    customer_email: st.email,
+    date: dateLabel,
+    time: timeStr,
+    menu_name: mn
+  };
+  // サロン通知メール
+  emailjs.send('service_5nw670b', 'template_fu91vih', params).catch(function() {});
+  // 顧客確認メール
+  emailjs.send('service_5nw670b', 'template_3d97ydi', params).catch(function() {});
+}
+
 function completeBooking() {
   var td = getTotalDur(), mn = '';
   st.menus.forEach(function(m, i) { mn += (i ? '・' : '') + m.name; });
@@ -747,7 +766,9 @@ function completeBooking() {
   } else {
     dbAddAppointment(apptData, function(err, a) {
       if (err) { showToast('予約に失敗しました'); return; }
-      cachedAppointments.push(a); goScreen('s-s6');
+      cachedAppointments.push(a);
+      sendBookingEmails(mn, st.selDate, st.selTime);
+      goScreen('s-s6');
     });
   }
 }
