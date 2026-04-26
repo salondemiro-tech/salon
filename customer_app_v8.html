@@ -471,30 +471,28 @@ function doLogin() {
   authInitialized = true;
   window.auth.signInWithEmailAndPassword(e, p)
     .then(function() {
-      // cachedCustomersからメールで顧客を探す
-      var cust = null;
-      for (var i = 0; i < cachedCustomers.length; i++) {
-        if (cachedCustomers[i].email === e) { cust = cachedCustomers[i]; break; }
+      // サロンIDを確保してから全データ読み込み
+      function afterSalonId() {
+        loadAllData(function() {
+          document.getElementById('loginBtn').disabled = false;
+          document.getElementById('loginBtn').textContent = 'ログイン';
+          var cust = null;
+          for (var i = 0; i < cachedCustomers.length; i++) {
+            if (cachedCustomers[i].email === e) { cust = cachedCustomers[i]; break; }
+          }
+          if (cust) {
+            custId = cust.id; st.name = cust.name; st.phone = cust.phone; st.email = cust.email;
+          }
+          goScreen('s-s3');
+        });
       }
-      document.getElementById('loginBtn').disabled = false;
-      document.getElementById('loginBtn').textContent = 'ログイン';
-      if (cust) {
-        custId = cust.id; st.name = cust.name; st.phone = cust.phone; st.email = cust.email;
-        goScreen('s-s3');
+      if (!getCurrentSalonId()) {
+        window.db.collection('salons').limit(1).get().then(function(snap) {
+          if (!snap.empty) setCurrentSalonId(snap.docs[0].id || snap.docs[0].data().id);
+          afterSalonId();
+        }).catch(function() { afterSalonId(); });
       } else {
-        // キャッシュにない場合はFirestoreから直接取得
-        var salonId = getCurrentSalonId();
-        if (!salonId) { goScreen('s-s3'); return; }
-        window.db.collection('salons').doc(salonId).collection('customers')
-          .where('email', '==', e).limit(1).get()
-          .then(function(snap) {
-            if (!snap.empty) {
-              var c = snap.docs[0].data();
-              custId = c.id; st.name = c.name; st.phone = c.phone; st.email = c.email;
-              cachedCustomers.push(c);
-            }
-            goScreen('s-s3');
-          }).catch(function() { goScreen('s-s3'); });
+        afterSalonId();
       }
     })
     .catch(function(err) {
