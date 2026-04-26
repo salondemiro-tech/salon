@@ -531,7 +531,8 @@ function chkReg() {
   document.getElementById('regBtn').disabled = !ok;
   document.getElementById('regErr').classList.remove('show');
 }
-  function doRegister() {
+
+function doRegister() {
   var sei = document.getElementById('rSei').value.trim();
   var mei = document.getElementById('rMei').value.trim();
   var phone = document.getElementById('rPhone').value.trim();
@@ -549,34 +550,43 @@ function chkReg() {
   }
   document.getElementById('regBtn').disabled = true;
   document.getElementById('regBtn').textContent = '登録中...';
-  window.auth.createUserWithEmailAndPassword(email, pass)
-    .then(function(cred) {
-      // 確認メールを送信
-      cred.user.sendEmailVerification();
-      var uid = cred.user.uid;
-      var name = sei + ' ' + mei;
-      var nc = { name: name, phone: phone, email: email, authUid: uid, isLine: false, stamps: 0 };
-      dbAddCustomer(nc, function(err, c) {
+  function execRegister() {
+    window.auth.createUserWithEmailAndPassword(email, pass)
+      .then(function(cred) {
+        cred.user.sendEmailVerification();
+        var uid = cred.user.uid;
+        var name = sei + ' ' + mei;
+        var nc = { name: name, phone: phone, email: email, authUid: uid, isLine: false, stamps: 0 };
+        dbAddCustomer(nc, function(err, c) {
+          document.getElementById('regBtn').disabled = false;
+          document.getElementById('regBtn').textContent = '登録する';
+          if (err) {
+            document.getElementById('regErr').textContent = '登録に失敗しました';
+            document.getElementById('regErr').classList.add('show'); return;
+          }
+          cachedCustomers.push(c);
+          custId = c.id; st.name = name; st.phone = phone; st.email = email;
+          goScreen('s-s3'); showToast('会員登録が完了しました！');
+        });
+      })
+      .catch(function(err) {
         document.getElementById('regBtn').disabled = false;
         document.getElementById('regBtn').textContent = '登録する';
-        if (err) {
-          document.getElementById('regErr').textContent = '登録に失敗しました';
-          document.getElementById('regErr').classList.add('show'); return;
-        }
-        cachedCustomers.push(c);
-        custId = c.id; st.name = name; st.phone = phone; st.email = email;
-        goScreen('s-s3'); showToast('会員登録が完了しました！');
+        var msg = '登録に失敗しました';
+        if (err.code === 'auth/email-already-in-use') msg = 'このメールアドレスはすでに登録されています';
+        if (err.code === 'auth/weak-password') msg = 'パスワードは6文字以上で入力してください';
+        document.getElementById('regErr').textContent = msg;
+        document.getElementById('regErr').classList.add('show');
       });
-    })
-    .catch(function(err) {
-      document.getElementById('regBtn').disabled = false;
-      document.getElementById('regBtn').textContent = '登録する';
-      var msg = '登録に失敗しました';
-      if (err.code === 'auth/email-already-in-use') msg = 'このメールアドレスはすでに登録されています';
-      if (err.code === 'auth/weak-password') msg = 'パスワードは6文字以上で入力してください';
-      document.getElementById('regErr').textContent = msg;
-      document.getElementById('regErr').classList.add('show');
-    });
+  }
+  if (!getCurrentSalonId()) {
+    window.db.collection('salons').limit(1).get().then(function(snap) {
+      if (!snap.empty) setCurrentSalonId(snap.docs[0].id || snap.docs[0].data().id);
+      execRegister();
+    }).catch(function() { execRegister(); });
+  } else {
+    execRegister();
+  }
 }
 
 // ===== メニュー =====
@@ -987,7 +997,7 @@ onFbReady(function() {
     }
     if (!salonId) {
       window.db.collection('salons').limit(1).get().then(function(snap) {
-        if (!snap.empty) setCurrentSalonId(snap.docs[0].data().id);
+        if (!snap.empty) setCurrentSalonId(snap.docs[0].id || snap.docs[0].data().id);
         doLoad();
       }).catch(function() { doLoad(); });
     } else {
