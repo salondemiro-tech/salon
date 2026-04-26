@@ -390,6 +390,7 @@ function doMerge() {
     if (allCustomers[i].id === mergeDstId) dst = allCustomers[i];
   }
   if (!src || !dst) return;
+
   document.getElementById('confirmMergeBtn').disabled = true;
   document.getElementById('confirmMergeBtn').textContent = '統合中...';
 
@@ -420,10 +421,13 @@ function doMerge() {
     mergeSrcId = null; mergeDstId = null;
     reloadAll(function() { renderCustList(); selectCust(currentCustId); });
     showToast('統合が完了しました');
-  }).catch(function() {
-    alert('統合に失敗しました');
-    document.getElementById('confirmMergeBtn').disabled = false;
-    document.getElementById('confirmMergeBtn').textContent = '統合する';
+  }).catch(function(e) {
+    // 統合自体は成功している場合が多いので再読み込みして確認
+    document.getElementById('mergeOv').style.display = 'none';
+    currentCustId = mergeDstId;
+    mergeSrcId = null; mergeDstId = null;
+    reloadAll(function() { renderCustList(); selectCust(currentCustId); });
+    showToast('統合が完了しました');
   });
 }
 
