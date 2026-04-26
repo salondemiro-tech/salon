@@ -148,7 +148,7 @@ function dbSalonExists(cb) {
 // サロン登録（新規）
 function dbRegisterSalon(name, email, password, cb) {
   var id = 'salon_' + Date.now();
-  var salon = { id: id, name: name, email: email, password: password };
+  var salon = { id: id, name: name, email: email };
   // 初期設定も同時に作成
   var batch = window.db.batch();
   batch.set(salonDoc(id), salon);
