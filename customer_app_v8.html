@@ -729,12 +729,95 @@ function toggleAgree() {
   document.getElementById('s5Btn').disabled = !st.agreed;
 }
 
-function sendBookingEmails(mn, dateStr, timeStr) {
-  var p = dateStr.split('-'), dow = DOWS[new Date(dateStr).getDay()];
-  var dateLabel = parseInt(p[1]) + '月' + parseInt(p[2]) + '日（' + dow + '）';
-  var params = { customer_name: st.name, customer_email: st.email, date: dateLabel, time: timeStr, menu_name: mn };
+// メール共通送信関数
+function sendEmails(type, dateLabel, timeStr, menuName, customerName, customerEmail, extraInfo) {
+  var params = {
+    message_type: type,
+    date: dateLabel,
+    time: timeStr,
+    menu_name: menuName,
+    customer_name: customerName,
+    customer_email: customerEmail,
+    extra_info: extraInfo || ''
+  };
   emailjs.send('service_5nw670b', 'template_fu91vih', params).catch(function() {});
   emailjs.send('service_5nw670b', 'template_3d97ydi', params).catch(function() {});
+}
+
+// 日付ラベル生成ヘルパー
+function toDateLabel(dateStr) {
+  var p = dateStr.split('-'), dow = DOWS[new Date(dateStr).getDay()];
+  return parseInt(p[1]) + '月' + parseInt(p[2]) + '日（' + dow + '）';
+}
+
+// 新規予約メール
+function sendBookingEmails(mn, dateStr, timeStr) {
+  sendEmails('ご予約', toDateLabel(dateStr), timeStr, mn, st.name, st.email, '');
+}
+
+// キャンセル通知メール（キャンセル料計算込み）
+function sendCancelEmails(appt) {
+  var fee = calcCancelFee(appt);
+  var extraInfo = '';
+  if (fee > 0) {
+    var pol = cachedCancelPolicy || {};
+    var totalPrice = getMenuTotalPrice(appt.menu);
+    var percent = totalPrice > 0 ? Math.round(fee / totalPrice * 100) : 0;
+    var feeLabel = '¥' + fee.toLocaleString() + '（' + percent + '%）';
+    var qrMsg = (pol.qrMsg || '')
+      .replace('{顧客名}', appt.name)
+      .replace('{予約日時}', toDateLabel(appt.date) + ' ' + appt.start)
+      .replace('{メニュー}', appt.menu)
+      .replace('{キャンセル料}', feeLabel)
+      .replace('{QRリンク}', pol.qrUrl || '');
+    extraInfo = '■ キャンセル料：' + feeLabel + '\n' + qrMsg;
+  }
+  sendEmails('キャンセル', toDateLabel(appt.date), appt.start, appt.menu, appt.name, st.email, extraInfo);
+}
+
+// 予約変更通知メール
+function sendChangeEmails(oldAppt, newMn, newDateStr, newTimeStr) {
+  var extraInfo = '［変更前］\n■ 日時：' + toDateLabel(oldAppt.date) + ' ' + oldAppt.start + '\n■ メニュー：' + oldAppt.menu;
+  sendEmails('変更', toDateLabel(newDateStr), newTimeStr, newMn, st.name, st.email, extraInfo);
+}
+
+// メニュー合計金額取得ヘルパー
+function getMenuTotalPrice(menuStr) {
+  var total = 0;
+  var names = menuStr ? menuStr.split('・') : [];
+  names.forEach(function(mname) {
+    var trimmed = mname.trim();
+    for (var i = 0; i < cachedMenus.length; i++) {
+      if (cachedMenus[i].name === trimmed) { total += (cachedMenus[i].price || 0); break; }
+    }
+  });
+  return total;
+}
+
+// キャンセル料計算（0なら料金なし）
+function calcCancelFee(appt) {
+  var pol = cachedCancelPolicy || {};
+  var rates = pol.rates || [];
+  if (!rates.length) return 0;
+  var totalPrice = getMenuTotalPrice(appt.menu);
+  if (!totalPrice) return 0;
+  var now = new Date();
+  var apptDate = new Date(appt.date + 'T' + appt.start + ':00');
+  var diffDays = (apptDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+  var percent = 0;
+  for (var j = 0; j < rates.length; j++) {
+    var r = rates[j];
+    var lbl = r.label || '';
+    var match = lbl.match(/(\d+)日前/);
+    if (match) {
+      if (diffDays <= parseInt(match[1])) { percent = r.percent; }
+    } else if (lbl.indexOf('前日') !== -1) {
+      if (diffDays <= 1) { percent = r.percent; }
+    } else if (lbl.indexOf('当日') !== -1) {
+      if (diffDays <= 0) { percent = r.percent; }
+    }
+  }
+  return Math.round(totalPrice * percent / 100);
 }
 
 function completeBooking() {
@@ -743,11 +826,18 @@ function completeBooking() {
   var s = cachedSettings || {};
   var apptData = { customerId: custId, name: st.name, date: st.selDate, start: st.selTime, durationMin: td, intervalMin: s.intervalMin || 30, menu: mn, status: 'active', type: 'online' };
   if (chgId) {
+    // 変更前の予約情報を保存
+    var oldAppt = null;
+    for (var i = 0; i < cachedAppointments.length; i++) {
+      if (cachedAppointments[i].id === chgId) { oldAppt = cachedAppointments[i]; break; }
+    }
     dbUpdateAppointment(chgId, Object.assign(apptData, { id: chgId }), function(err) {
       if (err) { showToast('予約変更に失敗しました'); return; }
       for (var i = 0; i < cachedAppointments.length; i++) {
         if (cachedAppointments[i].id === chgId) { cachedAppointments[i] = Object.assign({}, cachedAppointments[i], apptData); break; }
       }
+      // 変更通知メール送信
+      if (oldAppt) { sendChangeEmails(oldAppt, mn, st.selDate, st.selTime); }
       chgId = null; goScreen('s-s6');
     });
   } else {
@@ -895,9 +985,14 @@ function openCan(id) {
 
 function doCancel() {
   if (!canId) return;
+  var targetAppt = null;
+  for (var i = 0; i < cachedAppointments.length; i++) {
+    if (cachedAppointments[i].id === canId) { targetAppt = cachedAppointments[i]; break; }
+  }
   dbCancelAppointment(canId, function(err) {
     if (err) { showToast('エラーが発生しました'); return; }
     for (var i = 0; i < cachedAppointments.length; i++) { if (cachedAppointments[i].id === canId) { cachedAppointments[i].status = 'cancelled'; break; } }
+    if (targetAppt) { sendCancelEmails(targetAppt); }
     canId = null; closeModals(); renderHistory(); showToast('キャンセルが完了しました');
   });
 }
