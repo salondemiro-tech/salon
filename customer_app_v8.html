@@ -863,12 +863,22 @@ function renderHistory() {
   document.getElementById('histName').textContent = st.name ? st.name + 'さん' : '';
   var cust = null;
   for (var i = 0; i < cachedCustomers.length; i++) { if (cachedCustomers[i].id === custId) { cust = cachedCustomers[i]; break; } }
-  var active = [], cancelled = [];
+  var oneYearAgo = new Date();
+  oneYearAgo.setFullYear(oneYearAgo.getFullYear() - 1);
+  var limitDate = oneYearAgo.toISOString().slice(0, 10);
+  var today = new Date().toISOString().slice(0, 10);
+  var active = [], visited = [], cancelled = [];
   for (var j = 0; j < cachedAppointments.length; j++) {
     var a = cachedAppointments[j];
     if (a.customerId !== custId) continue;
-    if (a.status === 'active') active.push(a); else cancelled.push(a);
+    if (a.date < limitDate) continue;
+    if (a.status === 'active') active.push(a);
+    else if (a.status === 'visited') visited.push(a);
+    else if (a.status === 'cancelled') cancelled.push(a);
   }
+  active.sort(function(a, b) { return a.date > b.date ? 1 : -1; });
+  visited.sort(function(a, b) { return a.date > b.date ? -1 : 1; });
+  cancelled.sort(function(a, b) { return a.date > b.date ? -1 : 1; });
   var html = '';
   if (!editProf) {
     html += '<div class="pcard"><div class="pch"><span class="pct">登録情報</span><button class="pedit" id="startEditProfBtn">変更する</button></div>'
@@ -885,12 +895,20 @@ function renderHistory() {
       + '</div></div>';
   }
   html += '<div class="slbl2">今後の予約</div>';
-  if (!active.length) { html += '<div style="font-size:13px;color:var(--mu);text-align:center;padding:16px;background:var(--sf);border-radius:10px;">現在予約はありません</div>'; }
+  var futureActive = active.filter(function(a) { return a.date >= today; });
+  if (!futureActive.length) { html += '<div style="font-size:13px;color:var(--mu);text-align:center;padding:16px;background:var(--sf);border-radius:10px;">現在予約はありません</div>'; }
   else {
-    active.forEach(function(a) {
+    futureActive.forEach(function(a) {
       var pp = a.date.split('-'), dw = DOWS[new Date(a.date).getDay()], en = toMin(a.start) + a.durationMin;
       html += '<div class="hcard"><div class="htop"><div><div class="hdate">' + parseInt(pp[1]) + '月' + parseInt(pp[2]) + '日（' + dw + '）' + a.start + '〜' + toTime(en) + '</div><div class="hmenu">' + a.menu + '（' + a.durationMin + '分）</div></div><span class="sbadge up">予約済み</span></div>'
         + '<div class="hacts"><button class="hbtn chg-btn" data-id="' + a.id + '">変更する</button><button class="hbtn danger can-btn" data-id="' + a.id + '">キャンセル</button></div></div>';
+    });
+  }
+  if (visited.length) {
+    html += '<div class="slbl2" style="margin-top:8px;">来店済み</div>';
+    visited.forEach(function(v) {
+      var vp = v.date.split('-'), vdw = DOWS[new Date(v.date).getDay()];
+      html += '<div class="hcard"><div class="htop"><div><div class="hdate">' + parseInt(vp[1]) + '月' + parseInt(vp[2]) + '日（' + vdw + '）' + v.start + '〜</div><div class="hmenu">' + v.menu + '</div></div><span class="sbadge" style="background:var(--gl);color:var(--gt);">来店済み</span></div></div>';
     });
   }
   if (cancelled.length) {
