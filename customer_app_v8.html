@@ -847,7 +847,7 @@ function completeBooking() {
 }
 
 function renderComplete() {
-  document.getElementById('okMsg').textContent = st.isLine ? 'LINEに予約確認メッセージをお送りしました。' : 'メールに予約確認メッセージをお送りしました。';
+  document.getElementById('okMsg').textContent = 'メールに予約確認メッセージをお送りしました。';
   var mn = '', tp = 0;
   st.menus.forEach(function(m) { mn += (mn ? '、' : '') + m.name; tp += m.price; });
   st.options.forEach(function(o) { tp += o.price; });
