@@ -201,6 +201,74 @@
   </div>
 </div>
 
+<!-- 顧客統合モーダル -->
+<div id="mergeOv" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:200;align-items:center;justify-content:center;padding:20px;overflow-y:auto;">
+  <div style="background:#fff;border-radius:14px;padding:24px;width:100%;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,.15);margin:auto;">
+    <h3 style="font-size:16px;font-weight:600;margin-bottom:6px;">顧客カルテを統合</h3>
+    <p style="font-size:12px;color:#73726c;margin-bottom:16px;line-height:1.6;">統合元のカルテは削除され、予約履歴・スタンプは統合先に引き継がれます。</p>
+
+    <!-- STEP1: 統合先選択 -->
+    <div id="mergeStep1">
+      <div style="font-size:12px;font-weight:600;color:#73726c;margin-bottom:8px;">統合先の顧客を検索</div>
+      <input type="text" id="mergeSearch" placeholder="氏名・電話番号・メールで検索..." style="width:100%;padding:10px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:9px;font-size:14px;font-family:inherit;margin-bottom:10px;">
+      <div id="mergeSearchResults" style="max-height:200px;overflow-y:auto;border:1.5px solid rgba(0,0,0,.08);border-radius:9px;"></div>
+    </div>
+
+    <!-- STEP2: 統合内容設定 -->
+    <div id="mergeStep2" style="display:none;">
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:#f8f7f4;border-radius:10px;">
+        <div style="flex:1;text-align:center;">
+          <div style="font-size:10px;color:#73726c;margin-bottom:4px;">統合元（削除）</div>
+          <div id="mergeSrcName" style="font-size:13px;font-weight:600;"></div>
+        </div>
+        <div style="font-size:20px;color:#b5845a;">→</div>
+        <div style="flex:1;text-align:center;">
+          <div style="font-size:10px;color:#73726c;margin-bottom:4px;">統合先（残す）</div>
+          <div id="mergeDstName" style="font-size:13px;font-weight:600;"></div>
+        </div>
+      </div>
+
+      <div style="font-size:12px;font-weight:600;color:#73726c;margin-bottom:10px;">統合後の情報を設定</div>
+
+      <div style="margin-bottom:10px;">
+        <label style="font-size:12px;font-weight:600;color:#73726c;display:block;margin-bottom:4px;">氏名</label>
+        <div style="display:flex;gap:6px;margin-bottom:4px;">
+          <button class="merge-pick-btn" id="mergeNameSrc" style="flex:1;padding:7px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;background:#fff;"></button>
+          <button class="merge-pick-btn" id="mergeNameDst" style="flex:1;padding:7px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;background:#fff;"></button>
+        </div>
+        <input type="text" id="mergeNameFree" placeholder="または自由入力..." style="width:100%;padding:8px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;font-family:inherit;">
+      </div>
+
+      <div style="margin-bottom:10px;">
+        <label style="font-size:12px;font-weight:600;color:#73726c;display:block;margin-bottom:4px;">電話番号</label>
+        <div style="display:flex;gap:6px;margin-bottom:4px;">
+          <button class="merge-pick-btn" id="mergePhoneSrc" style="flex:1;padding:7px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;background:#fff;"></button>
+          <button class="merge-pick-btn" id="mergePhoneDst" style="flex:1;padding:7px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;background:#fff;"></button>
+        </div>
+        <input type="text" id="mergePhoneFree" placeholder="または自由入力..." style="width:100%;padding:8px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;font-family:inherit;">
+      </div>
+
+      <div style="margin-bottom:16px;">
+        <label style="font-size:12px;font-weight:600;color:#73726c;display:block;margin-bottom:4px;">メールアドレス</label>
+        <div style="display:flex;gap:6px;margin-bottom:4px;">
+          <button class="merge-pick-btn" id="mergeEmailSrc" style="flex:1;padding:7px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;background:#fff;"></button>
+          <button class="merge-pick-btn" id="mergeEmailDst" style="flex:1;padding:7px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:12px;font-family:inherit;cursor:pointer;background:#fff;"></button>
+        </div>
+        <input type="text" id="mergeEmailFree" placeholder="または自由入力..." style="width:100%;padding:8px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;font-family:inherit;">
+      </div>
+
+      <div style="padding:10px 12px;background:#e8f2eb;border-radius:8px;font-size:12px;color:#1e4d2b;margin-bottom:16px;">
+        予約履歴・スタンプは自動的に合算されます
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:4px;">
+      <button id="cancelMergeBtn" style="flex:1;padding:12px;border-radius:10px;border:1.5px solid rgba(0,0,0,.12);background:none;font-size:14px;font-family:inherit;cursor:pointer;color:#73726c;">キャンセル</button>
+      <button id="confirmMergeBtn" style="flex:1;padding:12px;border-radius:10px;border:none;background:#b5845a;color:#fff;font-size:14px;font-family:inherit;font-weight:600;cursor:pointer;display:none;">統合する</button>
+    </div>
+  </div>
+</div>
+
 <script>
 var currentCustId = null;
 var currentTab = 'memo';
@@ -213,6 +281,151 @@ var sortMode = 'new';
 var DOWS = ['日','月','火','水','木','金','土'];
 var allCustomers = [];
 var allAppointments = [];
+
+
+// ===== 統合機能 =====
+var mergeSrcId = null;
+var mergeDstId = null;
+
+function openMerge() {
+  if (!currentCustId) return;
+  mergeSrcId = currentCustId;
+  mergeDstId = null;
+  document.getElementById('mergeStep1').style.display = '';
+  document.getElementById('mergeStep2').style.display = 'none';
+  document.getElementById('confirmMergeBtn').style.display = 'none';
+  document.getElementById('mergeSearch').value = '';
+  document.getElementById('mergeSearchResults').innerHTML = '';
+  document.getElementById('mergeOv').style.display = 'flex';
+}
+
+function renderMergeResults(q) {
+  var src = null;
+  for (var i = 0; i < allCustomers.length; i++) {
+    if (allCustomers[i].id === mergeSrcId) { src = allCustomers[i]; break; }
+  }
+  var results = allCustomers.filter(function(c) {
+    if (c.id === mergeSrcId) return false;
+    var sq = q.toLowerCase();
+    return (c.name || '').toLowerCase().indexOf(sq) >= 0
+      || (c.phone || '').indexOf(sq) >= 0
+      || (c.email || '').toLowerCase().indexOf(sq) >= 0;
+  });
+  var div = document.getElementById('mergeSearchResults');
+  if (!q) { div.innerHTML = '<div style="padding:12px;font-size:12px;color:#73726c;text-align:center;">氏名・電話番号・メールで検索</div>'; return; }
+  if (!results.length) { div.innerHTML = '<div style="padding:12px;font-size:12px;color:#73726c;text-align:center;">該当なし</div>'; return; }
+  div.innerHTML = '';
+  results.forEach(function(c) {
+    var row = document.createElement('div');
+    row.style.cssText = 'padding:10px 14px;cursor:pointer;border-bottom:1px solid rgba(0,0,0,.06);display:flex;align-items:center;gap:10px;';
+    row.innerHTML = '<div style="width:32px;height:32px;border-radius:50%;background:#b5845a;color:#fff;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:600;flex-shrink:0;">' + (c.name||'?').charAt(0) + '</div>'
+      + '<div><div style="font-size:13px;font-weight:600;">' + (c.name||'') + '</div><div style="font-size:11px;color:#73726c;">' + (c.phone||'') + (c.email ? '　' + c.email : '') + '</div></div>';
+    (function(cust) {
+      row.addEventListener('click', function() { selectMergeDst(cust); });
+    })(c);
+    div.appendChild(row);
+  });
+}
+
+function selectMergeDst(dst) {
+  mergeDstId = dst.id;
+  var src = null;
+  for (var i = 0; i < allCustomers.length; i++) {
+    if (allCustomers[i].id === mergeSrcId) { src = allCustomers[i]; break; }
+  }
+  document.getElementById('mergeSrcName').textContent = src ? src.name : '';
+  document.getElementById('mergeDstName').textContent = dst.name || '';
+
+  // ボタンにそれぞれの値をセット
+  document.getElementById('mergeNameSrc').textContent = src ? src.name : '';
+  document.getElementById('mergeNameDst').textContent = dst.name || '';
+  document.getElementById('mergePhoneSrc').textContent = src ? src.phone : '';
+  document.getElementById('mergePhoneDst').textContent = dst.phone || '';
+  document.getElementById('mergeEmailSrc').textContent = src ? src.email : '';
+  document.getElementById('mergeEmailDst').textContent = dst.email || '';
+
+  // フリー入力欄に初期値セット
+  document.getElementById('mergeNameFree').value = dst.name || '';
+  document.getElementById('mergePhoneFree').value = dst.phone || '';
+  document.getElementById('mergeEmailFree').value = dst.email || '';
+
+  // ボタンのスタイルリセット
+  var btns = document.querySelectorAll('.merge-pick-btn');
+  for (var j = 0; j < btns.length; j++) {
+    btns[j].style.borderColor = 'rgba(0,0,0,.12)';
+    btns[j].style.background = '#fff';
+    btns[j].style.color = '#1a1a18';
+  }
+
+  document.getElementById('mergeStep1').style.display = 'none';
+  document.getElementById('mergeStep2').style.display = '';
+  document.getElementById('confirmMergeBtn').style.display = '';
+}
+
+function setupMergePickBtn(btnId, freeId) {
+  document.getElementById(btnId).addEventListener('click', function() {
+    document.getElementById(freeId).value = this.textContent;
+    var siblings = this.parentNode.querySelectorAll('.merge-pick-btn');
+    for (var i = 0; i < siblings.length; i++) {
+      siblings[i].style.borderColor = 'rgba(0,0,0,.12)';
+      siblings[i].style.background = '#fff';
+      siblings[i].style.color = '#1a1a18';
+    }
+    this.style.borderColor = '#b5845a';
+    this.style.background = '#f5ede4';
+    this.style.color = '#7a5535';
+  });
+}
+
+function doMerge() {
+  if (!mergeSrcId || !mergeDstId) return;
+  var newName = document.getElementById('mergeNameFree').value.trim();
+  var newPhone = document.getElementById('mergePhoneFree').value.trim();
+  var newEmail = document.getElementById('mergeEmailFree').value.trim();
+  if (!newName || !newPhone) { alert('氏名と電話番号は必須です'); return; }
+
+  var src = null, dst = null;
+  for (var i = 0; i < allCustomers.length; i++) {
+    if (allCustomers[i].id === mergeSrcId) src = allCustomers[i];
+    if (allCustomers[i].id === mergeDstId) dst = allCustomers[i];
+  }
+  if (!src || !dst) return;
+  document.getElementById('confirmMergeBtn').disabled = true;
+  document.getElementById('confirmMergeBtn').textContent = '統合中...';
+
+  var salonId = getCurrentSalonId();
+  var batch = window.db.batch();
+
+  // 統合先の顧客情報を更新（スタンプも合算）
+  var mergedStamps = (src.stamps || 0) + (dst.stamps || 0);
+  batch.update(salonCol(salonId, 'customers').doc(mergeDstId), {
+    name: newName, phone: newPhone, email: newEmail, stamps: mergedStamps
+  });
+
+  // 統合元の予約を統合先に移す
+  for (var j = 0; j < allAppointments.length; j++) {
+    if (allAppointments[j].customerId === mergeSrcId) {
+      batch.update(salonCol(salonId, 'appointments').doc(allAppointments[j].id), {
+        customerId: mergeDstId, name: newName
+      });
+    }
+  }
+
+  // 統合元を削除
+  batch.delete(salonCol(salonId, 'customers').doc(mergeSrcId));
+
+  batch.commit().then(function() {
+    document.getElementById('mergeOv').style.display = 'none';
+    currentCustId = mergeDstId;
+    mergeSrcId = null; mergeDstId = null;
+    reloadAll(function() { renderCustList(); selectCust(currentCustId); });
+    showToast('統合が完了しました');
+  }).catch(function() {
+    alert('統合に失敗しました');
+    document.getElementById('confirmMergeBtn').disabled = false;
+    document.getElementById('confirmMergeBtn').textContent = '統合する';
+  });
+}
 
 function reloadAll(cb) {
   dbGetCustomers(function(custs) {
@@ -555,7 +768,16 @@ onFbReady(function() {
   document.getElementById('cameraInput').addEventListener('change', handlePhoto);
   document.getElementById('tabMemo').addEventListener('click', function() { switchTab('memo'); });
   document.getElementById('tabHistory').addEventListener('click', function() { switchTab('history'); });
-  document.getElementById('mergeBtn').addEventListener('click', function() { alert('統合機能は次バージョンで対応予定です'); });
+  document.getElementById('mergeBtn').addEventListener('click', openMerge);
+  document.getElementById('cancelMergeBtn').addEventListener('click', function() { document.getElementById('mergeOv').style.display = 'none'; });
+  document.getElementById('confirmMergeBtn').addEventListener('click', doMerge);
+  document.getElementById('mergeSearch').addEventListener('input', function() { renderMergeResults(this.value.trim()); });
+  setupMergePickBtn('mergeNameSrc', 'mergeNameFree');
+  setupMergePickBtn('mergeNameDst', 'mergeNameFree');
+  setupMergePickBtn('mergePhoneSrc', 'mergePhoneFree');
+  setupMergePickBtn('mergePhoneDst', 'mergePhoneFree');
+  setupMergePickBtn('mergeEmailSrc', 'mergeEmailFree');
+  setupMergePickBtn('mergeEmailDst', 'mergeEmailFree');
 });
 </script>
 </body>
