@@ -352,8 +352,10 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
 </div>
 </div>
 <div class="toast" id="toast"></div>
+
 <script>
 var DOWS = ['日','月','火','水','木','金','土'];
+var authInitialized = false;
 var st = { name: '', phone: '', email: '', isLine: false, menus: [], options: [], selDate: null, selTime: null, agreed: false };
 var custId = null, chgId = null, canId = null;
 var calY = new Date().getFullYear(), calM = new Date().getMonth();
@@ -466,6 +468,7 @@ function doLogin() {
   var p = document.getElementById('lPass').value;
   document.getElementById('loginBtn').disabled = true;
   document.getElementById('loginBtn').textContent = '確認中...';
+  authInitialized = true;
   window.auth.signInWithEmailAndPassword(e, p)
     .then(function(cred) {
       var uid = cred.user.uid;
@@ -490,6 +493,7 @@ function doLogin() {
       }
     })
     .catch(function(err) {
+      authInitialized = false;
       document.getElementById('loginBtn').disabled = false;
       document.getElementById('loginBtn').textContent = 'ログイン';
       var msg = 'メールアドレスまたはパスワードが正しくありません';
@@ -527,8 +531,7 @@ function chkReg() {
   document.getElementById('regBtn').disabled = !ok;
   document.getElementById('regErr').classList.remove('show');
 }
-
-function doRegister() {
+  function doRegister() {
   var sei = document.getElementById('rSei').value.trim();
   var mei = document.getElementById('rMei').value.trim();
   var phone = document.getElementById('rPhone').value.trim();
@@ -994,6 +997,8 @@ onFbReady(function() {
 
   // Firebase Auth 状態監視（自動ログイン）
   window.auth.onAuthStateChanged(function(user) {
+    if (authInitialized) return;
+    authInitialized = true;
     loadAllData(function() {
       if (user) {
         dbFindCustomer({ email: user.email }, function(found) {
