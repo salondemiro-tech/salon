@@ -486,15 +486,16 @@ if (cb) cb({ message: msg });
 function dbAuthLogin(email, password, cb) {
 window.auth.signInWithEmailAndPassword(email, password)
 .then(function(cred) {
-var salonId = ‘Ej3SdlceD3PZYJWd9t2dwZLHvx32’;
-setCurrentSalonId(salonId);
-return salonDoc(salonId).get();
+var uid = cred.user.uid;
+setCurrentSalonId(uid);
+return salonDoc(uid).get();
 })
 .then(function(doc) {
-if (cb) cb(null, doc.exists ? doc.data() : { id: ‘Ej3SdlceD3PZYJWd9t2dwZLHvx32’, email: email, name: ‘’ });
+var uid = getCurrentSalonId();
+if (cb) cb(null, doc.exists ? doc.data() : { id: uid, email: email, name: '' });
 })
 .catch(function(e) {
-var msg = ‘メールアドレスまたはパスワードが正しくありません’;
+var msg = 'メールアドレスまたはパスワードが正しくありません';
 if (cb) cb({ message: msg });
 });
 }
