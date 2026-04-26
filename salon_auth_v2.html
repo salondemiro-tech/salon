@@ -301,13 +301,7 @@ onFbReady(function() {
   dbAuthOnStateChanged(function(user) {
     if (user) {
       setCurrentSalonId('Ej3SdlceD3PZYJWd9t2dwZLHvx32');
-      if (!user.emailVerified) {
-        document.getElementById('vwEmail').textContent = user.email;
-        hideErr('vwErr');
-        show('vVerifyWait');
-      } else {
-        dbGetSalon(function(salon) { if (salon) { enterDash(salon); } else { show('vLogin'); } });
-      }
+      dbGetSalon(function(salon) { if (salon) { enterDash(salon); } else { show('vLogin'); } });
     } else { show('vLogin'); }
   });
   document.getElementById('lPassEye').addEventListener('click', function() { togglePw('lPass', this); });
