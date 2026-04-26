@@ -168,11 +168,22 @@ function doLogin() {
   hideErr('loginErr');
   document.getElementById('loginBtn').disabled = true;
   document.getElementById('loginBtn').textContent = '確認中...';
-  dbAuthLogin(e, p, function(err, salon) {
+  var SALON_ID = 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
+  window.auth.signInWithEmailAndPassword(e, p)
+  .then(function() {
+    localStorage.setItem('salon_current_id', SALON_ID);
+    return window.db.collection('salons').doc(SALON_ID).get();
+  })
+  .then(function(doc) {
     document.getElementById('loginBtn').disabled = false;
     document.getElementById('loginBtn').textContent = 'ログイン';
-    if (err) { showErr('loginErr', err.message); return; }
+    var salon = doc.exists ? doc.data() : { id: SALON_ID, email: e, name: '' };
     enterDash(salon);
+  })
+  .catch(function(err) {
+    document.getElementById('loginBtn').disabled = false;
+    document.getElementById('loginBtn').textContent = 'ログイン';
+    showErr('loginErr', 'メールアドレスまたはパスワードが正しくありません');
   });
 }
 function chkReg() { document.getElementById('regBtn').disabled = !(gv('rName') && gv('rEmail')); hideErr('regErr'); }
