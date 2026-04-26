@@ -1,4 +1,5 @@
 <!DOCTYPE html>
+
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
@@ -308,8 +309,20 @@ onFbReady(function() {
     } else { show('vLogin'); }
   });
   document.getElementById('lEmail').addEventListener('input', chkLogin);
+  document.getElementById('lEmail').addEventListener('change', chkLogin);
   document.getElementById('lPass').addEventListener('input', chkLogin);
+  document.getElementById('lPass').addEventListener('change', chkLogin);
   document.getElementById('loginBtn').addEventListener('click', doLogin);
+  // オートフィル対策：定期的にボタン状態を再チェック
+  setInterval(function() {
+    var emailEl = document.getElementById('lEmail');
+    var passEl = document.getElementById('lPass');
+    var btn = document.getElementById('loginBtn');
+    if (emailEl && passEl && btn && !btn.disabled) return;
+    if (emailEl && passEl && emailEl.value.trim() && passEl.value.trim()) {
+      if (btn) btn.disabled = false;
+    }
+  }, 300);
   document.getElementById('lPassEye').addEventListener('click', function() { togglePw('lPass', this); });
   document.getElementById('toForgotBtn').addEventListener('click', function() { show('vForgot'); });
   document.getElementById('toRegBtn').addEventListener('click', function() { show('vReg'); });
