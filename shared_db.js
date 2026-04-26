@@ -486,11 +486,11 @@ if (cb) cb({ message: msg });
 function dbAuthLogin(email, password, cb) {
 window.auth.signInWithEmailAndPassword(email, password)
 .then(function(cred) {
-var uid = cred.user.uid;
-setCurrentSalonId(uid);
-salonDoc(uid).get().then(function(doc) {
-if (cb) cb(null, doc.exists ? doc.data() : { id: uid, email: email, name: ‘’ });
-});
+// 現在は固定サロンIDを使用
+var salonId = ‘Ej3SdlceD3PZYJWd9t2dwZLHvx32’;
+setCurrentSalonId(salonId);
+salonDoc(salonId).get().then(function(doc) {
+if (cb) cb(null, doc.exists ? doc.data() : { id: salonId, email: email, name: ‘’ });
 })
 .catch(function(e) {
 var msg = ‘メールアドレスまたはパスワードが正しくありません’;
