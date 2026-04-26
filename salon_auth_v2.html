@@ -296,7 +296,14 @@ setTimeout(function() {
 onFbReady(function() {
   dbAuthOnStateChanged(function(user) {
     if (user) {
-      setCurrentSalonId(user.uid);
+      // user.uidではなくFirestoreの実際のサロンIDをセット
+      window.db.collection('salons').where('email', '==', user.email).limit(1).get().then(function(snap) {
+        if (!snap.empty) {
+          setCurrentSalonId(snap.docs[0].id);
+        } else {
+          setCurrentSalonId(user.uid);
+        }
+      }).catch(function() { setCurrentSalonId(user.uid); });
       if (!user.emailVerified) {
         document.getElementById('vwEmail').textContent = user.email;
         hideErr('vwErr');
