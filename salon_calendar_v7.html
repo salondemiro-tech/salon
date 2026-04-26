@@ -160,6 +160,14 @@
         <div class="option-list" id="mOptionList"></div>
         <button class="add-option-btn" id="addOptionBtn">＋ オプションを追加</button>
         <label>メモ</label><input type="text" id="mMemo" placeholder="備考など">
+        <div style="margin-top:12px;display:flex;align-items:center;gap:8px;">
+          <input type="checkbox" id="mAddCustomer" style="width:auto;">
+          <label style="margin:0;font-size:11px;color:var(--muted);">顧客マスタにも登録する</label>
+        </div>
+        <div id="mCustomerExtra" style="display:none;">
+          <label>電話番号</label><input type="tel" id="mPhone" placeholder="09012345678">
+          <label>メールアドレス</label><input type="email" id="mEmail" placeholder="例：xxx@example.com">
+        </div>
       </div>
       <div class="tab-panel" id="tabClose">
         <label>日付</label><input type="date" id="cDate">
@@ -266,11 +274,23 @@ function saveEntry() {
     var fullMenuName = menu ? menu.name : menuId;
     if (optNames.length > 0) fullMenuName += '＋' + optNames.join('＋');
     var appt = { name: name, menu: fullMenuName, date: date, start: time, durationMin: totalDur, intervalMin: s ? s.intervalMin : 30, memo: memo, type: 'manual', status: 'active' };
+    var addCustomer = document.getElementById('mAddCustomer').checked;
+    var phone = document.getElementById('mPhone').value.trim();
+    var email = document.getElementById('mEmail').value.trim();
     dbAddAppointment(appt, function(err, a) {
       if (err) { alert('登録に失敗しました'); return; }
       cachedAppointments.push(a);
+      // 顧客マスタ登録
+      if (addCustomer && name) {
+        var custData = { name: name, phone: phone || '', email: email || '', isLine: false, stamps: 0 };
+        dbAddCustomer(custData, function() {});
+      }
       document.getElementById('mName').value = '';
       document.getElementById('mMemo').value = '';
+      document.getElementById('mPhone').value = '';
+      document.getElementById('mEmail').value = '';
+      document.getElementById('mAddCustomer').checked = false;
+      document.getElementById('mCustomerExtra').style.display = 'none';
       document.getElementById('mOptionList').innerHTML = '';
       closeModal(); renderCal(); showToast('予約を登録しました');
     });
@@ -328,19 +348,24 @@ function showAppt(appt) {
   var p = appt.date.split('-');
   var typeLabel = appt.type === 'online' ? 'アプリ予約' : '手動登録';
   var typeCls = appt.type === 'online' ? 'online' : 'manual';
+  var isVisited = appt.status === 'visited';
+  var statusLabel = isVisited ? '<span class="badge" style="background:#e8f2eb;color:#2e5c3a;">来店済み</span>' : '';
+  var actionBtns = isVisited
+    ? '<button class="dp-btn danger" id="dpCancelBtn">キャンセル処理</button>'
+    : '<button class="dp-btn primary" id="dpChangeBtn">変更する</button>'
+      + '<button class="dp-btn visited" id="dpVisitedBtn">来店済み</button>'
+      + '<button class="dp-btn danger" id="dpCancelBtn">キャンセル処理</button>';
   document.getElementById('dpContent').innerHTML =
     '<div class="dp-title">' + appt.name + '</div>'
     + '<div class="dp-sub">' + p[0] + '年' + p[1] + '月' + p[2] + '日　' + appt.start + '〜</div>'
     + '<div class="dp-field"><label>メニュー</label><div class="val">' + (appt.menu || '—') + '</div></div>'
-    + '<div class="dp-field"><label>予約経路</label><div class="val"><span class="badge ' + typeCls + '">' + typeLabel + '</span></div></div>'
+    + '<div class="dp-field"><label>予約経路</label><div class="val"><span class="badge ' + typeCls + '">' + typeLabel + '</span>' + statusLabel + '</div></div>'
     + '<div class="dp-field"><label>メモ</label><div class="val">' + (appt.memo || '（なし）') + '</div></div>'
-    + '<div class="dp-actions">'
-    + '<button class="dp-btn primary" id="dpChangeBtn">変更する</button>'
-    + '<button class="dp-btn visited" id="dpVisitedBtn">来店済み</button>'
-    + '<button class="dp-btn danger" id="dpCancelBtn">キャンセル処理</button>'
-    + '</div>';
-  document.getElementById('dpChangeBtn').addEventListener('click', function() { openChangeById(appt.id); });
-  document.getElementById('dpVisitedBtn').addEventListener('click', function() { visitedAppt(appt.id); });
+    + '<div class="dp-actions">' + actionBtns + '</div>';
+  if (!isVisited) {
+    document.getElementById('dpChangeBtn').addEventListener('click', function() { openChangeById(appt.id); });
+    document.getElementById('dpVisitedBtn').addEventListener('click', function() { visitedAppt(appt.id); });
+  }
   document.getElementById('dpCancelBtn').addEventListener('click', function() { cancelAppt(appt.id); });
   document.getElementById('dp').classList.add('open');
 }
@@ -440,7 +465,7 @@ function renderCal() {
   var bookingWeeks = s.bookingWeeks || 8;
   var rangeEnd = new Date(); rangeEnd.setHours(0,0,0,0); rangeEnd.setDate(rangeEnd.getDate() + bookingWeeks * 7);
   var rangeEndStr = fmtDate(rangeEnd);
-  var appointments = cachedAppointments.filter(function(a) { return a.status === 'active'; });
+  var appointments = cachedAppointments.filter(function(a) { return a.status === 'active' || a.status === 'visited'; });
   var closeBlocks = cachedCloseBlocks;
 
   // 週ラベル
@@ -562,6 +587,9 @@ onFbReady(function() {
   document.getElementById('tabApptBtn').addEventListener('click', function() { switchTab('appt'); });
   document.getElementById('tabCloseBtn').addEventListener('click', function() { switchTab('close'); });
   document.getElementById('addOptionBtn').addEventListener('click', function() { addOption('mOptionList'); });
+  document.getElementById('mAddCustomer').addEventListener('change', function() {
+    document.getElementById('mCustomerExtra').style.display = this.checked ? 'block' : 'none';
+  });
   document.getElementById('cancelChangeBtn').addEventListener('click', closeChange);
   document.getElementById('saveChangeBtn').addEventListener('click', saveChange);
   document.getElementById('dpCloseBtn').addEventListener('click', closeDP);
