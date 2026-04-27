@@ -1,6 +1,5 @@
 // ============================================================
 //  shared_db.js  - Firebase Firestore対応版
-//  キャッシュ対策: 全ての .get() を .get({source:‘server’}) に変更
 // ============================================================
 
 // –––––––––– Firebase設定 ––––––––––
@@ -77,9 +76,6 @@ function salonCol(salonId, colName) {
 return salonDoc(salonId).collection(colName);
 }
 
-// –––––––––– 取得オプション（キャッシュ無効化） ––––––––––
-var GET_OPTS = { source: ‘server’ };
-
 // –––––––––– デフォルト値 ––––––––––
 var DEFAULT_SETTINGS = {
 openTime: ‘10:00’, closeTime: ‘19:00’,
@@ -126,7 +122,7 @@ var DEFAULT_MENUS = [
 function dbGetSalon(cb) {
 var id = getCurrentSalonId();
 if (!id) { cb(null); return; }
-salonDoc(id).get(GET_OPTS).then(function(doc) {
+salonDoc(id).get().then(function(doc) {
 cb(doc.exists ? doc.data() : null);
 }).catch(function() { cb(null); });
 }
@@ -141,14 +137,14 @@ if (cb) cb(null);
 function dbSalonExists(cb) {
 var id = getCurrentSalonId();
 if (!id) { cb(false); return; }
-salonDoc(id).get(GET_OPTS).then(function(doc) { cb(doc.exists); }).catch(function() { cb(false); });
+salonDoc(id).get().then(function(doc) { cb(doc.exists); }).catch(function() { cb(false); });
 }
 
 // –––––––––– settings ––––––––––
 function dbGetSettings(cb) {
 var id = getCurrentSalonId();
 if (!id) { cb(Object.assign({}, DEFAULT_SETTINGS)); return; }
-salonDoc(id).collection(‘config’).doc(‘settings’).get(GET_OPTS).then(function(doc) {
+salonDoc(id).collection(‘config’).doc(‘settings’).get().then(function(doc) {
 cb(doc.exists ? Object.assign({}, DEFAULT_SETTINGS, doc.data()) : Object.assign({}, DEFAULT_SETTINGS));
 }).catch(function() { cb(Object.assign({}, DEFAULT_SETTINGS)); });
 }
@@ -165,7 +161,7 @@ if (cb) cb(null);
 function dbGetMenus(cb) {
 var id = getCurrentSalonId();
 if (!id) { cb([]); return; }
-salonCol(id, ‘menus’).orderBy(‘id’).get(GET_OPTS).then(function(snap) {
+salonCol(id, ‘menus’).orderBy(‘id’).get().then(function(snap) {
 var menus = [];
 snap.forEach(function(doc) { menus.push(doc.data()); });
 cb(menus);
@@ -182,7 +178,7 @@ function dbSaveMenus(menus, cb) {
 var id = getCurrentSalonId();
 if (!id) { if (cb) cb(‘no salon’); return; }
 var batch = window.db.batch();
-salonCol(id, ‘menus’).get(GET_OPTS).then(function(snap) {
+salonCol(id, ‘menus’).get().then(function(snap) {
 snap.forEach(function(doc) { batch.delete(doc.ref); });
 menus.forEach(function(m) {
 batch.set(salonCol(id, ‘menus’).doc(m.id), m);
@@ -197,7 +193,7 @@ if (cb) cb(null);
 function dbGetCustomers(cb) {
 var id = getCurrentSalonId();
 if (!id) { cb([]); return; }
-salonCol(id, ‘customers’).orderBy(‘name’).get(GET_OPTS).then(function(snap) {
+salonCol(id, ‘customers’).orderBy(‘name’).get().then(function(snap) {
 var list = [];
 snap.forEach(function(doc) { list.push(doc.data()); });
 cb(list);
@@ -237,7 +233,7 @@ count = count || 1;
 var id = getCurrentSalonId();
 if (!id) { if (cb) cb(‘no salon’); return; }
 var ref = salonCol(id, ‘customers’).doc(customerId);
-ref.get(GET_OPTS).then(function(doc) {
+ref.get().then(function(doc) {
 if (!doc.exists) { if (cb) cb(‘not found’); return; }
 var cur = doc.data().stamps || 0;
 return ref.update({ stamps: cur + count });
@@ -253,7 +249,7 @@ dbUpdateCustomer(customerId, { stamps: 0 }, cb);
 function dbGetStampCard(cb) {
 var id = getCurrentSalonId();
 if (!id) { cb(Object.assign({}, DEFAULT_STAMP_CARD)); return; }
-salonDoc(id).collection(‘config’).doc(‘stampCard’).get(GET_OPTS).then(function(doc) {
+salonDoc(id).collection(‘config’).doc(‘stampCard’).get().then(function(doc) {
 cb(doc.exists ? Object.assign({}, DEFAULT_STAMP_CARD, doc.data()) : Object.assign({}, DEFAULT_STAMP_CARD));
 }).catch(function() { cb(Object.assign({}, DEFAULT_STAMP_CARD)); });
 }
@@ -270,7 +266,7 @@ if (cb) cb(null);
 function dbGetAppointments(cb) {
 var id = getCurrentSalonId();
 if (!id) { cb([]); return; }
-salonCol(id, ‘appointments’).orderBy(‘date’).get(GET_OPTS).then(function(snap) {
+salonCol(id, ‘appointments’).orderBy(‘date’).get().then(function(snap) {
 var list = [];
 snap.forEach(function(doc) { list.push(doc.data()); });
 cb(list);
@@ -302,7 +298,7 @@ dbUpdateAppointment(appointmentId, { status: ‘cancelled’ }, cb);
 function dbGetCloseBlocks(cb) {
 var id = getCurrentSalonId();
 if (!id) { cb([]); return; }
-salonCol(id, ‘closeBlocks’).get(GET_OPTS).then(function(snap) {
+salonCol(id, ‘closeBlocks’).get().then(function(snap) {
 var list = [];
 snap.forEach(function(doc) { list.push(doc.data()); });
 cb(list);
@@ -330,7 +326,7 @@ if (cb) cb(null);
 function dbGetCancelPolicy(cb) {
 var id = getCurrentSalonId();
 if (!id) { cb(Object.assign({}, DEFAULT_CANCEL_POLICY)); return; }
-salonDoc(id).collection(‘config’).doc(‘cancelPolicy’).get(GET_OPTS).then(function(doc) {
+salonDoc(id).collection(‘config’).doc(‘cancelPolicy’).get().then(function(doc) {
 cb(doc.exists ? Object.assign({}, DEFAULT_CANCEL_POLICY, doc.data()) : Object.assign({}, DEFAULT_CANCEL_POLICY));
 }).catch(function() { cb(Object.assign({}, DEFAULT_CANCEL_POLICY)); });
 }
@@ -456,7 +452,7 @@ window.auth.signInWithEmailAndPassword(email, password)
 .then(function(cred) {
 var uid = cred.user.uid;
 setCurrentSalonId(uid);
-return salonDoc(uid).get(GET_OPTS).then(function(doc) {
+return salonDoc(uid).get().then(function(doc) {
 if (cb) cb(null, doc.exists ? doc.data() : { id: uid, email: email, name: ‘’ });
 });
 })
