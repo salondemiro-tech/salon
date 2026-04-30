@@ -109,6 +109,7 @@
   <div class="sidebar">
     <div class="sidebar-logo">Salon Manager<span>管理画面</span></div>
     <div style="height:14px;"></div>
+    <a class="nav-item" href="salon_auth_v2.html">🏠 ダッシュボード</a>
     <a class="nav-item active">📅 カレンダー</a>
     <a class="nav-item" href="customer_memo_v6.html">👤 顧客管理</a>
     <a class="nav-item" href="menu_settings_v3.html">✦ メニュー設定</a>
@@ -201,6 +202,16 @@
 <div class="toast" id="toast"></div>
 
 <script>
+// ★★★ 修正点 ★★★
+// 固定のサロンIDを常にlocalStorageに書き込む
+var SALON_FIXED_ID = 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
+setCurrentSalonId(SALON_FIXED_ID);
+setInterval(function() {
+  if (localStorage.getItem('salon_current_id') !== SALON_FIXED_ID) {
+    setCurrentSalonId(SALON_FIXED_ID);
+  }
+}, 1000);
+
 var SLOT_H = 48;
 var DOWS = ['日','月','火','水','木','金','土'];
 var HOURS = [];
@@ -280,7 +291,6 @@ function saveEntry() {
     dbAddAppointment(appt, function(err, a) {
       if (err) { alert('登録に失敗しました'); return; }
       cachedAppointments.push(a);
-      // 顧客マスタ登録
       if (addCustomer && name) {
         var custData = { name: name, phone: phone || '', email: email || '', isLine: false, stamps: 0 };
         dbAddCustomer(custData, function() {});
@@ -468,7 +478,6 @@ function renderCal() {
   var appointments = cachedAppointments.filter(function(a) { return a.status === 'active' || a.status === 'visited'; });
   var closeBlocks = cachedCloseBlocks;
 
-  // 週ラベル
   var s0 = days[0], e0 = days[6];
   document.getElementById('weekLabel').textContent = s0.getFullYear() + '年 ' + (s0.getMonth()+1) + '/' + s0.getDate() + ' 〜 ' + (e0.getMonth()+1) + '/' + e0.getDate();
 
@@ -499,7 +508,6 @@ function renderCal() {
   html += '</div>';
   area.innerHTML = html;
 
-  // セルクリックイベント
   area.querySelectorAll('.dcol.clickable').forEach(function(el) {
     el.addEventListener('click', function(e) {
       cellClick(el.getAttribute('data-date'), parseInt(el.getAttribute('data-hour')), e);
@@ -508,7 +516,6 @@ function renderCal() {
 
   var allCols = area.querySelectorAll('.dcol');
 
-  // 予約ブロック描画
   for (var ai = 0; ai < appointments.length; ai++) {
     var appt = appointments[ai];
     var apptDi = -1;
@@ -539,7 +546,6 @@ function renderCal() {
     }
   }
 
-  // クローズブロック描画
   for (var cbi = 0; cbi < closeBlocks.length; cbi++) {
     var cblock = closeBlocks[cbi];
     var cbDi = -1;
@@ -558,6 +564,7 @@ function renderCal() {
 }
 
 function loadAndRender() {
+  setCurrentSalonId(SALON_FIXED_ID);
   dbGetSettings(function(s) {
     cachedSettings = s;
     dbGetMenus(function(menus) {
@@ -576,6 +583,7 @@ function loadAndRender() {
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 2500); }
 
 onFbReady(function() {
+  setCurrentSalonId(SALON_FIXED_ID);
   loadAndRender();
 
   document.getElementById('prevWeekBtn').addEventListener('click', function() { weekStart = new Date(weekStart); weekStart.setDate(weekStart.getDate() - 7); renderCal(); });
