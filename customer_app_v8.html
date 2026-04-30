@@ -147,12 +147,10 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
 <div class="phone">
   <div class="sbar"><span>9:41</span><span>●●●</span></div>
 
-  <!-- ローディング -->
   <div id="s-loading" style="display:flex;flex-direction:column;flex:1;">
     <div class="loading-screen">読み込み中...</div>
   </div>
 
-  <!-- S1 ログイン -->
   <div id="s-s1" style="display:none;flex-direction:column;flex:1;">
     <div class="scr">
       <div class="logo"><div class="logon" id="salonNameLogin">Salon ✦ Name</div><div class="logos">ご予約はこちらから</div></div>
@@ -171,7 +169,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     </div>
   </div>
 
-  <!-- S-REG 新規登録 -->
   <div id="s-reg" style="display:none;flex-direction:column;flex:1;">
     <div class="ahead"><div class="ahtop"><button class="backbtn" id="regBackBtn">‹</button><div class="htitle">新規会員登録</div></div></div>
     <div class="scr">
@@ -190,7 +187,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     <div class="bbar"><button class="pbtn" id="regBtn" disabled>登録する</button></div>
   </div>
 
-  <!-- S-FORGOT パスワード再設定 -->
   <div id="s-forgot" style="display:none;flex-direction:column;flex:1;">
     <div class="ahead"><div class="ahtop"><button class="backbtn" id="forgotBackBtn">‹</button><div class="htitle">パスワード再設定</div></div></div>
     <div class="scr">
@@ -201,7 +197,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     <div class="bbar"><button class="pbtn" id="fgBtn" disabled>再設定メールを送る</button></div>
   </div>
 
-  <!-- S-FORGOT-SENT 送信完了 -->
   <div id="s-forgot-sent" style="display:none;flex-direction:column;flex:1;">
     <div class="scr" style="display:flex;flex-direction:column;align-items:center;justify-content:center;">
       <div style="font-size:48px;margin-bottom:16px;">📧</div>
@@ -211,7 +206,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     <div class="bbar"><button class="pbtn" id="toLoginFromSentBtn">ログイン画面に戻る</button></div>
   </div>
 
-  <!-- S3 メニュー選択 -->
   <div id="s-s3" style="display:none;flex-direction:column;flex:1;">
     <div class="ahead"><div class="ahtop"><div class="htitle">メニューを選ぶ</div></div></div>
     <div class="stepper">
@@ -234,7 +228,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     </div>
   </div>
 
-  <!-- S4 日時選択 -->
   <div id="s-s4" style="display:none;flex-direction:column;flex:1;">
     <div class="ahead"><div class="ahtop"><button class="backbtn" id="s4BackBtn">‹</button><div class="htitle">日時を選ぶ</div></div></div>
     <div class="stepper">
@@ -269,7 +262,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     </div>
   </div>
 
-  <!-- S5 確認 -->
   <div id="s-s5" style="display:none;flex-direction:column;flex:1;">
     <div class="ahead"><div class="ahtop"><button class="backbtn" id="s5BackBtn">‹</button><div class="htitle">予約内容の確認</div></div></div>
     <div class="stepper">
@@ -290,7 +282,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     <div class="bbar"><button class="pbtn" id="s5Btn" disabled>この内容で予約する</button></div>
   </div>
 
-  <!-- S6 完了 -->
   <div id="s-s6" style="display:none;flex-direction:column;flex:1;">
     <div class="ahead"><div class="ahtop"><div class="htitle">予約完了</div></div></div>
     <div class="scr">
@@ -305,7 +296,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     </div>
   </div>
 
-  <!-- S7 予約履歴 -->
   <div id="s-s7" style="display:none;flex-direction:column;flex:1;">
     <div class="ahead"><div class="ahtop"><div><div class="htitle">予約履歴</div><div class="hsub" id="histName"></div></div></div></div>
     <div class="scr" id="histScr"></div>
@@ -316,7 +306,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     </div>
   </div>
 
-  <!-- S-STAMP スタンプカード -->
   <div id="s-stamp" style="display:none;flex-direction:column;flex:1;">
     <div class="ahead"><div class="ahtop"><div><div class="htitle">スタンプカード</div><div class="hsub" id="stName"></div></div></div></div>
     <div class="scr" id="stScr"></div>
@@ -327,7 +316,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     </div>
   </div>
 
-  <!-- キャンセルモーダル -->
   <div class="modal" id="canModal">
     <div class="mbody">
       <div class="mtitle">予約をキャンセルしますか？</div>
@@ -338,7 +326,6 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     </div>
   </div>
 
-  <!-- 変更モーダル -->
   <div class="modal" id="chgModal">
     <div class="mbody">
       <div class="mtitle">予約を変更しますか？</div>
@@ -352,6 +339,19 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
 <div class="toast" id="toast"></div>
 
 <script>
+// ★★★ 修正点 ★★★
+// 固定のサロンIDを常にlocalStorageに書き込む
+// このIDはサロン側と共通なので、データの保存場所が一致する
+var SALON_FIXED_ID = 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
+setCurrentSalonId(SALON_FIXED_ID);
+
+// 定期的にlocalStorageが変わってないか監視して再セットする
+setInterval(function() {
+  if (localStorage.getItem('salon_current_id') !== SALON_FIXED_ID) {
+    setCurrentSalonId(SALON_FIXED_ID);
+  }
+}, 1000);
+
 var DOWS = ['日','月','火','水','木','金','土'];
 var authReady = false;
 var st = { name: '', phone: '', email: '', isLine: false, menus: [], options: [], selDate: null, selTime: null, agreed: false };
@@ -387,20 +387,15 @@ function canBook(ds, sm, td, excId) {
   var todayStr = fmtD(now);
   var nowMin = now.getHours() * 60 + now.getMinutes();
 
-  // 過去の日付は不可
   if (ds < todayStr) return { ok: false, reason: '受付期間外' };
 
-  // 受付期間チェック
   var rng = getBookingRange();
   if (ds > rng.toStr) return { ok: false, reason: '受付期間外' };
 
-  // 直前受付制限チェック（lastMin設定）
   var lastMin = s.lastMin || 'same1h';
   if (ds === todayStr) {
-    // 当日の制限
     var limitMin = nowMin;
     if (lastMin === '1week' || lastMin === '3days' || lastMin === '1day') {
-      // 当日不可
       return { ok: false, reason: '当日受付不可' };
     } else if (lastMin === 'same3h') {
       limitMin = nowMin + 180;
@@ -411,7 +406,6 @@ function canBook(ds, sm, td, excId) {
     }
     if (sm < limitMin) return { ok: false, reason: '受付期限超過' };
   } else {
-    // 当日以外の直前制限
     var apptDate = new Date(ds + 'T00:00:00');
     var diffDays = Math.floor((apptDate - new Date(todayStr + 'T00:00:00')) / 86400000);
     if (lastMin === '1week' && diffDays < 7) return { ok: false, reason: '受付期限超過' };
@@ -453,7 +447,6 @@ function goScreen(id) {
   if (id === 's-stamp') renderStamp();
 }
 
-// ===== ログイン =====
 function chkLogin() {
   var e = document.getElementById('lEmail').value.trim();
   var p = document.getElementById('lPass').value;
@@ -467,9 +460,12 @@ function doLogin() {
   document.getElementById('loginBtn').disabled = true;
   document.getElementById('loginBtn').textContent = '確認中...';
   authReady = true;
+  // ★ ログイン処理開始時にも固定IDを再セット
+  setCurrentSalonId(SALON_FIXED_ID);
   window.auth.signInWithEmailAndPassword(e, p)
     .then(function() {
-      // データ再読み込みしてから顧客を特定
+      // ★ ログイン後も固定ID維持
+      setCurrentSalonId(SALON_FIXED_ID);
       loadAllData(function() {
         document.getElementById('loginBtn').disabled = false;
         document.getElementById('loginBtn').textContent = 'ログイン';
@@ -493,7 +489,6 @@ function doLogin() {
     });
 }
 
-// ===== パスワード再設定 =====
 function chkForgot() {
   document.getElementById('fgBtn').disabled = !document.getElementById('fgEmail').value.trim();
   document.getElementById('fgErr').classList.remove('show');
@@ -511,7 +506,6 @@ function doForgot() {
     });
   }
 
-// ===== 新規登録 =====
 function chkReg() {
   var ok = document.getElementById('rSei').value.trim()
     && document.getElementById('rMei').value.trim()
@@ -541,10 +535,13 @@ function doRegister() {
   }
   document.getElementById('regBtn').disabled = true;
   document.getElementById('regBtn').textContent = '登録中...';
+  // ★ 新規登録時も固定IDを再セット
+  setCurrentSalonId(SALON_FIXED_ID);
   window.auth.createUserWithEmailAndPassword(email, pass)
     .then(function(cred) {
-      // 確認メールを送信
       cred.user.sendEmailVerification();
+      // ★ 登録後も固定ID維持（dbAddCustomerが正しい場所に書き込まれるため）
+      setCurrentSalonId(SALON_FIXED_ID);
       var uid = cred.user.uid;
       var name = sei + ' ' + mei;
       var nc = { name: name, phone: phone, email: email, authUid: uid, isLine: false, stamps: 0 };
@@ -571,7 +568,6 @@ function doRegister() {
     });
 }
 
-// ===== メニュー =====
 function renderMenu() {
   st.menus = []; st.options = []; document.getElementById('s3Btn').disabled = true;
   var all = cachedMenus.filter(function(m) { return m.public; });
@@ -631,7 +627,6 @@ function renderMenu() {
   }
 }
 
-// ===== カレンダー =====
 function renderCal() {
   var rng = getBookingRange();
   document.getElementById('calLbl').textContent = calY + '年' + (calM+1) + '月';
@@ -700,7 +695,6 @@ function renderSlots() {
 
 function selTime(t) { st.selTime = t; document.getElementById('s4Btn').disabled = false; renderSlots(); }
 
-// ===== 確認 =====
 function renderConfirm() {
   st.agreed = false;
   var ck = document.getElementById('agChk'); ck.textContent = ''; ck.classList.remove('checked');
@@ -729,7 +723,6 @@ function toggleAgree() {
   document.getElementById('s5Btn').disabled = !st.agreed;
 }
 
-// メール共通送信関数
 function sendEmails(type, dateLabel, timeStr, menuName, customerName, customerEmail, extraInfo, qrUrl) {
   var params = {
     message_type: type,
@@ -745,18 +738,15 @@ function sendEmails(type, dateLabel, timeStr, menuName, customerName, customerEm
   emailjs.send('service_5nw670b', 'template_3d97ydi', params).catch(function() {});
 }
 
-// 日付ラベル生成ヘルパー
 function toDateLabel(dateStr) {
   var p = dateStr.split('-'), dow = DOWS[new Date(dateStr).getDay()];
   return parseInt(p[1]) + '月' + parseInt(p[2]) + '日（' + dow + '）';
 }
 
-// 新規予約メール
 function sendBookingEmails(mn, dateStr, timeStr) {
   sendEmails('ご予約', toDateLabel(dateStr), timeStr, mn, st.name, st.email, '');
 }
 
-// キャンセル通知メール（キャンセル料計算込み）
 function sendCancelEmails(appt) {
   var fee = calcCancelFee(appt);
   var extraInfo = '';
@@ -771,13 +761,11 @@ function sendCancelEmails(appt) {
   sendEmails('キャンセル', toDateLabel(appt.date), appt.start, appt.menu, appt.name, st.email, extraInfo, qrUrl);
 }
 
-// 予約変更通知メール
 function sendChangeEmails(oldAppt, newMn, newDateStr, newTimeStr) {
   var extraInfo = '［変更前］\n■ 日時：' + toDateLabel(oldAppt.date) + ' ' + oldAppt.start + '\n■ メニュー：' + oldAppt.menu;
   sendEmails('変更', toDateLabel(newDateStr), newTimeStr, newMn, st.name, st.email, extraInfo);
 }
 
-// メニュー合計金額取得ヘルパー
 function getMenuTotalPrice(menuStr) {
   var total = 0;
   var names = menuStr ? menuStr.split('・') : [];
@@ -790,7 +778,6 @@ function getMenuTotalPrice(menuStr) {
   return total;
 }
 
-// キャンセル料計算（0なら料金なし）
 function calcCancelFee(appt) {
   var pol = cachedCancelPolicy || {};
   var rates = pol.rates || [];
@@ -820,9 +807,10 @@ function completeBooking() {
   var td = getTotalDur(), mn = '';
   st.menus.forEach(function(m, i) { mn += (i ? '・' : '') + m.name; });
   var s = cachedSettings || {};
+  // ★ 予約保存前に固定IDを再セット（正しい場所に保存されるよう保証）
+  setCurrentSalonId(SALON_FIXED_ID);
   var apptData = { customerId: custId, name: st.name, date: st.selDate, start: st.selTime, durationMin: td, intervalMin: s.intervalMin || 30, menu: mn, status: 'active', type: 'online' };
   if (chgId) {
-    // 変更前の予約情報を保存
     var oldAppt = null;
     for (var i = 0; i < cachedAppointments.length; i++) {
       if (cachedAppointments[i].id === chgId) { oldAppt = cachedAppointments[i]; break; }
@@ -832,7 +820,6 @@ function completeBooking() {
       for (var i = 0; i < cachedAppointments.length; i++) {
         if (cachedAppointments[i].id === chgId) { cachedAppointments[i] = Object.assign({}, cachedAppointments[i], apptData); break; }
       }
-      // 変更通知メール送信
       if (oldAppt) { sendChangeEmails(oldAppt, mn, st.selDate, st.selTime); }
       chgId = null; goScreen('s-s6');
     });
@@ -858,7 +845,6 @@ function renderComplete() {
     '<div class="cfrow"><span class="cflbl">料金</span><span class="cfval price">¥' + tp.toLocaleString() + '</span></div>';
 }
 
-// ===== 予約履歴 =====
 function renderHistory() {
   document.getElementById('histName').textContent = st.name ? st.name + 'さん' : '';
   var cust = null;
@@ -921,7 +907,6 @@ function renderHistory() {
   html += '<div style="margin-top:16px;"><button id="logoutBtn" style="width:100%;padding:11px;background:none;border:1.5px solid var(--bd);border-radius:10px;font-size:13px;color:var(--mu);cursor:pointer;font-family:inherit;">ログアウト</button></div>';
   document.getElementById('histScr').innerHTML = html;
 
-  // イベントリスナー登録（innerHTML後）
   var editProfBtn = document.getElementById('startEditProfBtn');
   if (editProfBtn) editProfBtn.addEventListener('click', function() { editProf = true; renderHistory(); });
   var cancelProfBtn = document.getElementById('cancelEditProfBtn');
@@ -946,7 +931,6 @@ function saveProf() {
   });
 }
 
-// ===== スタンプ =====
 function renderStamp() {
   var sc = cachedStampCard;
   var cust = null;
@@ -985,7 +969,6 @@ function renderStamp() {
     + '<div style="font-size:11px;color:var(--mu);text-align:center;line-height:1.8;margin-top:8px;">スタンプはご来店時にサロンスタッフが付与します。</div>';
 }
 
-// ===== モーダル =====
 function openCan(id) {
   canId = id;
   var a = null;
@@ -1022,17 +1005,26 @@ function openChg(id) {
 
 function startChange() { closeModals(); goScreen('s-s4'); }
 function closeModals() { document.getElementById('canModal').classList.remove('show'); document.getElementById('chgModal').classList.remove('show'); }
+
+// ★★★ 重要修正：ログアウト時、Firebase Authをサインアウトしても固定IDを維持 ★★★
 function doLogout() {
   if (window.auth) window.auth.signOut();
+  // ★ サインアウト後すぐに固定IDを再セット（サロン側のlocalStorageを保護）
+  setCurrentSalonId(SALON_FIXED_ID);
+  // ★ さらに念のため、少し遅らせてもう一度再セット
+  setTimeout(function() { setCurrentSalonId(SALON_FIXED_ID); }, 100);
+  setTimeout(function() { setCurrentSalonId(SALON_FIXED_ID); }, 500);
   custId = null;
   st = { name: '', phone: '', email: '', isLine: false, menus: [], options: [], selDate: null, selTime: null, agreed: false };
   goScreen('s-s1');
   showToast('ログアウトしました');
 }
+
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 3000); }
 
-// ===== 全データ読み込み（グローバル関数） =====
 function loadAllData(cb) {
+  // ★ データ読み込み前に固定IDを再セット
+  setCurrentSalonId(SALON_FIXED_ID);
   dbGetSettings(function(s) { cachedSettings = s;
     dbGetMenus(function(m) { cachedMenus = m;
       dbGetCustomers(function(c) { cachedCustomers = c;
@@ -1053,13 +1045,13 @@ function loadAllData(cb) {
   });
 }
 
-// ===== 初期化 =====
 onFbReady(function() {
-  // 顧客アプリは常にサロンIDを固定で使用
-  setCurrentSalonId('Ej3SdlceD3PZYJWd9t2dwZLHvx32');
+  // ★ Firebase初期化完了後にも固定IDを再セット
+  setCurrentSalonId(SALON_FIXED_ID);
 
-  // Firebase Auth 状態監視（ページ読み込み時の自動ログイン判定）
   window.auth.onAuthStateChanged(function(user) {
+    // ★ 認証状態が変わるたびに固定IDを保持
+    setCurrentSalonId(SALON_FIXED_ID);
     if (authReady) return;
     authReady = true;
     loadAllData(function() {
@@ -1074,6 +1066,8 @@ onFbReady(function() {
           goScreen('s-s3');
         } else {
           window.auth.signOut();
+          // ★ サインアウト後も固定ID維持
+          setCurrentSalonId(SALON_FIXED_ID);
           goScreen('s-s1');
         }
       } else {
@@ -1082,14 +1076,12 @@ onFbReady(function() {
     });
   });
 
-  // ログイン
   document.getElementById('lEmail').addEventListener('input', chkLogin);
   document.getElementById('lPass').addEventListener('input', chkLogin);
   document.getElementById('loginBtn').addEventListener('click', doLogin);
   document.getElementById('toRegBtn').addEventListener('click', function() { goScreen('s-reg'); });
   document.getElementById('toForgotBtn').addEventListener('click', function() { goScreen('s-forgot'); });
 
-  // 新規登録
   document.getElementById('regBackBtn').addEventListener('click', function() { goScreen('s-s1'); });
   document.getElementById('rSei').addEventListener('input', chkReg);
   document.getElementById('rMei').addEventListener('input', chkReg);
@@ -1099,7 +1091,6 @@ onFbReady(function() {
   document.getElementById('rPass2').addEventListener('input', chkReg);
   document.getElementById('regBtn').addEventListener('click', doRegister);
 
-  // パスワード再設定
   document.getElementById('forgotBackBtn').addEventListener('click', function() { goScreen('s-s1'); });
   document.getElementById('fgEmail').addEventListener('input', chkForgot);
   document.getElementById('fgBtn').addEventListener('click', doForgot);
