@@ -57,18 +57,22 @@ var FIREBASE_CONFIG = {
 })();
 
 // –––––––––– サロンID管理 ––––––––––
+// Firebase Auth UID = サロンID として直接参照する方式
+// localStorageを使わないので、顧客アプリとの競合が原理的に発生しない
 var SALON_ID_KEY = 'salon_current_id';
 
 function getCurrentSalonId() {
-  var id = localStorage.getItem(SALON_ID_KEY);
-  if (id) return id;
-  return 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
+  if (window.auth && window.auth.currentUser) {
+    return window.auth.currentUser.uid;
+  }
+  return null;
 }
+// 互換のため関数自体は残す（他ファイルから呼ばれても害がないように空関数化）
 function setCurrentSalonId(id) {
-  localStorage.setItem(SALON_ID_KEY, id);
+  // 何もしない（Auth UIDが自動的にサロンIDになるため）
 }
 function clearCurrentSalonId() {
-  localStorage.removeItem(SALON_ID_KEY);
+  // 何もしない（signOut()でcurrentUserがnullになり自動的にクリアされる）
 }
 
 // –––––––––– Firestore パス ––––––––––

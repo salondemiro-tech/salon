@@ -139,19 +139,6 @@ h2{font-size:17px;font-weight:600;color:var(--ac);text-align:center;margin-botto
 </div>
 <div class="toast" id="toast"></div>
 <script>
-// ★★★ 修正点 ★★★
-// 固定のサロンIDを常にlocalStorageに書き込む
-// 顧客アプリの影響でlocalStorageが変わっても、このページが開かれた時点で常に上書きされる
-var SALON_FIXED_ID = 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
-setCurrentSalonId(SALON_FIXED_ID);
-
-// さらに、定期的にlocalStorageが変わってないか監視して再セットする
-setInterval(function() {
-  if (localStorage.getItem('salon_current_id') !== SALON_FIXED_ID) {
-    setCurrentSalonId(SALON_FIXED_ID);
-  }
-}, 1000);
-
 var regTmp = { name: '', email: '' };
 var VIEWS = ['vLoading','vLogin','vReg','vSetPass','vVerifyWait','vForgot','vForgotSent'];
 function show(id) {
@@ -181,14 +168,10 @@ function doLogin() {
   hideErr('loginErr');
   document.getElementById('loginBtn').disabled = true;
   document.getElementById('loginBtn').textContent = '確認中...';
-  // ★ ログイン処理開始時にも固定IDを再セット（顧客アプリの影響を排除）
-  setCurrentSalonId(SALON_FIXED_ID);
   dbAuthLogin(e, p, function(err, salon) {
     document.getElementById('loginBtn').disabled = false;
     document.getElementById('loginBtn').textContent = 'ログイン';
     if (err) { showErr('loginErr', err.message); return; }
-    // ★ ログイン成功後も固定IDを保持
-    setCurrentSalonId(SALON_FIXED_ID);
     enterDash(salon);
   });
 }
@@ -251,8 +234,6 @@ function checkEmailVerified() {
   user.reload().then(function() {
     var u = dbAuthGetCurrentUser();
     if (u && u.emailVerified) {
-      // ★ 固定IDを保持
-      setCurrentSalonId(SALON_FIXED_ID);
       dbGetSalon(function(salon) {
         if (salon) { enterDash(salon); showToast('登録が完了しました！'); } else { show('vLogin'); }
       });
@@ -301,10 +282,8 @@ function saveProfile() {
   });
 }
 function doLogout() {
-  // ★ サロン側のログアウト：Firebase Authをサインアウト後、固定IDを再セット
+  // Firebase Authをサインアウト（currentUserがnullになり、自動的にサロンIDも無効になる）
   if (window.auth) window.auth.signOut();
-  // localStorageの固定IDは維持（次回サロンログイン時にすぐ使える）
-  setCurrentSalonId(SALON_FIXED_ID);
   document.getElementById('vDash').style.display = 'none';
   document.getElementById('authWrap').style.display = 'block';
   document.getElementById('lEmail').value = '';
@@ -321,12 +300,7 @@ document.getElementById('lEmail').addEventListener('input', chkLogin);
   document.getElementById('lPass').addEventListener('input', chkLogin);
   document.getElementById('loginBtn').addEventListener('click', doLogin);
 onFbReady(function() {
-  // ★ Firebase初期化完了後も固定IDを再セット
-  setCurrentSalonId(SALON_FIXED_ID);
-
   dbAuthOnStateChanged(function(user) {
-    // ★ 認証状態が変わるたびに固定IDを保持
-    setCurrentSalonId(SALON_FIXED_ID);
     if (user) {
       if (!user.emailVerified) {
         document.getElementById('vwEmail').textContent = user.email;
@@ -352,7 +326,7 @@ onFbReady(function() {
   document.getElementById('toRegFromPassBtn').addEventListener('click', function() { show('vReg'); });
   document.getElementById('vwCheckBtn').addEventListener('click', checkEmailVerified);
   document.getElementById('vwResendBtn').addEventListener('click', resendVerifyEmail);
-  document.getElementById('vwCancelBtn').addEventListener('click', function() { if (window.auth) window.auth.signOut(); setCurrentSalonId(SALON_FIXED_ID); show('vLogin'); });
+  document.getElementById('vwCancelBtn').addEventListener('click', function() { if (window.auth) window.auth.signOut(); show('vLogin'); });
   document.getElementById('fgEmail').addEventListener('input', chkForgot);
   document.getElementById('fgBtn').addEventListener('click', doForgot);
   document.getElementById('toLoginFromForgotBtn').addEventListener('click', function() { show('vLogin'); });
