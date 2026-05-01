@@ -17,7 +17,8 @@ var FIREBASE_CONFIG = {
   var scripts = [
     'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
     'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js',
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js'
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js',
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js'
   ];
 
   window._fbReady = false;
@@ -30,6 +31,7 @@ var FIREBASE_CONFIG = {
     firebase.initializeApp(FIREBASE_CONFIG);
     window.db = firebase.firestore();
     window.auth = firebase.auth();
+    window.storage = firebase.storage();
     window._fbReady = true;
     for (var i = 0; i < window._fbReadyCbs.length; i++) {
       window._fbReadyCbs[i]();
@@ -47,9 +49,10 @@ var FIREBASE_CONFIG = {
 
   loadScript(scripts[0], function() {
     var done = 0;
-    function check() { done++; if (done === 2) onAllLoaded(); }
+    function check() { done++; if (done === 3) onAllLoaded(); }
     loadScript(scripts[1], check);
     loadScript(scripts[2], check);
+    loadScript(scripts[3], check);
   });
 })();
 
@@ -335,6 +338,82 @@ function dbSaveCancelPolicy(p, cb) {
   var id = getCurrentSalonId();
   if (!id) { if (cb) cb('no salon'); return; }
   salonDoc(id).collection('config').doc('cancelPolicy').set(p).then(function() {
+    if (cb) cb(null);
+  }).catch(function(e) { if (cb) cb(e); });
+}
+
+// –––––––––– 写真（Firebase Storage） ––––––––––
+// 写真をアップロード（appointmentId配下に保存）
+// fileがFile/Blobの場合はそのまま、Base64文字列の場合はBlobに変換してアップロード
+function dbUploadVisitPhoto(appointmentId, file, cb) {
+  var id = getCurrentSalonId();
+  if (!id) { if (cb) cb('no salon', null); return; }
+  if (!window.storage) { if (cb) cb('storage not ready', null); return; }
+  var photoId = 'p' + Date.now() + '_' + Math.floor(Math.random() * 10000);
+  var path = 'salons/' + id + '/visits/' + appointmentId + '/' + photoId + '.jpg';
+  var ref = window.storage.ref(path);
+  var task;
+  if (typeof file === 'string') {
+    // Base64の場合
+    var idx = file.indexOf(',');
+    var base64 = idx >= 0 ? file.substring(idx + 1) : file;
+    task = ref.putString(base64, 'base64', { contentType: 'image/jpeg' });
+  } else {
+    task = ref.put(file);
+  }
+  task.then(function(snap) {
+    return snap.ref.getDownloadURL();
+  }).then(function(url) {
+    if (cb) cb(null, { id: photoId, path: path, url: url });
+  }).catch(function(e) { if (cb) cb(e, null); });
+}
+
+// 写真の一覧を取得（appointmentに保存されているphotosフィールドから）
+function dbGetVisitPhotos(appointmentId, cb) {
+  var id = getCurrentSalonId();
+  if (!id) { cb([]); return; }
+  salonCol(id, 'appointments').doc(appointmentId).get().then(function(doc) {
+    if (!doc.exists) { cb([]); return; }
+    var data = doc.data();
+    cb(data.photos || []);
+  }).catch(function() { cb([]); });
+}
+
+// 写真の追加（appointmentのphotos配列に追加）
+function dbAddVisitPhoto(appointmentId, photoObj, cb) {
+  var id = getCurrentSalonId();
+  if (!id) { if (cb) cb('no salon'); return; }
+  var ref = salonCol(id, 'appointments').doc(appointmentId);
+  ref.get().then(function(doc) {
+    var photos = (doc.exists && doc.data().photos) || [];
+    photos.push(photoObj);
+    return ref.update({ photos: photos });
+  }).then(function() {
+    if (cb) cb(null);
+  }).catch(function(e) { if (cb) cb(e); });
+}
+
+// 写真の削除（Storageからとappointmentのphotos配列から）
+function dbDeleteVisitPhoto(appointmentId, photoId, cb) {
+  var id = getCurrentSalonId();
+  if (!id) { if (cb) cb('no salon'); return; }
+  var ref = salonCol(id, 'appointments').doc(appointmentId);
+  ref.get().then(function(doc) {
+    if (!doc.exists) { if (cb) cb('not found'); return; }
+    var photos = doc.data().photos || [];
+    var target = null;
+    var newPhotos = [];
+    for (var i = 0; i < photos.length; i++) {
+      if (photos[i].id === photoId) { target = photos[i]; }
+      else { newPhotos.push(photos[i]); }
+    }
+    if (!target) { if (cb) cb('photo not found'); return; }
+    // Storageから削除（失敗しても処理は続ける）
+    if (target.path && window.storage) {
+      window.storage.ref(target.path).delete().catch(function() {});
+    }
+    return ref.update({ photos: newPhotos });
+  }).then(function() {
     if (cb) cb(null);
   }).catch(function(e) { if (cb) cb(e); });
 }

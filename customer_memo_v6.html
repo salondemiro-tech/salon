@@ -62,6 +62,7 @@
   .visit-memo-area{padding:10px 14px;}
   .vm-label{font-size:10px;color:var(--muted);letter-spacing:.08em;margin-bottom:6px;display:flex;align-items:center;justify-content:space-between;}
   .camera-btn{display:inline-flex;align-items:center;gap:4px;padding:4px 10px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-family:inherit;font-weight:600;}
+  .camera-btn:disabled{background:var(--muted);cursor:wait;}
   .vm-ta{width:100%;min-height:64px;padding:9px;border:1px solid var(--border);border-radius:7px;font-size:12px;line-height:1.6;resize:vertical;font-family:inherit;}
   .vm-ta:focus{outline:none;border-color:var(--accent);}
   .vm-saved{font-size:10px;color:var(--green);height:14px;margin-top:3px;}
@@ -70,6 +71,7 @@
   .mp-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:5px;}
   .mp-slot{aspect-ratio:1;border-radius:5px;overflow:hidden;border:1px solid var(--border);position:relative;background:var(--surface);}
   .mp-slot img{width:100%;height:100%;object-fit:cover;display:block;cursor:pointer;}
+  .mp-slot.uploading{display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--muted);}
   .mp-del{position:absolute;top:2px;right:2px;width:18px;height:18px;border-radius:50%;background:rgba(196,123,123,.9);border:none;color:#fff;font-size:10px;cursor:pointer;display:flex;align-items:center;justify-content:center;}
   .mp-empty{font-size:11px;color:var(--muted);padding:8px 0;text-align:center;}
   .modal-bg{display:none;position:fixed;inset:0;background:rgba(0,0,0,.3);z-index:50;align-items:center;justify-content:center;}
@@ -90,6 +92,8 @@
   .nav-item{display:flex;align-items:center;gap:8px;padding:10px 14px;font-size:12px;color:var(--muted);cursor:pointer;transition:all .15s;border-left:3px solid transparent;text-decoration:none;border-bottom:1px solid var(--border);}
   .nav-item:hover{background:var(--accent-light);color:var(--accent);}
   .nav-item.active{color:var(--accent);border-left-color:var(--accent);background:var(--accent-light);font-weight:600;}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#2e5c3a;color:#fff;font-size:12px;padding:9px 20px;border-radius:20px;opacity:0;transition:all .3s;z-index:300;white-space:nowrap;}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0);}
 </style>
 </head>
 <body>
@@ -206,15 +210,11 @@
   <div style="background:#fff;border-radius:14px;padding:24px;width:100%;max-width:480px;box-shadow:0 8px 32px rgba(0,0,0,.15);margin:auto;">
     <h3 style="font-size:16px;font-weight:600;margin-bottom:6px;">顧客カルテを統合</h3>
     <p style="font-size:12px;color:#73726c;margin-bottom:16px;line-height:1.6;">統合元のカルテは削除され、予約履歴・スタンプは統合先に引き継がれます。</p>
-
-    <!-- STEP1: 統合先選択 -->
     <div id="mergeStep1">
       <div style="font-size:12px;font-weight:600;color:#73726c;margin-bottom:8px;">統合先の顧客を検索</div>
       <input type="text" id="mergeSearch" placeholder="氏名・電話番号・メールで検索..." style="width:100%;padding:10px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:9px;font-size:14px;font-family:inherit;margin-bottom:10px;">
       <div id="mergeSearchResults" style="max-height:200px;overflow-y:auto;border:1.5px solid rgba(0,0,0,.08);border-radius:9px;"></div>
     </div>
-
-    <!-- STEP2: 統合内容設定 -->
     <div id="mergeStep2" style="display:none;">
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:12px;background:#f8f7f4;border-radius:10px;">
         <div style="flex:1;text-align:center;">
@@ -227,9 +227,7 @@
           <div id="mergeDstName" style="font-size:13px;font-weight:600;"></div>
         </div>
       </div>
-
       <div style="font-size:12px;font-weight:600;color:#73726c;margin-bottom:10px;">統合後の情報を設定</div>
-
       <div style="margin-bottom:10px;">
         <label style="font-size:12px;font-weight:600;color:#73726c;display:block;margin-bottom:4px;">氏名</label>
         <div style="display:flex;gap:6px;margin-bottom:4px;">
@@ -238,7 +236,6 @@
         </div>
         <input type="text" id="mergeNameFree" placeholder="または自由入力..." style="width:100%;padding:8px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;font-family:inherit;">
       </div>
-
       <div style="margin-bottom:10px;">
         <label style="font-size:12px;font-weight:600;color:#73726c;display:block;margin-bottom:4px;">電話番号</label>
         <div style="display:flex;gap:6px;margin-bottom:4px;">
@@ -247,7 +244,6 @@
         </div>
         <input type="text" id="mergePhoneFree" placeholder="または自由入力..." style="width:100%;padding:8px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;font-family:inherit;">
       </div>
-
       <div style="margin-bottom:16px;">
         <label style="font-size:12px;font-weight:600;color:#73726c;display:block;margin-bottom:4px;">メールアドレス</label>
         <div style="display:flex;gap:6px;margin-bottom:4px;">
@@ -256,12 +252,8 @@
         </div>
         <input type="text" id="mergeEmailFree" placeholder="または自由入力..." style="width:100%;padding:8px 12px;border:1.5px solid rgba(0,0,0,.12);border-radius:8px;font-size:13px;font-family:inherit;">
       </div>
-
-      <div style="padding:10px 12px;background:#e8f2eb;border-radius:8px;font-size:12px;color:#1e4d2b;margin-bottom:16px;">
-        予約履歴・スタンプは自動的に合算されます
-      </div>
+      <div style="padding:10px 12px;background:#e8f2eb;border-radius:8px;font-size:12px;color:#1e4d2b;margin-bottom:16px;">予約履歴・スタンプは自動的に合算されます</div>
     </div>
-
     <div style="display:flex;gap:10px;margin-top:4px;">
       <button id="cancelMergeBtn" style="flex:1;padding:12px;border-radius:10px;border:1.5px solid rgba(0,0,0,.12);background:none;font-size:14px;font-family:inherit;cursor:pointer;color:#73726c;">キャンセル</button>
       <button id="confirmMergeBtn" style="flex:1;padding:12px;border-radius:10px;border:none;background:#b5845a;color:#fff;font-size:14px;font-family:inherit;font-weight:600;cursor:pointer;display:none;">統合する</button>
@@ -269,19 +261,29 @@
   </div>
 </div>
 
+<div class="toast" id="toast"></div>
+
 <script>
+// ★★★ 固定ID保護 ★★★
+var SALON_FIXED_ID = 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
+setCurrentSalonId(SALON_FIXED_ID);
+setInterval(function() {
+  if (localStorage.getItem('salon_current_id') !== SALON_FIXED_ID) {
+    setCurrentSalonId(SALON_FIXED_ID);
+  }
+}, 1000);
+
 var currentCustId = null;
 var currentTab = 'memo';
 var expandedVisitId = null;
 var activeUploadVisitId = null;
 var memoTimers = {};
-var visitPhotos = {};
 var karteTimer = null;
 var sortMode = 'new';
 var DOWS = ['日','月','火','水','木','金','土'];
 var allCustomers = [];
 var allAppointments = [];
-
+var uploadingVisitId = null;
 
 // ===== 統合機能 =====
 var mergeSrcId = null;
@@ -300,10 +302,6 @@ function openMerge() {
 }
 
 function renderMergeResults(q) {
-  var src = null;
-  for (var i = 0; i < allCustomers.length; i++) {
-    if (allCustomers[i].id === mergeSrcId) { src = allCustomers[i]; break; }
-  }
   var results = allCustomers.filter(function(c) {
     if (c.id === mergeSrcId) return false;
     var sq = q.toLowerCase();
@@ -335,28 +333,21 @@ function selectMergeDst(dst) {
   }
   document.getElementById('mergeSrcName').textContent = src ? src.name : '';
   document.getElementById('mergeDstName').textContent = dst.name || '';
-
-  // ボタンにそれぞれの値をセット
   document.getElementById('mergeNameSrc').textContent = src ? src.name : '';
   document.getElementById('mergeNameDst').textContent = dst.name || '';
   document.getElementById('mergePhoneSrc').textContent = src ? src.phone : '';
   document.getElementById('mergePhoneDst').textContent = dst.phone || '';
   document.getElementById('mergeEmailSrc').textContent = src ? src.email : '';
   document.getElementById('mergeEmailDst').textContent = dst.email || '';
-
-  // フリー入力欄に初期値セット
   document.getElementById('mergeNameFree').value = dst.name || '';
   document.getElementById('mergePhoneFree').value = dst.phone || '';
   document.getElementById('mergeEmailFree').value = dst.email || '';
-
-  // ボタンのスタイルリセット
   var btns = document.querySelectorAll('.merge-pick-btn');
   for (var j = 0; j < btns.length; j++) {
     btns[j].style.borderColor = 'rgba(0,0,0,.12)';
     btns[j].style.background = '#fff';
     btns[j].style.color = '#1a1a18';
   }
-
   document.getElementById('mergeStep1').style.display = 'none';
   document.getElementById('mergeStep2').style.display = '';
   document.getElementById('confirmMergeBtn').style.display = '';
@@ -383,27 +374,20 @@ function doMerge() {
   var newPhone = document.getElementById('mergePhoneFree').value.trim();
   var newEmail = document.getElementById('mergeEmailFree').value.trim();
   if (!newName || !newPhone) { alert('氏名と電話番号は必須です'); return; }
-
   var src = null, dst = null;
   for (var i = 0; i < allCustomers.length; i++) {
     if (allCustomers[i].id === mergeSrcId) src = allCustomers[i];
     if (allCustomers[i].id === mergeDstId) dst = allCustomers[i];
   }
   if (!src || !dst) return;
-
   document.getElementById('confirmMergeBtn').disabled = true;
   document.getElementById('confirmMergeBtn').textContent = '統合中...';
-
   var salonId = getCurrentSalonId();
   var batch = window.db.batch();
-
-  // 統合先の顧客情報を更新（スタンプも合算）
   var mergedStamps = (src.stamps || 0) + (dst.stamps || 0);
   batch.update(salonCol(salonId, 'customers').doc(mergeDstId), {
     name: newName, phone: newPhone, email: newEmail, stamps: mergedStamps
   });
-
-  // 統合元の予約を統合先に移す
   for (var j = 0; j < allAppointments.length; j++) {
     if (allAppointments[j].customerId === mergeSrcId) {
       batch.update(salonCol(salonId, 'appointments').doc(allAppointments[j].id), {
@@ -411,10 +395,7 @@ function doMerge() {
       });
     }
   }
-
-  // 統合元を削除
   batch.delete(salonCol(salonId, 'customers').doc(mergeSrcId));
-
   batch.commit().then(function() {
     document.getElementById('mergeOv').style.display = 'none';
     currentCustId = mergeDstId;
@@ -422,7 +403,6 @@ function doMerge() {
     reloadAll(function() { renderCustList(); selectCust(currentCustId); });
     showToast('統合が完了しました');
   }).catch(function(e) {
-    // 統合自体は成功している場合が多いので再読み込みして確認
     document.getElementById('mergeOv').style.display = 'none';
     currentCustId = mergeDstId;
     mergeSrcId = null; mergeDstId = null;
@@ -514,8 +494,6 @@ function renderMemoTab() {
   if (!cust) return;
   var tc = document.getElementById('tabContent');
   tc.innerHTML = '';
-
-  // スタンプカード
   dbGetStampCard(function(sc) {
     if (sc && sc.enabled) {
       var goal = sc.goal || 10;
@@ -541,7 +519,6 @@ function renderMemoTab() {
       })(currentCustId);
       tc.appendChild(spDiv);
     }
-
     var lbl = document.createElement('div'); lbl.className = 'slabel'; lbl.innerHTML = 'カルテメモ <span style="font-size:10px;color:var(--accent);">自動保存</span>';
     var ta = document.createElement('textarea'); ta.className = 'memo-ta'; ta.id = 'karteText'; ta.value = cust.karteNote || '';
     ta.addEventListener('input', onKarteInput);
@@ -584,7 +561,7 @@ function renderHistoryTab() {
     var bCls = isCan ? 'badge-cancel' : a.type === 'online' ? 'badge-online' : 'badge-manual';
     var bLbl = isCan ? 'キャンセル' : a.type === 'online' ? 'アプリ予約' : '手動登録';
     var payDisp = a.payment != null ? '¥' + a.payment.toLocaleString() : '未入力';
-    var photos = visitPhotos[a.id] || [];
+    var photos = a.photos || [];
     var card = document.createElement('div'); card.className = 'visit-card'; card.id = 'vc_' + a.id;
     var hdr = document.createElement('div'); hdr.className = 'visit-header';
     hdr.innerHTML = '<div><div class="vh-date" style="' + (isCan ? 'text-decoration:line-through;color:var(--muted);' : '') + '">'
@@ -597,13 +574,14 @@ function renderHistoryTab() {
     var body = document.createElement('div'); body.className = 'visit-body' + (isOpen ? ' open' : ''); body.id = 'vb_' + a.id;
     var photoHtml = '';
     for (var pi = 0; pi < photos.length; pi++) {
-      photoHtml += '<div class="mp-slot"><img class="mp-img" src="' + photos[pi].dataUrl + '"><button class="mp-del" data-aid="' + a.id + '" data-pi="' + pi + '">×</button></div>';
+      photoHtml += '<div class="mp-slot"><img class="mp-img" src="' + photos[pi].url + '"><button class="mp-del" data-aid="' + a.id + '" data-pid="' + photos[pi].id + '">×</button></div>';
     }
+    var uploadingBlock = (uploadingVisitId === a.id) ? '<div class="mp-slot uploading">アップロード中...</div>' : '';
     if (isCan) {
       body.innerHTML = '<div class="visit-memo-area"><div class="vm-label"><span>メモ</span><button class="camera-btn" data-vid="' + a.id + '">📷 写真・ライブラリ</button></div>'
         + '<textarea class="vm-ta" id="vm_' + a.id + '" data-vid="' + a.id + '">' + (a.visitMemo || '') + '</textarea>'
         + '<div class="vm-saved" id="vms_' + a.id + '"></div></div>'
-        + (photos.length ? '<div class="memo-photos"><div class="mp-label">写真（' + photos.length + '枚）</div><div class="mp-grid">' + photoHtml + '</div></div>' : '');
+        + ((photos.length || uploadingBlock) ? '<div class="memo-photos"><div class="mp-label">写真（' + photos.length + '枚）</div><div class="mp-grid">' + photoHtml + uploadingBlock + '</div></div>' : '');
     } else {
       body.innerHTML = '<div class="payment-row"><label>支払い金額</label>'
         + '<input class="pay-input" type="number" id="pay_' + a.id + '" value="' + (a.payment != null ? a.payment : '') + '" placeholder="0" min="0" step="100">'
@@ -613,14 +591,14 @@ function renderHistoryTab() {
         + '<div class="visit-memo-area"><div class="vm-label"><span>この日のメモ</span><button class="camera-btn" data-vid="' + a.id + '">📷 写真・ライブラリ</button></div>'
         + '<textarea class="vm-ta" id="vm_' + a.id + '" data-vid="' + a.id + '" placeholder="施術内容・申し送りなど...">' + (a.visitMemo || '') + '</textarea>'
         + '<div class="vm-saved" id="vms_' + a.id + '"></div></div>'
-        + (photos.length ? '<div class="memo-photos"><div class="mp-label">写真（' + photos.length + '枚）</div><div class="mp-grid">' + photoHtml + '</div></div>' : '<div class="memo-photos"><div class="mp-empty">📷 写真ボタンから追加できます</div></div>');
+        + ((photos.length || uploadingBlock) ? '<div class="memo-photos"><div class="mp-label">写真（' + photos.length + '枚）</div><div class="mp-grid">' + photoHtml + uploadingBlock + '</div></div>' : '<div class="memo-photos"><div class="mp-empty">📷 写真ボタンから追加できます</div></div>');
     }
     (function(aid, bd) {
       bd.querySelectorAll('.camera-btn').forEach(function(el) { el.addEventListener('click', function() { triggerCamera(el.getAttribute('data-vid')); }); });
       bd.querySelectorAll('.vm-ta').forEach(function(el) { el.addEventListener('input', function() { onVmInput(el.getAttribute('data-vid')); }); });
       bd.querySelectorAll('.pay-save').forEach(function(el) { el.addEventListener('click', function() { savePay(el.getAttribute('data-vid')); }); });
       bd.querySelectorAll('.mp-img').forEach(function(el) { el.addEventListener('click', function() { openImgModal(el.src); }); });
-      bd.querySelectorAll('.mp-del').forEach(function(el) { el.addEventListener('click', function(e) { e.stopPropagation(); deletePhoto(el.getAttribute('data-aid'), parseInt(el.getAttribute('data-pi'))); }); });
+      bd.querySelectorAll('.mp-del').forEach(function(el) { el.addEventListener('click', function(e) { e.stopPropagation(); deletePhoto(el.getAttribute('data-aid'), el.getAttribute('data-pid')); }); });
     })(a.id, body);
     card.appendChild(hdr); card.appendChild(body); tc.appendChild(card);
   }
@@ -654,20 +632,79 @@ function onVmInput(id) {
   }, 800);
 }
 
-function triggerCamera(visitId) { activeUploadVisitId = visitId; document.getElementById('cameraInput').value = ''; document.getElementById('cameraInput').click(); }
+function triggerCamera(visitId) {
+  if (uploadingVisitId) { alert('別の写真をアップロード中です。少し待ってから再度お試しください。'); return; }
+  activeUploadVisitId = visitId;
+  document.getElementById('cameraInput').value = '';
+  document.getElementById('cameraInput').click();
+}
+
+// 画像をリサイズしてからアップロード（Storage容量節約）
+function resizeImage(file, maxW, maxH, cb) {
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var img = new Image();
+    img.onload = function() {
+      var w = img.width, h = img.height;
+      if (w > maxW || h > maxH) {
+        var ratio = Math.min(maxW / w, maxH / h);
+        w = Math.round(w * ratio);
+        h = Math.round(h * ratio);
+      }
+      var canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      var ctx = canvas.getContext('2d');
+      ctx.drawImage(img, 0, 0, w, h);
+      canvas.toBlob(function(blob) { cb(blob); }, 'image/jpeg', 0.85);
+    };
+    img.onerror = function() { cb(file); };
+    img.src = e.target.result;
+  };
+  reader.onerror = function() { cb(file); };
+  reader.readAsDataURL(file);
+}
+
 function handlePhoto(event) {
   var file = event.target.files[0]; if (!file) return;
   if (file.type.indexOf('image/') < 0) { alert('画像ファイルを選択してください'); return; }
-  var reader = new FileReader();
-  reader.onload = function(e) {
-    var now = new Date(), time = String(now.getHours()).padStart(2, '0') + ':' + String(now.getMinutes()).padStart(2, '0');
-    var vid = activeUploadVisitId;
-    if (vid) { if (!visitPhotos[vid]) visitPhotos[vid] = []; visitPhotos[vid].push({ dataUrl: e.target.result, time: time }); }
-    renderHistoryTab();
-  };
-  reader.readAsDataURL(file);
+  var vid = activeUploadVisitId;
+  if (!vid) return;
+  uploadingVisitId = vid;
+  renderHistoryTab();
+  // 画像をリサイズ（最大1600x1600）
+  resizeImage(file, 1600, 1600, function(blob) {
+    dbUploadVisitPhoto(vid, blob, function(err, photo) {
+      if (err) {
+        uploadingVisitId = null;
+        renderHistoryTab();
+        alert('写真のアップロードに失敗しました：' + (err.message || err));
+        return;
+      }
+      // appointmentに写真情報を追加
+      dbAddVisitPhoto(vid, { id: photo.id, path: photo.path, url: photo.url, time: new Date().toISOString() }, function(err2) {
+        uploadingVisitId = null;
+        if (err2) {
+          renderHistoryTab();
+          alert('写真情報の保存に失敗しました');
+          return;
+        }
+        reloadAll(function() {
+          renderHistoryTab();
+          showToast('写真を追加しました');
+        });
+      });
+    });
+  });
 }
-function deletePhoto(visitId, idx) { if (visitPhotos[visitId]) visitPhotos[visitId].splice(idx, 1); renderHistoryTab(); }
+
+function deletePhoto(visitId, photoId) {
+  if (!confirm('この写真を削除しますか？')) return;
+  dbDeleteVisitPhoto(visitId, photoId, function(err) {
+    if (err) { alert('削除に失敗しました'); return; }
+    reloadAll(function() { renderHistoryTab(); showToast('写真を削除しました'); });
+  });
+}
+
 function openImgModal(src) { document.getElementById('imgModalSrc').src = src; document.getElementById('imgModal').classList.add('show'); }
 function closeImgModal() { document.getElementById('imgModal').classList.remove('show'); }
 
@@ -703,7 +740,6 @@ function confirmDeleteCust() {
   if (!salonId) return;
   var batch = window.db.batch();
   batch.delete(salonCol(salonId, 'customers').doc(currentCustId));
-  // 予約も削除
   var apptIds = [];
   for (var i = 0; i < allAppointments.length; i++) {
     if (allAppointments[i].customerId === currentCustId) apptIds.push(allAppointments[i].id);
@@ -750,9 +786,11 @@ function setSortMode(mode) {
   renderCustList();
 }
 
-onFbReady(function() {
-  reloadAll(function() { renderCustList(); });
+function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 2500); }
 
+onFbReady(function() {
+  setCurrentSalonId(SALON_FIXED_ID);
+  reloadAll(function() { renderCustList(); });
   document.getElementById('custSearch').addEventListener('input', renderCustList);
   document.getElementById('custSearchPhone').addEventListener('input', renderCustList);
   document.getElementById('custSearchEmail').addEventListener('input', renderCustList);
