@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>デバッグ - データ確認</title>
+<script src="shared_db.js"></script>
+<style>
+  body{font-family:sans-serif;padding:20px;line-height:1.8;font-size:14px;}
+  .box{border:1px solid #ccc;border-radius:8px;padding:14px;margin:10px 0;background:#f9f9f9;}
+  .label{font-weight:bold;color:#666;font-size:12px;}
+  .value{font-family:monospace;background:#fff;padding:4px 8px;border-radius:4px;word-break:break-all;}
+  .ok{color:green;font-weight:bold;}
+  .ng{color:red;font-weight:bold;}
+  h2{font-size:16px;margin:20px 0 10px;}
+  pre{background:#fff;padding:10px;border-radius:4px;overflow-x:auto;font-size:11px;}
+</style>
+</head>
+<body>
+<h1>🔍 データ確認デバッグページ</h1>
+<p>このページは shared_db.js が正しく動いているか確認するためのものです。</p>
+
+<div class="box">
+  <h2>① ログイン状態</h2>
+  <div id="loginStatus">確認中...</div>
+</div>
+
+<div class="box">
+  <h2>② getCurrentSalonId() の結果</h2>
+  <div id="salonIdStatus">確認中...</div>
+</div>
+
+<div class="box">
+  <h2>③ 顧客データ（customers）</h2>
+  <div id="customersStatus">確認中...</div>
+</div>
+
+<div class="box">
+  <h2>④ メニューデータ（menus）</h2>
+  <div id="menusStatus">確認中...</div>
+</div>
+
+<div class="box">
+  <h2>⑤ サロン情報（ドキュメント自体）</h2>
+  <div id="salonDocStatus">確認中...</div>
+</div>
+
+<div class="box">
+  <h2>⑥ localStorage の中身</h2>
+  <pre id="lsStatus">確認中...</pre>
+</div>
+
+<script>
+function showLoginStatus() {
+  var div = document.getElementById('loginStatus');
+  if (!window.auth) {
+    div.innerHTML = '<span class="ng">❌ window.auth が存在しません（shared_db.js が読み込まれていない可能性）</span>';
+    return;
+  }
+  var u = window.auth.currentUser;
+  if (!u) {
+    div.innerHTML = '<span class="ng">❌ ログインしていません</span><br>'
+      + '<small>このページを開く前に、salon_auth_v2.html でログインしてからここに来てください</small>';
+    return;
+  }
+  div.innerHTML = '<span class="ok">✅ ログイン済み</span><br>'
+    + '<span class="label">UID:</span> <span class="value">' + u.uid + '</span><br>'
+    + '<span class="label">Email:</span> <span class="value">' + (u.email || '(なし)') + '</span>';
+}
+
+function showSalonId() {
+  var div = document.getElementById('salonIdStatus');
+  try {
+    var id = getCurrentSalonId();
+    if (!id) {
+      div.innerHTML = '<span class="ng">❌ getCurrentSalonId() が null または空を返しました</span>';
+      return;
+    }
+    div.innerHTML = '<span class="ok">✅ 取得成功</span><br>'
+      + '<span class="label">サロンID:</span> <span class="value">' + id + '</span>';
+  } catch (e) {
+    div.innerHTML = '<span class="ng">❌ エラー: ' + e.message + '</span>';
+  }
+}
+
+function showCustomers() {
+  var div = document.getElementById('customersStatus');
+  try {
+    dbGetCustomers(function(custs) {
+      if (!custs) {
+        div.innerHTML = '<span class="ng">❌ 結果が null/undefined</span>';
+        return;
+      }
+      if (custs.length === 0) {
+        div.innerHTML = '<span class="ng">❌ 0件（読めていない）</span>';
+        return;
+      }
+      var html = '<span class="ok">✅ ' + custs.length + '件取得</span>';
+      for (var i = 0; i < custs.length; i++) {
+        var c = custs[i];
+        html += '<br><span class="value">' + c.id + ' / ' + c.name + ' / ' + (c.phone || '') + '</span>';
+      }
+      div.innerHTML = html;
+    });
+  } catch (e) {
+    div.innerHTML = '<span class="ng">❌ エラー: ' + e.message + '</span>';
+  }
+}
+
+function showMenus() {
+  var div = document.getElementById('menusStatus');
+  try {
+    dbGetMenus(function(menus) {
+      if (!menus) {
+        div.innerHTML = '<span class="ng">❌ 結果が null/undefined</span>';
+        return;
+      }
+      if (menus.length === 0) {
+        div.innerHTML = '<span class="ng">❌ 0件（読めていない）</span>';
+        return;
+      }
+      var html = '<span class="ok">✅ ' + menus.length + '件取得</span>';
+      for (var i = 0; i < menus.length; i++) {
+        var m = menus[i];
+        html += '<br><span class="value">' + m.id + ' / ' + (m.name || '') + ' / ¥' + (m.price || 0) + '</span>';
+      }
+      div.innerHTML = html;
+    });
+  } catch (e) {
+    div.innerHTML = '<span class="ng">❌ エラー: ' + e.message + '</span>';
+  }
+}
+
+function showSalonDoc() {
+  var div = document.getElementById('salonDocStatus');
+  try {
+    var id = getCurrentSalonId();
+    if (!id) { div.innerHTML = '<span class="ng">❌ サロンIDがないので確認できません</span>'; return; }
+    window.db.collection('salons').doc(id).get().then(function(doc) {
+      if (!doc.exists) {
+        div.innerHTML = '<span class="ng">❌ サロンドキュメントが存在しません（exists: false）</span><br>'
+          + '<small>これが原因かもしれません！データはサブコレクションにあっても、親ドキュメントが「存在しない」状態だと読めないことがあります。</small>';
+        return;
+      }
+      var data = doc.data();
+      div.innerHTML = '<span class="ok">✅ ドキュメント存在</span><br>'
+        + '<pre>' + JSON.stringify(data, null, 2) + '</pre>';
+    }).catch(function(e) {
+      div.innerHTML = '<span class="ng">❌ 取得エラー: ' + e.message + '</span>';
+    });
+  } catch (e) {
+    div.innerHTML = '<span class="ng">❌ エラー: ' + e.message + '</span>';
+  }
+}
+
+function showLocalStorage() {
+  var pre = document.getElementById('lsStatus');
+  var keys = [];
+  for (var i = 0; i < localStorage.length; i++) {
+    var k = localStorage.key(i);
+    var v = localStorage.getItem(k);
+    if (v && v.length > 200) v = v.substring(0, 200) + '... (省略)';
+    keys.push(k + ' = ' + v);
+  }
+  pre.textContent = keys.length ? keys.join('\n') : '(空)';
+}
+
+onFbReady(function() {
+  showLoginStatus();
+  setTimeout(function() {
+    showSalonId();
+    showCustomers();
+    showMenus();
+    showSalonDoc();
+    showLocalStorage();
+  }, 500);
+});
+</script>
+</body>
+</html>
