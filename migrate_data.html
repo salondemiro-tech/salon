@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>データ移行ツール</title>
+<script src="shared_db.js"></script>
+<style>
+body{font-family:Georgia,serif;background:#f0ede8;padding:20px;max-width:800px;margin:0 auto;color:#1a1a18;}
+h1{font-size:20px;color:#7a5535;margin-bottom:8px;}
+.note{font-size:13px;color:#73726c;margin-bottom:20px;line-height:1.7;}
+.box{background:#fff;border:1.5px solid rgba(0,0,0,.10);border-radius:12px;padding:20px;margin-bottom:16px;}
+.label{font-size:12px;color:#73726c;font-weight:600;margin-bottom:8px;}
+.value{font-size:14px;font-family:monospace;background:#f8f7f4;padding:8px 12px;border-radius:6px;word-break:break-all;}
+.danger{background:#faeaea;border:1.5px solid #c47b7b;color:#6b1f1f;padding:14px;border-radius:10px;font-size:13px;line-height:1.7;margin-bottom:16px;}
+.success{background:#e8f2eb;border:1.5px solid #7b9e87;color:#1e4d2b;padding:14px;border-radius:10px;font-size:13px;line-height:1.7;margin-bottom:16px;}
+button{padding:14px 24px;background:#b5845a;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;width:100%;margin-bottom:8px;}
+button:disabled{background:rgba(0,0,0,.2);color:#73726c;cursor:not-allowed;}
+button.danger-btn{background:#c47b7b;}
+button.outline{background:none;border:1.5px solid #b5845a;color:#b5845a;}
+.log{background:#1a1a18;color:#a8d8b0;padding:14px;border-radius:8px;font-family:monospace;font-size:12px;line-height:1.7;max-height:400px;overflow-y:auto;margin-top:12px;}
+.log-line{margin-bottom:2px;}
+.log-line.error{color:#ff8c8c;}
+.log-line.success{color:#a8d8b0;}
+.log-line.info{color:#a0c0e0;}
+.log-line.warn{color:#f0d08c;}
+hr{border:none;border-top:1px solid rgba(0,0,0,.10);margin:16px 0;}
+</style>
+</head>
+<body>
+
+<h1>📦 データ移行ツール</h1>
+<div class="note">
+旧サロンID（固定ID）から新サロンID（Firebase Auth UID）へデータを移行します。<br>
+<strong>このツールは一度きりの使用を想定しています。移行後は削除してください。</strong>
+</div>
+
+<div class="box">
+  <div class="label">移行元（旧固定ID）</div>
+  <div class="value">Ej3SdlceD3PZYJWd9t2dwZLHvx32</div>
+  <hr>
+  <div class="label">移行先（いけさんのFirebase Auth UID）</div>
+  <div class="value">hTWPrkP1nPebpmGcb6iguviLmEl2</div>
+</div>
+
+<div class="danger">
+<strong>⚠️ 実行前の確認事項</strong><br>
+1. このツールは Salon Manager（salon_auth_v2.html）でログイン済みの状態で実行してください<br>
+2. 移行先（新ID）に既存データがあれば上書きされます<br>
+3. 移行元（旧ID）のデータは削除されません（安全のため残します）<br>
+4. 移行は appointments / config / customers / menus の4コレクションです
+</div>
+
+<div class="box">
+  <div class="label">ステップ1：認証確認</div>
+  <button id="checkAuthBtn">認証状態を確認する</button>
+  <div id="authResult"></div>
+</div>
+
+<div class="box">
+  <div class="label">ステップ2：データ移行を実行</div>
+  <button id="migrateBtn" disabled>データ移行を開始する</button>
+  <div id="migrateLog" class="log" style="display:none;"></div>
+</div>
+
+<div class="box">
+  <div class="label">ステップ3：（任意）新ID側の不要な孤立予約を削除</div>
+  <div class="note">
+    新ID側に「キャンセル済み・customerIdなし」の孤立した予約データが6件あります。<br>
+    これらは過去のテストで生成された不要データです。<br>
+    <strong>移行完了後</strong>に削除することをおすすめします。
+  </div>
+  <button id="cleanupBtn" class="danger-btn" disabled>孤立した不要予約を削除する</button>
+  <div id="cleanupLog" class="log" style="display:none;"></div>
+</div>
+
+<script>
+var SOURCE_SALON_ID = 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
+var TARGET_SALON_ID = 'hTWPrkP1nPebpmGcb6iguviLmEl2';
+var COLLECTIONS_TO_MIGRATE = ['appointments', 'config', 'customers', 'menus'];
+
+var authReady = false;
+var migrationDone = false;
+
+function logMsg(elId, msg, type) {
+  var el = document.getElementById(elId);
+  el.style.display = 'block';
+  var line = document.createElement('div');
+  line.className = 'log-line ' + (type || '');
+  line.textContent = '[' + new Date().toLocaleTimeString() + '] ' + msg;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+
+function checkAuth() {
+  var resultEl = document.getElementById('authResult');
+  resultEl.innerHTML = '';
+  if (!window.auth) {
+    resultEl.innerHTML = '<div class="danger" style="margin-top:12px;">❌ Firebaseが初期化されていません</div>';
+    return;
+  }
+  var user = window.auth.currentUser;
+  if (!user) {
+    resultEl.innerHTML = '<div class="danger" style="margin-top:12px;">❌ ログインしていません。<br>先に Salon Manager（salon_auth_v2.html）でログインしてください。</div>';
+    return;
+  }
+  if (user.uid !== TARGET_SALON_ID) {
+    resultEl.innerHTML = '<div class="danger" style="margin-top:12px;">❌ ログインユーザーのUIDが想定と一致しません。<br>現在のUID: ' + user.uid + '<br>想定UID: ' + TARGET_SALON_ID + '</div>';
+    return;
+  }
+  resultEl.innerHTML = '<div class="success" style="margin-top:12px;">✅ 認証OK<br>ログイン中: ' + user.email + '<br>UID: ' + user.uid + '</div>';
+  authReady = true;
+  document.getElementById('migrateBtn').disabled = false;
+}
+
+function migrateCollection(collName, cb) {
+  logMsg('migrateLog', '▶ ' + collName + ' のコピーを開始...', 'info');
+  var srcPath = window.db.collection('salons').doc(SOURCE_SALON_ID).collection(collName);
+  var dstPath = window.db.collection('salons').doc(TARGET_SALON_ID).collection(collName);
+  srcPath.get().then(function(snap) {
+    var docs = [];
+    snap.forEach(function(doc) {
+      docs.push({ id: doc.id, data: doc.data() });
+    });
+    logMsg('migrateLog', '  ' + collName + ': ' + docs.length + ' 件のドキュメントを発見', 'info');
+    if (docs.length === 0) {
+      logMsg('migrateLog', '  ' + collName + ': コピーするデータなし', 'warn');
+      cb();
+      return;
+    }
+    var copied = 0;
+    var errors = 0;
+    function copyNext(i) {
+      if (i >= docs.length) {
+        logMsg('migrateLog', '  ✓ ' + collName + ': ' + copied + ' 件コピー完了' + (errors > 0 ? '（エラー ' + errors + ' 件）' : ''), errors > 0 ? 'warn' : 'success');
+        cb();
+        return;
+      }
+      var d = docs[i];
+      dstPath.doc(d.id).set(d.data).then(function() {
+        copied++;
+        copyNext(i + 1);
+      }).catch(function(err) {
+        errors++;
+        logMsg('migrateLog', '    ✗ ' + d.id + ' のコピー失敗: ' + err.message, 'error');
+        copyNext(i + 1);
+      });
+    }
+    copyNext(0);
+  }).catch(function(err) {
+    logMsg('migrateLog', '  ✗ ' + collName + ' の読み込み失敗: ' + err.message, 'error');
+    cb();
+  });
+}
+
+function startMigration() {
+  if (!authReady) return;
+  document.getElementById('migrateBtn').disabled = true;
+  document.getElementById('migrateBtn').textContent = '移行中...';
+  document.getElementById('migrateLog').innerHTML = '';
+
+  logMsg('migrateLog', '=== データ移行開始 ===', 'info');
+  logMsg('migrateLog', '元: ' + SOURCE_SALON_ID, 'info');
+  logMsg('migrateLog', '先: ' + TARGET_SALON_ID, 'info');
+  logMsg('migrateLog', '対象コレクション: ' + COLLECTIONS_TO_MIGRATE.join(', '), 'info');
+  logMsg('migrateLog', '', 'info');
+
+  var idx = 0;
+  function next() {
+    if (idx >= COLLECTIONS_TO_MIGRATE.length) {
+      logMsg('migrateLog', '', 'info');
+      logMsg('migrateLog', '=== 🎉 全コレクションの移行完了 ===', 'success');
+      logMsg('migrateLog', '', 'info');
+      logMsg('migrateLog', '次のステップ:', 'info');
+      logMsg('migrateLog', '1. Salon Manager にログインし直して、顧客管理に池元さん・山田さんが表示されるか確認', 'info');
+      logMsg('migrateLog', '2. カレンダーに予約が表示されるか確認', 'info');
+      logMsg('migrateLog', '3. 顧客アプリ（misako_ikechan@yahoo.ne.jp）でログインして、予約履歴・スタンプが見えるか確認', 'info');
+      logMsg('migrateLog', '4. 全部OKなら、ステップ3で孤立予約データを削除', 'info');
+      document.getElementById('migrateBtn').textContent = '✓ 移行完了';
+      migrationDone = true;
+      document.getElementById('cleanupBtn').disabled = false;
+      return;
+    }
+    migrateCollection(COLLECTIONS_TO_MIGRATE[idx], function() {
+      idx++;
+      next();
+    });
+  }
+  next();
+}
+
+function cleanupOrphanedAppointments() {
+  if (!migrationDone) return;
+  if (!confirm('新ID側の孤立した予約データ（customerId: null かつ status: cancelled）を削除します。\n本当に実行しますか？')) {
+    return;
+  }
+  document.getElementById('cleanupBtn').disabled = true;
+  document.getElementById('cleanupBtn').textContent = '削除中...';
+  document.getElementById('cleanupLog').innerHTML = '';
+
+  logMsg('cleanupLog', '=== 孤立予約データの削除開始 ===', 'info');
+  var dstPath = window.db.collection('salons').doc(TARGET_SALON_ID).collection('appointments');
+  dstPath.get().then(function(snap) {
+    var toDelete = [];
+    snap.forEach(function(doc) {
+      var d = doc.data();
+      // customerIdがnullまたは未定義かつstatusがcancelledのものを削除対象とする
+      if ((!d.customerId || d.customerId === null) && d.status === 'cancelled') {
+        toDelete.push({ id: doc.id, data: d });
+      }
+    });
+    logMsg('cleanupLog', '削除対象: ' + toDelete.length + ' 件', 'info');
+    if (toDelete.length === 0) {
+      logMsg('cleanupLog', '削除対象なし。完了。', 'success');
+      document.getElementById('cleanupBtn').textContent = '✓ 完了';
+      return;
+    }
+    var deleted = 0;
+    var errors = 0;
+    function delNext(i) {
+      if (i >= toDelete.length) {
+        logMsg('cleanupLog', '=== 🎉 削除完了: ' + deleted + ' 件 ===', 'success');
+        document.getElementById('cleanupBtn').textContent = '✓ 完了';
+        return;
+      }
+      var t = toDelete[i];
+      logMsg('cleanupLog', '削除: ' + t.id + ' (' + (t.data.date || '?') + ' ' + (t.data.start || '?') + ')', 'info');
+      dstPath.doc(t.id).delete().then(function() {
+        deleted++;
+        delNext(i + 1);
+      }).catch(function(err) {
+        errors++;
+        logMsg('cleanupLog', '  ✗ ' + t.id + ' 削除失敗: ' + err.message, 'error');
+        delNext(i + 1);
+      });
+    }
+    delNext(0);
+  }).catch(function(err) {
+    logMsg('cleanupLog', '✗ 読み込み失敗: ' + err.message, 'error');
+    document.getElementById('cleanupBtn').disabled = false;
+    document.getElementById('cleanupBtn').textContent = '孤立した不要予約を削除する';
+  });
+}
+
+document.getElementById('checkAuthBtn').addEventListener('click', checkAuth);
+document.getElementById('migrateBtn').addEventListener('click', startMigration);
+document.getElementById('cleanupBtn').addEventListener('click', cleanupOrphanedAppointments);
+
+// Firebase初期化を待つ
+onFbReady(function() {
+  // 初期化完了後、自動的に認証チェックは行わない（ユーザーがボタンで実行）
+});
+</script>
+
+</body>
+</html>
