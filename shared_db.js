@@ -32,11 +32,19 @@ var FIREBASE_CONFIG = {
     window.db = firebase.firestore();
     window.auth = firebase.auth();
     window.storage = firebase.storage();
-    window._fbReady = true;
-    for (var i = 0; i < window._fbReadyCbs.length; i++) {
-      window._fbReadyCbs[i]();
-    }
-    window._fbReadyCbs = [];
+    // ★ Auth状態が確定するまで待つ（最初の onAuthStateChanged 発火を待機）
+    // これによりログイン済みのページではcurrentUserが復元された後にコールバックが実行される
+    var authResolved = false;
+    var unsubscribe = window.auth.onAuthStateChanged(function() {
+      if (authResolved) return;
+      authResolved = true;
+      if (unsubscribe) unsubscribe();
+      window._fbReady = true;
+      for (var i = 0; i < window._fbReadyCbs.length; i++) {
+        window._fbReadyCbs[i]();
+      }
+      window._fbReadyCbs = [];
+    });
   }
 
   function loadScript(src, cb) {
