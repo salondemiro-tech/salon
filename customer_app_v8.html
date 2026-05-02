@@ -155,7 +155,7 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     <div class="scr">
       <div class="logo"><div class="logon" id="salonNameLogin">Salon ✦ Name</div><div class="logos">ご予約はこちらから</div></div>
       <div class="fg"><label class="flbl">メールアドレス</label>
-        <input class="finp" id="lEmail" type="email" placeholder="例：hanako@example.com">
+        <input class="finp" id="lEmail" type="email" placeholder="例:hanako@example.com">
       </div>
       <div class="fg"><label class="flbl">パスワード</label>
         <input class="finp" id="lPass" type="password" placeholder="パスワード">
@@ -165,7 +165,7 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
     </div>
     <div class="bbar">
       <button class="pbtn" id="loginBtn" disabled>ログイン</button>
-      <button class="newlnk" id="toRegBtn">初めての方はこちら（新規登録）</button>
+      <button class="newlnk" id="toRegBtn">初めての方はこちら(新規登録)</button>
     </div>
   </div>
 
@@ -181,7 +181,7 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
       <div class="fg"><label class="flbl">電話番号</label><input type="tel" class="finp" id="rPhone" placeholder="09012345678"></div>
       <div class="fg"><label class="flbl">メールアドレス</label><input class="finp" id="rEmail" type="email" placeholder="メールアドレス"></div>
       <div class="fg"><label class="flbl">パスワード</label><input class="finp" id="rPass" type="password" placeholder="8文字以上・英字・数字を含む"></div>
-      <div class="fg"><label class="flbl">パスワード（確認）</label><input class="finp" id="rPass2" type="password" placeholder="もう一度入力"></div>
+      <div class="fg"><label class="flbl">パスワード(確認)</label><input class="finp" id="rPass2" type="password" placeholder="もう一度入力"></div>
       <div id="regErr" class="errmsg"></div>
     </div>
     <div class="bbar"><button class="pbtn" id="regBtn" disabled>登録する</button></div>
@@ -318,7 +318,7 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
 
   <div class="modal" id="canModal">
     <div class="mbody">
-      <div class="mtitle">予約をキャンセルしますか？</div>
+      <div class="mtitle">予約をキャンセルしますか?</div>
       <div class="msub" id="canSub"></div>
       <div class="mwarn" id="canPolicy"></div>
       <button class="cancelbtn" id="doCancelBtn">キャンセルする</button>
@@ -328,7 +328,7 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
 
   <div class="modal" id="chgModal">
     <div class="mbody">
-      <div class="mtitle">予約を変更しますか？</div>
+      <div class="mtitle">予約を変更しますか?</div>
       <div class="msub" id="chgSub"></div>
       <button class="pbtn" id="startChangeBtn">日時を変更する</button>
       <button class="closelnk" id="cancelChangeBtn">閉じる</button>
@@ -339,18 +339,34 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
 <div class="toast" id="toast"></div>
 
 <script>
-// ★★★ 修正点 ★★★
-// 固定のサロンIDを常にlocalStorageに書き込む
-// このIDはサロン側と共通なので、データの保存場所が一致する
-var SALON_FIXED_ID = 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
-setCurrentSalonId(SALON_FIXED_ID);
+// ============================================
+// 【顧客アプリ専用】サロンID管理
+// ============================================
+// このアプリは複数のサロンで共有されるため、
+// URLパラメータ ?salon=xxx でサロンを特定する。
+//
+// shared_db.js の getCurrentSalonId() は
+// サロン管理者用(Firebase Auth UID = サロンID)
+// だが、顧客アプリではここで上書きして
+// URLパラメータのサロンIDを返すようにする。
+// ============================================
+function getSalonIdFromUrl() {
+  var params = new URLSearchParams(window.location.search);
+  return params.get('salon');
+}
+var TARGET_SALON_ID = getSalonIdFromUrl();
 
-// 定期的にlocalStorageが変わってないか監視して再セットする
-setInterval(function() {
-  if (localStorage.getItem('salon_current_id') !== SALON_FIXED_ID) {
-    setCurrentSalonId(SALON_FIXED_ID);
-  }
-}, 1000);
+// サロンIDが指定されていない場合はエラー画面を表示
+if (!TARGET_SALON_ID) {
+  document.body.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;min-height:100vh;padding:20px;font-family:Georgia,serif;text-align:center;color:#7a2020;background:#faeaea;"><div><h2 style="margin-bottom:12px;">⚠️ アクセスエラー</h2><p style="font-size:14px;line-height:1.7;">サロン情報が指定されていません。<br>サロンから提供されたURLからアクセスしてください。</p></div></div>';
+  throw new Error('Salon ID not specified in URL');
+}
+
+// shared_db.js の getCurrentSalonId をオーバーライド
+// (顧客アプリでは URL パラメータの値を返す)
+window.getCurrentSalonId = function() {
+  return TARGET_SALON_ID;
+};
 
 var DOWS = ['日','月','火','水','木','金','土'];
 var authReady = false;
@@ -460,12 +476,8 @@ function doLogin() {
   document.getElementById('loginBtn').disabled = true;
   document.getElementById('loginBtn').textContent = '確認中...';
   authReady = true;
-  // ★ ログイン処理開始時にも固定IDを再セット
-  setCurrentSalonId(SALON_FIXED_ID);
   window.auth.signInWithEmailAndPassword(e, p)
     .then(function() {
-      // ★ ログイン後も固定ID維持
-      setCurrentSalonId(SALON_FIXED_ID);
       loadAllData(function() {
         document.getElementById('loginBtn').disabled = false;
         document.getElementById('loginBtn').textContent = 'ログイン';
@@ -535,13 +547,9 @@ function doRegister() {
   }
   document.getElementById('regBtn').disabled = true;
   document.getElementById('regBtn').textContent = '登録中...';
-  // ★ 新規登録時も固定IDを再セット
-  setCurrentSalonId(SALON_FIXED_ID);
   window.auth.createUserWithEmailAndPassword(email, pass)
     .then(function(cred) {
       cred.user.sendEmailVerification();
-      // ★ 登録後も固定ID維持（dbAddCustomerが正しい場所に書き込まれるため）
-      setCurrentSalonId(SALON_FIXED_ID);
       var uid = cred.user.uid;
       var name = sei + ' ' + mei;
       var nc = { name: name, phone: phone, email: email, authUid: uid, isLine: false, stamps: 0 };
@@ -554,7 +562,7 @@ function doRegister() {
         }
         cachedCustomers.push(c);
         custId = c.id; st.name = name; st.phone = phone; st.email = email;
-        goScreen('s-s3'); showToast('会員登録が完了しました！');
+        goScreen('s-s3'); showToast('会員登録が完了しました!');
       });
     })
     .catch(function(err) {
@@ -575,7 +583,7 @@ function renderMenu() {
   var opts = all.filter(function(m) { return m.type === 'option'; });
   var scr = document.getElementById('menuScr');
   scr.innerHTML = '';
-  var lbl = document.createElement('div'); lbl.className = 'slbl2'; lbl.textContent = 'メインメニュー（複数選択可）';
+  var lbl = document.createElement('div'); lbl.className = 'slbl2'; lbl.textContent = 'メインメニュー(複数選択可)';
   scr.appendChild(lbl);
   mains.forEach(function(m) {
     var card = document.createElement('div');
@@ -609,7 +617,7 @@ function renderMenu() {
     scr.appendChild(card);
   });
   if (opts.length) {
-    var lbl2 = document.createElement('div'); lbl2.className = 'slbl2'; lbl2.textContent = 'オプション（任意）';
+    var lbl2 = document.createElement('div'); lbl2.className = 'slbl2'; lbl2.textContent = 'オプション(任意)';
     scr.appendChild(lbl2);
     opts.forEach(function(o) {
       var ocard = document.createElement('div'); ocard.className = 'ocard'; ocard.id = 'oc_' + o.id;
@@ -630,7 +638,7 @@ function renderMenu() {
 function renderCal() {
   var rng = getBookingRange();
   document.getElementById('calLbl').textContent = calY + '年' + (calM+1) + '月';
-  document.getElementById('rnote').textContent = '予約受付：' + (rng.from.getMonth()+1) + '月' + rng.from.getDate() + '日 〜 ' + (rng.to.getMonth()+1) + '月' + rng.to.getDate() + '日';
+  document.getElementById('rnote').textContent = '予約受付:' + (rng.from.getMonth()+1) + '月' + rng.from.getDate() + '日 〜 ' + (rng.to.getMonth()+1) + '月' + rng.to.getDate() + '日';
   var first = new Date(calY, calM, 1).getDay(), days = new Date(calY, calM+1, 0).getDate();
   var tStr = fmtD(new Date()), td = getTotalDur();
   var calDays = document.getElementById('calDays');
@@ -689,7 +697,7 @@ function renderSlots() {
     tslots.appendChild(el);
   }
   var info = document.getElementById('blockInfo');
-  if (reasons.length) { info.style.display = 'block'; info.textContent = '× は予約不可：' + reasons.join('・'); }
+  if (reasons.length) { info.style.display = 'block'; info.textContent = '× は予約不可:' + reasons.join('・'); }
   else info.style.display = 'none';
 }
 
@@ -709,7 +717,7 @@ function renderConfirm() {
     '<div class="cfrow"><span class="cflbl">お名前</span><span class="cfval">' + st.name + '</span></div>' +
     '<div class="cfrow"><span class="cflbl">メニュー</span><span class="cfval">' + mn + '</span></div>' +
     '<div class="cfrow"><span class="cflbl">オプション</span><span class="cfval">' + (on || 'なし') + '</span></div>' +
-    '<div class="cfrow"><span class="cflbl">日時</span><span class="cfval">' + parseInt(p[1]) + '月' + parseInt(p[2]) + '日（' + dow + '）' + st.selTime + '〜</span></div>' +
+    '<div class="cfrow"><span class="cflbl">日時</span><span class="cfval">' + parseInt(p[1]) + '月' + parseInt(p[2]) + '日(' + dow + ')' + st.selTime + '〜</span></div>' +
     '<div class="cfrow"><span class="cflbl">所要時間</span><span class="cfval">' + td + '分</span></div>' +
     '<div class="cfrow"><span class="cflbl">料金</span><span class="cfval price">¥' + tp.toLocaleString() + '</span></div>';
   var pol = cachedCancelPolicy || {};
@@ -740,7 +748,7 @@ function sendEmails(type, dateLabel, timeStr, menuName, customerName, customerEm
 
 function toDateLabel(dateStr) {
   var p = dateStr.split('-'), dow = DOWS[new Date(dateStr).getDay()];
-  return parseInt(p[1]) + '月' + parseInt(p[2]) + '日（' + dow + '）';
+  return parseInt(p[1]) + '月' + parseInt(p[2]) + '日(' + dow + ')';
 }
 
 function sendBookingEmails(mn, dateStr, timeStr) {
@@ -754,15 +762,15 @@ function sendCancelEmails(appt) {
     var pol = cachedCancelPolicy || {};
     var totalPrice = getMenuTotalPrice(appt.menu);
     var percent = totalPrice > 0 ? Math.round(fee / totalPrice * 100) : 0;
-    var feeLabel = '¥' + fee.toLocaleString() + '（' + percent + '%）';
-    extraInfo = '■ キャンセル料：' + feeLabel;
+    var feeLabel = '¥' + fee.toLocaleString() + '(' + percent + '%)';
+    extraInfo = '■ キャンセル料:' + feeLabel;
   }
   var qrUrl = fee > 0 ? (cachedCancelPolicy && cachedCancelPolicy.qrUrl || '') : '';
   sendEmails('キャンセル', toDateLabel(appt.date), appt.start, appt.menu, appt.name, st.email, extraInfo, qrUrl);
 }
 
 function sendChangeEmails(oldAppt, newMn, newDateStr, newTimeStr) {
-  var extraInfo = '［変更前］\n■ 日時：' + toDateLabel(oldAppt.date) + ' ' + oldAppt.start + '\n■ メニュー：' + oldAppt.menu;
+  var extraInfo = '[変更前]\n■ 日時:' + toDateLabel(oldAppt.date) + ' ' + oldAppt.start + '\n■ メニュー:' + oldAppt.menu;
   sendEmails('変更', toDateLabel(newDateStr), newTimeStr, newMn, st.name, st.email, extraInfo);
 }
 
@@ -807,8 +815,6 @@ function completeBooking() {
   var td = getTotalDur(), mn = '';
   st.menus.forEach(function(m, i) { mn += (i ? '・' : '') + m.name; });
   var s = cachedSettings || {};
-  // ★ 予約保存前に固定IDを再セット（正しい場所に保存されるよう保証）
-  setCurrentSalonId(SALON_FIXED_ID);
   var apptData = { customerId: custId, name: st.name, date: st.selDate, start: st.selTime, durationMin: td, intervalMin: s.intervalMin || 30, menu: mn, status: 'active', type: 'online' };
   if (chgId) {
     var oldAppt = null;
@@ -841,7 +847,7 @@ function renderComplete() {
   var p = st.selDate.split('-'), dow = DOWS[new Date(st.selDate).getDay()];
   document.getElementById('okCard').innerHTML =
     '<div class="cfrow"><span class="cflbl">メニュー</span><span class="cfval">' + mn + '</span></div>' +
-    '<div class="cfrow"><span class="cflbl">日時</span><span class="cfval">' + parseInt(p[1]) + '月' + parseInt(p[2]) + '日（' + dow + '）' + st.selTime + '〜</span></div>' +
+    '<div class="cfrow"><span class="cflbl">日時</span><span class="cfval">' + parseInt(p[1]) + '月' + parseInt(p[2]) + '日(' + dow + ')' + st.selTime + '〜</span></div>' +
     '<div class="cfrow"><span class="cflbl">料金</span><span class="cfval price">¥' + tp.toLocaleString() + '</span></div>';
 }
 
@@ -886,7 +892,7 @@ function renderHistory() {
   else {
     futureActive.forEach(function(a) {
       var pp = a.date.split('-'), dw = DOWS[new Date(a.date).getDay()], en = toMin(a.start) + a.durationMin;
-      html += '<div class="hcard"><div class="htop"><div><div class="hdate">' + parseInt(pp[1]) + '月' + parseInt(pp[2]) + '日（' + dw + '）' + a.start + '〜' + toTime(en) + '</div><div class="hmenu">' + a.menu + '（' + a.durationMin + '分）</div></div><span class="sbadge up">予約済み</span></div>'
+      html += '<div class="hcard"><div class="htop"><div><div class="hdate">' + parseInt(pp[1]) + '月' + parseInt(pp[2]) + '日(' + dw + ')' + a.start + '〜' + toTime(en) + '</div><div class="hmenu">' + a.menu + '(' + a.durationMin + '分)</div></div><span class="sbadge up">予約済み</span></div>'
         + '<div class="hacts"><button class="hbtn chg-btn" data-id="' + a.id + '">変更する</button><button class="hbtn danger can-btn" data-id="' + a.id + '">キャンセル</button></div></div>';
     });
   }
@@ -894,14 +900,14 @@ function renderHistory() {
     html += '<div class="slbl2" style="margin-top:8px;">来店済み</div>';
     visited.forEach(function(v) {
       var vp = v.date.split('-'), vdw = DOWS[new Date(v.date).getDay()];
-      html += '<div class="hcard"><div class="htop"><div><div class="hdate">' + parseInt(vp[1]) + '月' + parseInt(vp[2]) + '日（' + vdw + '）' + v.start + '〜</div><div class="hmenu">' + v.menu + '</div></div><span class="sbadge" style="background:var(--gl);color:var(--gt);">来店済み</span></div></div>';
+      html += '<div class="hcard"><div class="htop"><div><div class="hdate">' + parseInt(vp[1]) + '月' + parseInt(vp[2]) + '日(' + vdw + ')' + v.start + '〜</div><div class="hmenu">' + v.menu + '</div></div><span class="sbadge" style="background:var(--gl);color:var(--gt);">来店済み</span></div></div>';
     });
   }
   if (cancelled.length) {
     html += '<div class="slbl2" style="margin-top:8px;">キャンセル済み</div>';
     cancelled.forEach(function(ca) {
       var cp = ca.date.split('-'), cdw = DOWS[new Date(ca.date).getDay()];
-      html += '<div class="hcard cancelled"><div class="htop"><div><div class="hdate struck">' + parseInt(cp[1]) + '月' + parseInt(cp[2]) + '日（' + cdw + '）' + ca.start + '〜</div><div class="hmenu">' + ca.menu + '</div></div><span class="sbadge can">キャンセル済み</span></div></div>';
+      html += '<div class="hcard cancelled"><div class="htop"><div><div class="hdate struck">' + parseInt(cp[1]) + '月' + parseInt(cp[2]) + '日(' + cdw + ')' + ca.start + '〜</div><div class="hmenu">' + ca.menu + '</div></div><span class="sbadge can">キャンセル済み</span></div></div>';
     });
   }
   html += '<div style="margin-top:16px;"><button id="logoutBtn" style="width:100%;padding:11px;background:none;border:1.5px solid var(--bd);border-radius:10px;font-size:13px;color:var(--mu);cursor:pointer;font-family:inherit;">ログアウト</button></div>';
@@ -951,7 +957,7 @@ function renderStamp() {
     bh = '<div class="bonlist">';
     sc.bonusStamps.forEach(function(b) {
       var reached = stamps >= b.at;
-      bh += '<div class="bonitem"><div class="bondot ' + (reached ? 'reached' : '') + '" style="' + (reached ? 'background:' + color + ';border-color:' + color + ';' : '') + '">' + b.at + '</div><span>' + (reached ? '✓ ' : '') + 'スタンプ' + b.at + '個達成：' + b.reward + '</span></div>';
+      bh += '<div class="bonitem"><div class="bondot ' + (reached ? 'reached' : '') + '" style="' + (reached ? 'background:' + color + ';border-color:' + color + ';' : '') + '">' + b.at + '</div><span>' + (reached ? '✓ ' : '') + 'スタンプ' + b.at + '個達成:' + b.reward + '</span></div>';
     });
     bh += '</div>';
   }
@@ -963,7 +969,7 @@ function renderStamp() {
     + '<div class="stpbar"><div class="stpfill" style="width:' + pct + '%;background:' + color + ';"></div></div>'
     + '<div class="stptxt">' + stamps + ' / ' + goal + ' スタンプ</div>'
     + '<div class="strbox ' + (ready ? 'ready' : '') + '">'
-    + '<div class="strlbl">' + (ready ? '🎉 おめでとうございます！特典が使えます' : 'ゴール特典') + '</div>'
+    + '<div class="strlbl">' + (ready ? '🎉 おめでとうございます!特典が使えます' : 'ゴール特典') + '</div>'
     + '<div class="strtxt">🎁 ' + sc.reward + '</div></div>'
     + bh + '</div>'
     + '<div style="font-size:11px;color:var(--mu);text-align:center;line-height:1.8;margin-top:8px;">スタンプはご来店時にサロンスタッフが付与します。</div>';
@@ -974,7 +980,7 @@ function openCan(id) {
   var a = null;
   for (var i = 0; i < cachedAppointments.length; i++) { if (cachedAppointments[i].id === id) { a = cachedAppointments[i]; break; } }
   var p = a.date.split('-'), dow = DOWS[new Date(a.date).getDay()];
-  document.getElementById('canSub').textContent = parseInt(p[1]) + '月' + parseInt(p[2]) + '日（' + dow + '）' + a.start + '　' + a.menu;
+  document.getElementById('canSub').textContent = parseInt(p[1]) + '月' + parseInt(p[2]) + '日(' + dow + ')' + a.start + '　' + a.menu;
   var pol = cachedCancelPolicy || {};
   document.getElementById('canPolicy').textContent = pol.text ? pol.text.split('\n')[0] : '';
   document.getElementById('canModal').classList.add('show');
@@ -999,21 +1005,15 @@ function openChg(id) {
   var a = null;
   for (var i = 0; i < cachedAppointments.length; i++) { if (cachedAppointments[i].id === id) { a = cachedAppointments[i]; break; } }
   var p = a.date.split('-'), dow = DOWS[new Date(a.date).getDay()];
-  document.getElementById('chgSub').textContent = parseInt(p[1]) + '月' + parseInt(p[2]) + '日（' + dow + '）' + a.start + '　' + a.menu;
+  document.getElementById('chgSub').textContent = parseInt(p[1]) + '月' + parseInt(p[2]) + '日(' + dow + ')' + a.start + '　' + a.menu;
   document.getElementById('chgModal').classList.add('show');
 }
 
 function startChange() { closeModals(); goScreen('s-s4'); }
 function closeModals() { document.getElementById('canModal').classList.remove('show'); document.getElementById('chgModal').classList.remove('show'); }
 
-// ★★★ 重要修正：ログアウト時、Firebase Authをサインアウトしても固定IDを維持 ★★★
 function doLogout() {
   if (window.auth) window.auth.signOut();
-  // ★ サインアウト後すぐに固定IDを再セット（サロン側のlocalStorageを保護）
-  setCurrentSalonId(SALON_FIXED_ID);
-  // ★ さらに念のため、少し遅らせてもう一度再セット
-  setTimeout(function() { setCurrentSalonId(SALON_FIXED_ID); }, 100);
-  setTimeout(function() { setCurrentSalonId(SALON_FIXED_ID); }, 500);
   custId = null;
   st = { name: '', phone: '', email: '', isLine: false, menus: [], options: [], selDate: null, selTime: null, agreed: false };
   goScreen('s-s1');
@@ -1023,8 +1023,6 @@ function doLogout() {
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 3000); }
 
 function loadAllData(cb) {
-  // ★ データ読み込み前に固定IDを再セット
-  setCurrentSalonId(SALON_FIXED_ID);
   dbGetSettings(function(s) { cachedSettings = s;
     dbGetMenus(function(m) { cachedMenus = m;
       dbGetCustomers(function(c) { cachedCustomers = c;
@@ -1046,12 +1044,7 @@ function loadAllData(cb) {
 }
 
 onFbReady(function() {
-  // ★ Firebase初期化完了後にも固定IDを再セット
-  setCurrentSalonId(SALON_FIXED_ID);
-
   window.auth.onAuthStateChanged(function(user) {
-    // ★ 認証状態が変わるたびに固定IDを保持
-    setCurrentSalonId(SALON_FIXED_ID);
     if (authReady) return;
     authReady = true;
     loadAllData(function() {
@@ -1066,8 +1059,6 @@ onFbReady(function() {
           goScreen('s-s3');
         } else {
           window.auth.signOut();
-          // ★ サインアウト後も固定ID維持
-          setCurrentSalonId(SALON_FIXED_ID);
           goScreen('s-s1');
         }
       } else {
