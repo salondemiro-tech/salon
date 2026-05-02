@@ -264,15 +264,6 @@
 <div class="toast" id="toast"></div>
 
 <script>
-// ★★★ 固定ID保護 ★★★
-var SALON_FIXED_ID = 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
-setCurrentSalonId(SALON_FIXED_ID);
-setInterval(function() {
-  if (localStorage.getItem('salon_current_id') !== SALON_FIXED_ID) {
-    setCurrentSalonId(SALON_FIXED_ID);
-  }
-}, 1000);
-
 var currentCustId = null;
 var currentTab = 'memo';
 var expandedVisitId = null;
@@ -789,7 +780,6 @@ function setSortMode(mode) {
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 2500); }
 
 onFbReady(function() {
-  setCurrentSalonId(SALON_FIXED_ID);
   reloadAll(function() { renderCustList(); });
   document.getElementById('custSearch').addEventListener('input', renderCustList);
   document.getElementById('custSearchPhone').addEventListener('input', renderCustList);
