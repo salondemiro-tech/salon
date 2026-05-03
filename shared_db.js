@@ -507,6 +507,48 @@ function dbLogout() {
   if (window.auth) window.auth.signOut();
 }
 
+// –––––––––– サロン管理画面の認証ガード ––––––––––
+// サロン管理画面の onFbReady の最初に必ず呼ぶ。
+// ログイン中のユーザーが「サロンアカウント本人」かをチェックし、
+// そうなら cb() を実行、違うなら自動でログイン画面へ遷移する。
+//
+// 用途：
+// - 同じブラウザで顧客アプリにログインした後、サロン管理画面に戻ってきても
+//   顧客のUID配下のデータを誤って読みに行かないようにする
+// - 未ログインで直接URLを開いた場合もログイン画面に誘導する
+//
+// 将来：複数スタッフ版では、ここで「スタッフロール」もチェックする予定。
+function requireSalonAuth(cb) {
+  var id = getCurrentSalonId();
+  if (!id) {
+    // 未ログイン → ログイン画面へ
+    location.href = 'salon_auth_v2.html';
+    return;
+  }
+  salonDoc(id).get().then(function(doc) {
+    if (!doc.exists) {
+      // ログインはしているが、salons/{uid} にドキュメントがない
+      // = 顧客アカウントなど、サロンではないアカウントでログイン中
+      // 一度ログアウトしてからログイン画面へ
+      if (window.auth) {
+        window.auth.signOut().then(function() {
+          location.href = 'salon_auth_v2.html';
+        }).catch(function() {
+          location.href = 'salon_auth_v2.html';
+        });
+      } else {
+        location.href = 'salon_auth_v2.html';
+      }
+      return;
+    }
+    // サロン本人なので、続行
+    cb();
+  }).catch(function() {
+    // 通信エラー等でも安全側に倒してログイン画面へ
+    location.href = 'salon_auth_v2.html';
+  });
+}
+
 // –––––––––– Firebase Authentication ––––––––––
 // サロン新規登録
 function dbAuthRegister(name, email, password, cb) {
