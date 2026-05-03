@@ -202,16 +202,6 @@
 <div class="toast" id="toast"></div>
 
 <script>
-// ★★★ 修正点 ★★★
-// 固定のサロンIDを常にlocalStorageに書き込む
-var SALON_FIXED_ID = 'Ej3SdlceD3PZYJWd9t2dwZLHvx32';
-setCurrentSalonId(SALON_FIXED_ID);
-setInterval(function() {
-  if (localStorage.getItem('salon_current_id') !== SALON_FIXED_ID) {
-    setCurrentSalonId(SALON_FIXED_ID);
-  }
-}, 1000);
-
 var SLOT_H = 48;
 var DOWS = ['日','月','火','水','木','金','土'];
 var HOURS = [];
@@ -564,7 +554,6 @@ function renderCal() {
 }
 
 function loadAndRender() {
-  setCurrentSalonId(SALON_FIXED_ID);
   dbGetSettings(function(s) {
     cachedSettings = s;
     dbGetMenus(function(menus) {
@@ -582,8 +571,7 @@ function loadAndRender() {
 
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 2500); }
 
-onFbReady(function() {
-  setCurrentSalonId(SALON_FIXED_ID);
+onFbReady(function() { requireSalonAuth(function() {
   loadAndRender();
 
   document.getElementById('prevWeekBtn').addEventListener('click', function() { weekStart = new Date(weekStart); weekStart.setDate(weekStart.getDate() - 7); renderCal(); });
@@ -601,7 +589,7 @@ onFbReady(function() {
   document.getElementById('cancelChangeBtn').addEventListener('click', closeChange);
   document.getElementById('saveChangeBtn').addEventListener('click', saveChange);
   document.getElementById('dpCloseBtn').addEventListener('click', closeDP);
-});
+}); });
 </script>
 </body>
 </html>
