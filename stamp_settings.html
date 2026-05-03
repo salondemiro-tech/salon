@@ -271,7 +271,7 @@ function saveAll() {
 
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 3000); }
 
-onFbReady(function() {
+onFbReady(function() { requireSalonAuth(function() {
   dbGetStampCard(function(sc) {
     document.getElementById('scEnabled').checked = sc.enabled !== false;
     document.getElementById('scGoal').value = sc.goal || 10;
@@ -288,7 +288,7 @@ onFbReady(function() {
   document.getElementById('scEnabled').addEventListener('change', toggleEnabled);
   document.getElementById('scGoal').addEventListener('input', function() { updatePreview(); renderBonusList(); });
   document.getElementById('scReward').addEventListener('input', updatePreview);
-});
+}); });
 </script>
 </body>
 </html>

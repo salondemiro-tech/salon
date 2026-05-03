@@ -779,7 +779,7 @@ function setSortMode(mode) {
 
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 2500); }
 
-onFbReady(function() {
+onFbReady(function() { requireSalonAuth(function() {
   reloadAll(function() { renderCustList(); });
   document.getElementById('custSearch').addEventListener('input', renderCustList);
   document.getElementById('custSearchPhone').addEventListener('input', renderCustList);
@@ -810,7 +810,7 @@ onFbReady(function() {
   setupMergePickBtn('mergePhoneDst', 'mergePhoneFree');
   setupMergePickBtn('mergeEmailSrc', 'mergeEmailFree');
   setupMergePickBtn('mergeEmailDst', 'mergeEmailFree');
-});
+}); });
 </script>
 </body>
 </html>

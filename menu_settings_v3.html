@@ -361,7 +361,7 @@ function showToast(msg) {
   setTimeout(function() { t.classList.remove('show'); }, 2200);
 }
 
-onFbReady(function() {
+onFbReady(function() { requireSalonAuth(function() {
   dbGetMenus(function(data) {
     menus = data;
     renderList();
@@ -379,7 +379,7 @@ onFbReady(function() {
   document.getElementById('roPub').addEventListener('click', function() { setVis('public'); });
   document.getElementById('roPrv').addEventListener('click', function() { setVis('private'); });
   document.getElementById('fDesc').addEventListener('input', function() { document.getElementById('dCnt').textContent = this.value.length; });
-});
+}); });
 </script>
 </body>
 </html>

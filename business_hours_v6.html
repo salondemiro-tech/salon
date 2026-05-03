@@ -349,7 +349,7 @@ function saveAll() {
 
 function showToast(msg) { var t = document.getElementById('toast'); t.textContent = msg; t.classList.add('show'); setTimeout(function() { t.classList.remove('show'); }, 2500); }
 
-onFbReady(function() {
+onFbReady(function() { requireSalonAuth(function() {
   dbGetSettings(function(s) {
     document.getElementById('openTime').value = s.openTime || '10:00';
     document.getElementById('closeTime').value = s.closeTime || '19:00';
@@ -371,7 +371,7 @@ onFbReady(function() {
   document.getElementById('intervalMin').addEventListener('input', function() { renderIvChips(); updatePreview(); });
   document.getElementById('closeTime').addEventListener('change', updatePreview);
   document.getElementById('intervalToggle').addEventListener('change', updatePreview);
-});
+}); });
 </script>
 </body>
 </html>
