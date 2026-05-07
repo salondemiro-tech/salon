@@ -1,0 +1,271 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>TORITA メール送信テスト</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<style>
+  body {
+    font-family: -apple-system, sans-serif;
+    background: #f5ede4;
+    padding: 20px;
+    max-width: 500px;
+    margin: 0 auto;
+    color: #1a1a18;
+    line-height: 1.6;
+  }
+  h1 {
+    font-size: 18px;
+    border-bottom: 2px solid #b5845a;
+    padding-bottom: 8px;
+    margin-bottom: 16px;
+  }
+  .box {
+    background: #fff;
+    padding: 16px;
+    border-radius: 12px;
+    margin-bottom: 16px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.05);
+  }
+  .label {
+    font-size: 12px;
+    color: #73726c;
+    margin-bottom: 4px;
+    display: block;
+  }
+  input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+    font-size: 14px;
+    margin-bottom: 12px;
+    box-sizing: border-box;
+  }
+  button {
+    width: 100%;
+    padding: 12px;
+    background: #b5845a;
+    color: #fff;
+    border: none;
+    border-radius: 8px;
+    font-size: 14px;
+    font-weight: 600;
+    cursor: pointer;
+    margin-bottom: 8px;
+  }
+  button:disabled {
+    background: #ccc;
+    cursor: not-allowed;
+  }
+  .status {
+    padding: 8px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    margin-top: 8px;
+  }
+  .status.ok { background: #e8f2eb; color: #1e4d2b; }
+  .status.ng { background: #faeaea; color: #6b1f1f; }
+  .status.info { background: #eef0f4; color: #333; }
+  pre {
+    background: #f0ede8;
+    padding: 8px;
+    border-radius: 6px;
+    font-size: 11px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+  #log {
+    font-size: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+  }
+  .log-item {
+    padding: 6px 0;
+    border-bottom: 1px solid #eee;
+  }
+  .log-time { color: #999; font-size: 10px; }
+</style>
+</head>
+<body>
+
+<h1>📧 TORITA メール送信テスト</h1>
+
+<div class="box">
+  <strong>① ログイン</strong>
+  <div class="label" style="margin-top:8px;">サロンのメールアドレス</div>
+  <input type="email" id="loginEmail" placeholder="salondemiro@gmail.com">
+  <div class="label">パスワード</div>
+  <input type="password" id="loginPass" placeholder="ログインパスワード">
+  <button id="loginBtn">ログイン</button>
+  <button id="logoutBtn" style="background:#888;display:none;">ログアウト</button>
+  <div id="loginStatus" class="status info">未ログイン</div>
+</div>
+
+<div class="box">
+  <strong>② テスト送信</strong>
+  <div class="label" style="margin-top:8px;">送信先メールアドレス</div>
+  <input type="email" id="toEmail" placeholder="自分宛(届くか確認するため)">
+  <button id="sendBtn" disabled>テストメール送信</button>
+  <div id="sendStatus" class="status info">ログイン後、送信先を入力してください</div>
+</div>
+
+<div class="box">
+  <strong>③ 通信ログ</strong>
+  <div id="log"></div>
+</div>
+
+<script>
+// Firebase 初期化
+var FIREBASE_CONFIG = {
+  apiKey: 'AIzaSyCbU0t9GipUCu6WQFOJ5QLUjAjiFl3j3TY',
+  authDomain: 'salon-booking-1d9de.firebaseapp.com',
+  projectId: 'salon-booking-1d9de',
+  storageBucket: 'salon-booking-1d9de.firebasestorage.app',
+  messagingSenderId: '230269330263',
+  appId: '1:230269330263:web:0aa2f6b624f2f3803dd412'
+};
+firebase.initializeApp(FIREBASE_CONFIG);
+var auth = firebase.auth();
+
+// Cloud Functions のURL
+var FUNCTIONS_URL = 'https://sendbookingemail-zycy3wf6ba-an.a.run.app';
+
+// ログ出力用
+function addLog(msg, isError) {
+  var item = document.createElement('div');
+  item.className = 'log-item';
+  var t = new Date();
+  var timeStr = t.getHours() + ':' + ('0'+t.getMinutes()).slice(-2) + ':' + ('0'+t.getSeconds()).slice(-2);
+  item.innerHTML = '<div class="log-time">' + timeStr + '</div><div style="color:' + (isError ? '#c00' : '#333') + '">' + msg + '</div>';
+  document.getElementById('log').insertBefore(item, document.getElementById('log').firstChild);
+}
+
+// 状態表示
+function setLoginStatus(text, type) {
+  var el = document.getElementById('loginStatus');
+  el.textContent = text;
+  el.className = 'status ' + type;
+}
+function setSendStatus(text, type) {
+  var el = document.getElementById('sendStatus');
+  el.textContent = text;
+  el.className = 'status ' + type;
+}
+
+// ログイン状態の監視
+auth.onAuthStateChanged(function(user) {
+  if (user) {
+    setLoginStatus('✅ ログイン中: ' + user.email + ' (UID: ' + user.uid.substring(0, 8) + '...)', 'ok');
+    document.getElementById('loginBtn').style.display = 'none';
+    document.getElementById('logoutBtn').style.display = 'block';
+    document.getElementById('sendBtn').disabled = false;
+    setSendStatus('送信先を入力して送信ボタンをタップ', 'info');
+    addLog('ログイン状態確認: ' + user.email);
+  } else {
+    setLoginStatus('未ログイン', 'info');
+    document.getElementById('loginBtn').style.display = 'block';
+    document.getElementById('logoutBtn').style.display = 'none';
+    document.getElementById('sendBtn').disabled = true;
+    setSendStatus('ログイン後、送信先を入力してください', 'info');
+  }
+});
+
+// ログイン処理
+document.getElementById('loginBtn').addEventListener('click', function() {
+  var email = document.getElementById('loginEmail').value.trim();
+  var pass = document.getElementById('loginPass').value;
+  if (!email || !pass) {
+    setLoginStatus('メールアドレスとパスワードを入力してください', 'ng');
+    return;
+  }
+  setLoginStatus('ログイン中...', 'info');
+  addLog('ログイン試行: ' + email);
+  auth.signInWithEmailAndPassword(email, pass)
+    .then(function(cred) {
+      addLog('ログイン成功');
+    })
+    .catch(function(err) {
+      setLoginStatus('❌ ログイン失敗: ' + err.message, 'ng');
+      addLog('ログイン失敗: ' + err.message, true);
+    });
+});
+
+// ログアウト処理
+document.getElementById('logoutBtn').addEventListener('click', function() {
+  auth.signOut().then(function() {
+    addLog('ログアウト完了');
+  });
+});
+
+// 送信処理(本命)
+document.getElementById('sendBtn').addEventListener('click', function() {
+  var to = document.getElementById('toEmail').value.trim();
+  if (!to) {
+    setSendStatus('送信先を入力してください', 'ng');
+    return;
+  }
+
+  document.getElementById('sendBtn').disabled = true;
+  setSendStatus('送信中...', 'info');
+  addLog('送信開始: → ' + to);
+
+  // Step 1: Firebase Auth IDトークンを取得
+  var user = auth.currentUser;
+  if (!user) {
+    setSendStatus('❌ ログイン情報が取れません', 'ng');
+    document.getElementById('sendBtn').disabled = false;
+    return;
+  }
+
+  user.getIdToken().then(function(idToken) {
+    addLog('IDトークン取得成功 (長さ: ' + idToken.length + ')');
+
+    // Step 2: fetch で Cloud Functions を呼び出し
+    var body = {
+      to: to,
+      subject: '【TORITAテスト】fetch経由メール送信成功',
+      html: '<h2>テスト送信成功 🎉</h2><p>このメールは Cloud Functions の fetch 方式で送信されました。</p><p>送信時刻: ' + new Date().toLocaleString('ja-JP') + '</p>',
+      salonName: 'TORITAテスト'
+    };
+
+    addLog('fetch開始: ' + FUNCTIONS_URL);
+
+    return fetch(FUNCTIONS_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': 'Bearer ' + idToken
+      },
+      body: JSON.stringify(body)
+    });
+  }).then(function(res) {
+    addLog('レスポンス受信: HTTP ' + res.status);
+    return res.json().then(function(data) {
+      return { status: res.status, data: data };
+    });
+  }).then(function(result) {
+    addLog('レスポンス内容: ' + JSON.stringify(result.data));
+    if (result.status === 200 && result.data.success) {
+      setSendStatus('✅ 送信成功! Message ID: ' + (result.data.messageId || '(なし)'), 'ok');
+      addLog('送信成功!メールボックスを確認してください');
+    } else {
+      setSendStatus('❌ 失敗: ' + (result.data.error || 'unknown error'), 'ng');
+      addLog('失敗: ' + JSON.stringify(result.data), true);
+    }
+    document.getElementById('sendBtn').disabled = false;
+  }).catch(function(err) {
+    setSendStatus('❌ エラー: ' + err.message, 'ng');
+    addLog('fetchエラー: ' + err.message, true);
+    document.getElementById('sendBtn').disabled = false;
+  });
+});
+
+addLog('テストページ起動完了');
+</script>
+
+</body>
+</html>
