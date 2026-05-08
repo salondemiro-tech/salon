@@ -26,8 +26,8 @@ const getResend = () => {
   return new Resend(apiKey);
 };
 
-// 送信元メールアドレス（後でドメイン認証後に変更可能）
-const FROM_EMAIL = 'TORITA <onboarding@resend.dev>';
+// 送信元メールアドレス（独自ドメイン torita-app.com 認証済み 2026/5/7）
+const FROM_EMAIL = 'TORITA <noreply@torita-app.com>';
 
 // CORS ヘッダーを設定するヘルパー
 function setCorsHeaders(res) {
@@ -112,7 +112,7 @@ exports.sendBookingEmail = onRequest(
     try {
       const resend = getResend();
       const fromName = salonName
-        ? `${salonName} <onboarding@resend.dev>`
+        ? `${salonName} <noreply@torita-app.com>`
         : FROM_EMAIL;
 
       const result = await resend.emails.send({
