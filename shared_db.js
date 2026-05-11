@@ -1,5 +1,9 @@
 // ============================================================
 //  shared_db.js  - Firebase Firestore対応版
+//  Phase 1 修正版（2026/5/11）
+//  変更点：getCurrentSalonId を「明示セット値 → Auth UID → null」方式に変更
+//          旧 localStorage 方式と旧固定ID Ej3SdlceD3PZYJWd9t2dwZLHvx32 フォールバックを廃止
+//          setCurrentSalonId / clearCurrentSalonId は互換性のため空関数として残す
 // ============================================================
 
 // –––––––––– Firebase設定 ––––––––––
@@ -17,8 +21,7 @@ var FIREBASE_CONFIG = {
   var scripts = [
     'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
     'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js',
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js',
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-storage-compat.js'
+    'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js'
   ];
 
   window._fbReady = false;
@@ -31,20 +34,11 @@ var FIREBASE_CONFIG = {
     firebase.initializeApp(FIREBASE_CONFIG);
     window.db = firebase.firestore();
     window.auth = firebase.auth();
-    window.storage = firebase.storage();
-    // ★ Auth状態が確定するまで待つ（最初の onAuthStateChanged 発火を待機）
-    // これによりログイン済みのページではcurrentUserが復元された後にコールバックが実行される
-    var authResolved = false;
-    var unsubscribe = window.auth.onAuthStateChanged(function() {
-      if (authResolved) return;
-      authResolved = true;
-      if (unsubscribe) unsubscribe();
-      window._fbReady = true;
-      for (var i = 0; i < window._fbReadyCbs.length; i++) {
-        window._fbReadyCbs[i]();
-      }
-      window._fbReadyCbs = [];
-    });
+    window._fbReady = true;
+    for (var i = 0; i < window._fbReadyCbs.length; i++) {
+      window._fbReadyCbs[i]();
+    }
+    window._fbReadyCbs = [];
   }
 
   function loadScript(src, cb) {
@@ -57,30 +51,45 @@ var FIREBASE_CONFIG = {
 
   loadScript(scripts[0], function() {
     var done = 0;
-    function check() { done++; if (done === 3) onAllLoaded(); }
+    function check() { done++; if (done === 2) onAllLoaded(); }
     loadScript(scripts[1], check);
     loadScript(scripts[2], check);
-    loadScript(scripts[3], check);
   });
 })();
 
-// –––––––––– サロンID管理 ––––––––––
-// Firebase Auth UID = サロンID として直接参照する方式
-// localStorageを使わないので、顧客アプリとの競合が原理的に発生しない
+// –––––––––– サロンID管理（Phase 1 修正版） ––––––––––
+// SALON_ID_KEY は廃止予定だが、互換性のため変数だけ残す
 var SALON_ID_KEY = 'salon_current_id';
 
+// 明示的にセットされた salonId（customer_app が URL から渡す）
+var _explicitSalonId = null;
+
+// customer_app などから明示的に salonId をセットするための関数
+function setExplicitSalonId(id) {
+  _explicitSalonId = id;
+}
+
+// 現在の salonId を取得
+// 優先順位：
+// 1. 明示セット値（customer_app から URL パラメータ経由で）
+// 2. Firebase Auth の currentUser.uid（サロン管理画面用）
+// 3. それ以外は null
 function getCurrentSalonId() {
-  if (window.auth && window.auth.currentUser) {
-    return window.auth.currentUser.uid;
-  }
+  if (_explicitSalonId) return _explicitSalonId;
+  if (window.auth && window.auth.currentUser) return window.auth.currentUser.uid;
   return null;
 }
-// 互換のため関数自体は残す（他ファイルから呼ばれても害がないように空関数化）
+
+// 旧 setCurrentSalonId は localStorage を廃止。空関数として残す（既存呼び出し箇所の互換性のため）
 function setCurrentSalonId(id) {
-  // 何もしない（Auth UIDが自動的にサロンIDになるため）
+  // localStorage 書き込みは廃止
+  // 旧コード（dbSaveSalon / dbAuthRegister / dbAuthLogin など）からの呼び出しを壊さないため空関数として残す
 }
+
+// 旧 clearCurrentSalonId も空関数として残す
 function clearCurrentSalonId() {
-  // 何もしない（signOut()でcurrentUserがnullになり自動的にクリアされる）
+  // localStorage 削除は廃止
+  // dbLogout などからの呼び出しを壊さないため空関数として残す
 }
 
 // –––––––––– Firestore パス ––––––––––
@@ -354,82 +363,6 @@ function dbSaveCancelPolicy(p, cb) {
   }).catch(function(e) { if (cb) cb(e); });
 }
 
-// –––––––––– 写真（Firebase Storage） ––––––––––
-// 写真をアップロード（appointmentId配下に保存）
-// fileがFile/Blobの場合はそのまま、Base64文字列の場合はBlobに変換してアップロード
-function dbUploadVisitPhoto(appointmentId, file, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon', null); return; }
-  if (!window.storage) { if (cb) cb('storage not ready', null); return; }
-  var photoId = 'p' + Date.now() + '_' + Math.floor(Math.random() * 10000);
-  var path = 'salons/' + id + '/visits/' + appointmentId + '/' + photoId + '.jpg';
-  var ref = window.storage.ref(path);
-  var task;
-  if (typeof file === 'string') {
-    // Base64の場合
-    var idx = file.indexOf(',');
-    var base64 = idx >= 0 ? file.substring(idx + 1) : file;
-    task = ref.putString(base64, 'base64', { contentType: 'image/jpeg' });
-  } else {
-    task = ref.put(file);
-  }
-  task.then(function(snap) {
-    return snap.ref.getDownloadURL();
-  }).then(function(url) {
-    if (cb) cb(null, { id: photoId, path: path, url: url });
-  }).catch(function(e) { if (cb) cb(e, null); });
-}
-
-// 写真の一覧を取得（appointmentに保存されているphotosフィールドから）
-function dbGetVisitPhotos(appointmentId, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb([]); return; }
-  salonCol(id, 'appointments').doc(appointmentId).get().then(function(doc) {
-    if (!doc.exists) { cb([]); return; }
-    var data = doc.data();
-    cb(data.photos || []);
-  }).catch(function() { cb([]); });
-}
-
-// 写真の追加（appointmentのphotos配列に追加）
-function dbAddVisitPhoto(appointmentId, photoObj, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  var ref = salonCol(id, 'appointments').doc(appointmentId);
-  ref.get().then(function(doc) {
-    var photos = (doc.exists && doc.data().photos) || [];
-    photos.push(photoObj);
-    return ref.update({ photos: photos });
-  }).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
-// 写真の削除（Storageからとappointmentのphotos配列から）
-function dbDeleteVisitPhoto(appointmentId, photoId, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  var ref = salonCol(id, 'appointments').doc(appointmentId);
-  ref.get().then(function(doc) {
-    if (!doc.exists) { if (cb) cb('not found'); return; }
-    var photos = doc.data().photos || [];
-    var target = null;
-    var newPhotos = [];
-    for (var i = 0; i < photos.length; i++) {
-      if (photos[i].id === photoId) { target = photos[i]; }
-      else { newPhotos.push(photos[i]); }
-    }
-    if (!target) { if (cb) cb('photo not found'); return; }
-    // Storageから削除（失敗しても処理は続ける）
-    if (target.path && window.storage) {
-      window.storage.ref(target.path).delete().catch(function() {});
-    }
-    return ref.update({ photos: newPhotos });
-  }).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
 // –––––––––– 予約可能日範囲 ––––––––––
 function dbGetBookingDateRange(settings) {
   var weeks = (settings && settings.bookingWeeks) || 8;
@@ -505,48 +438,6 @@ function validatePassword(pw) {
 function dbLogout() {
   clearCurrentSalonId();
   if (window.auth) window.auth.signOut();
-}
-
-// –––––––––– サロン管理画面の認証ガード ––––––––––
-// サロン管理画面の onFbReady の最初に必ず呼ぶ。
-// ログイン中のユーザーが「サロンアカウント本人」かをチェックし、
-// そうなら cb() を実行、違うなら自動でログイン画面へ遷移する。
-//
-// 用途：
-// - 同じブラウザで顧客アプリにログインした後、サロン管理画面に戻ってきても
-//   顧客のUID配下のデータを誤って読みに行かないようにする
-// - 未ログインで直接URLを開いた場合もログイン画面に誘導する
-//
-// 将来：複数スタッフ版では、ここで「スタッフロール」もチェックする予定。
-function requireSalonAuth(cb) {
-  var id = getCurrentSalonId();
-  if (!id) {
-    // 未ログイン → ログイン画面へ
-    location.href = 'salon_auth_v2.html';
-    return;
-  }
-  salonDoc(id).get().then(function(doc) {
-    if (!doc.exists) {
-      // ログインはしているが、salons/{uid} にドキュメントがない
-      // = 顧客アカウントなど、サロンではないアカウントでログイン中
-      // 一度ログアウトしてからログイン画面へ
-      if (window.auth) {
-        window.auth.signOut().then(function() {
-          location.href = 'salon_auth_v2.html';
-        }).catch(function() {
-          location.href = 'salon_auth_v2.html';
-        });
-      } else {
-        location.href = 'salon_auth_v2.html';
-      }
-      return;
-    }
-    // サロン本人なので、続行
-    cb();
-  }).catch(function() {
-    // 通信エラー等でも安全側に倒してログイン画面へ
-    location.href = 'salon_auth_v2.html';
-  });
 }
 
 // –––––––––– Firebase Authentication ––––––––––
