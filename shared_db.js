@@ -1,9 +1,16 @@
 // ============================================================
 //  shared_db.js  - Firebase Firestore対応版
-//  Phase 1 修正版（2026/5/11）
-//  変更点：getCurrentSalonId を「明示セット値 → Auth UID → null」方式に変更
-//          旧 localStorage 方式と旧固定ID Ej3SdlceD3PZYJWd9t2dwZLHvx32 フォールバックを廃止
-//          setCurrentSalonId / clearCurrentSalonId は互換性のため空関数として残す
+//  Phase 1+2 統合版（2026/5/12）
+//
+//  【Phase 1：salonId 取得の一元化】
+//  - URL パラメータ ?salon=xxx を冒頭で自動取得
+//  - getCurrentSalonId は「URL → Auth UID → null」優先順位
+//  - 旧 localStorage 方式と旧固定ID Ej3SdlceD3PZYJWd9t2dwZLHvx32 フォールバック廃止
+//  - setCurrentSalonId / clearCurrentSalonId は互換性のため空関数として残す
+//
+//  【Phase 2：onFbReady を Auth 確定まで待つ】
+//  - SDK 読み込み完了 ＋ onAuthStateChanged が一度発火するまで _fbReady = true にしない
+//  - これにより auth.currentUser が null の状態で getCurrentSalonId が呼ばれる事故を防止
 // ============================================================
 
 // –––––––––– Firebase設定 ––––––––––
@@ -16,7 +23,58 @@ var FIREBASE_CONFIG = {
   appId: '1:230269330263:web:0aa2f6b624f2f3803dd412'
 };
 
-// –––––––––– Firebase SDK読み込み ––––––––––
+// –––––––––– サロンID管理（Phase 1） ––––––––––
+// SALON_ID_KEY は廃止予定だが、互換性のため変数だけ残す
+var SALON_ID_KEY = 'salon_current_id';
+
+// 明示的にセットされた salonId
+var _explicitSalonId = null;
+
+// URL パラメータ ?salon=xxx から salonId を自動取得（ファイル読み込み時に即実行）
+(function() {
+  try {
+    var query = window.location.search;
+    if (query && query.length > 1) {
+      var pairs = query.substring(1).split('&');
+      for (var i = 0; i < pairs.length; i++) {
+        var pair = pairs[i].split('=');
+        if (pair[0] === 'salon' && pair[1]) {
+          _explicitSalonId = decodeURIComponent(pair[1]);
+          break;
+        }
+      }
+    }
+  } catch (e) {
+    // URL 解析失敗時は何もしない
+  }
+})();
+
+// 外部から明示的に salonId をセットするための関数（互換性のため残す）
+function setExplicitSalonId(id) {
+  _explicitSalonId = id;
+}
+
+// 現在の salonId を取得
+// 優先順位：
+//   1. _explicitSalonId（URL パラメータまたは明示セット）
+//   2. Firebase Auth の currentUser.uid（サロン管理画面用）
+//   3. null
+function getCurrentSalonId() {
+  if (_explicitSalonId) return _explicitSalonId;
+  if (window.auth && window.auth.currentUser) return window.auth.currentUser.uid;
+  return null;
+}
+
+// 旧 setCurrentSalonId / clearCurrentSalonId は localStorage を廃止
+// 既存呼び出し箇所の互換性のため空関数として残す
+function setCurrentSalonId(id) {
+  // localStorage 書き込みは廃止
+}
+function clearCurrentSalonId() {
+  // localStorage 削除は廃止
+}
+
+// –––––––––– Firebase SDK読み込み（Phase 2：Auth 確定まで待つ） ––––––––––
 (function() {
   var scripts = [
     'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
@@ -30,15 +88,28 @@ var FIREBASE_CONFIG = {
     if (window._fbReady) { cb(); } else { window._fbReadyCbs.push(cb); }
   };
 
-  function onAllLoaded() {
-    firebase.initializeApp(FIREBASE_CONFIG);
-    window.db = firebase.firestore();
-    window.auth = firebase.auth();
+  function fireReady() {
     window._fbReady = true;
     for (var i = 0; i < window._fbReadyCbs.length; i++) {
       window._fbReadyCbs[i]();
     }
     window._fbReadyCbs = [];
+  }
+
+  function onAllLoaded() {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    window.db = firebase.firestore();
+    window.auth = firebase.auth();
+
+    // Phase 2：onAuthStateChanged が一度発火するまで ready にしない
+    // これにより auth.currentUser が確定した状態で各画面の初期化が始まる
+    var authConfirmed = false;
+    var unsub = window.auth.onAuthStateChanged(function() {
+      if (authConfirmed) return;
+      authConfirmed = true;
+      if (unsub) unsub();
+      fireReady();
+    });
   }
 
   function loadScript(src, cb) {
@@ -56,41 +127,6 @@ var FIREBASE_CONFIG = {
     loadScript(scripts[2], check);
   });
 })();
-
-// –––––––––– サロンID管理（Phase 1 修正版） ––––––––––
-// SALON_ID_KEY は廃止予定だが、互換性のため変数だけ残す
-var SALON_ID_KEY = 'salon_current_id';
-
-// 明示的にセットされた salonId（customer_app が URL から渡す）
-var _explicitSalonId = null;
-
-// customer_app などから明示的に salonId をセットするための関数
-function setExplicitSalonId(id) {
-  _explicitSalonId = id;
-}
-
-// 現在の salonId を取得
-// 優先順位：
-// 1. 明示セット値（customer_app から URL パラメータ経由で）
-// 2. Firebase Auth の currentUser.uid（サロン管理画面用）
-// 3. それ以外は null
-function getCurrentSalonId() {
-  if (_explicitSalonId) return _explicitSalonId;
-  if (window.auth && window.auth.currentUser) return window.auth.currentUser.uid;
-  return null;
-}
-
-// 旧 setCurrentSalonId は localStorage を廃止。空関数として残す（既存呼び出し箇所の互換性のため）
-function setCurrentSalonId(id) {
-  // localStorage 書き込みは廃止
-  // 旧コード（dbSaveSalon / dbAuthRegister / dbAuthLogin など）からの呼び出しを壊さないため空関数として残す
-}
-
-// 旧 clearCurrentSalonId も空関数として残す
-function clearCurrentSalonId() {
-  // localStorage 削除は廃止
-  // dbLogout などからの呼び出しを壊さないため空関数として残す
-}
 
 // –––––––––– Firestore パス ––––––––––
 function salonDoc(salonId) {
