@@ -886,7 +886,105 @@ function completeBooking() {
     dbAddAppointment(apptData, function(err, a) {
       if (err) { showToast('予約に失敗しました'); return; }
       cachedAppointments.push(a);
+      
       sendBookingEmails(mn, st.selDate, st.selTime);
+
+      // ========================================
+      // Functions メール送信
+      // ========================================
+
+      window.auth.currentUser
+        .getIdToken()
+        .then(function(idToken){
+
+          return fetch(
+            'https://sendbookingemail-zycy3wf6ba-an.a.run.app',
+            {
+
+              method: 'POST',
+
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + idToken
+              },
+
+              body: JSON.stringify({
+
+                to:
+                  st.email || '',
+
+                subject:
+                  'ご予約ありがとうございます',
+
+                salonName:
+                  cachedSalon && cachedSalon.name
+                    ? cachedSalon.name
+                    : 'Salon de Miro',
+
+                html:
+                  `
+                  <div style="font-family:sans-serif;">
+
+                    <h2>
+                      ${
+                        cachedSalon && cachedSalon.name
+                          ? cachedSalon.name
+                          : 'Salon de Miro'
+                      }
+                    </h2>
+
+                    <p>
+                      ${st.name || ''} 様
+                    </p>
+
+                    <p>
+                      ご予約ありがとうございます。
+                    </p>
+
+                    <hr>
+
+                    <p>
+                      <b>メニュー:</b>
+                      ${mn || ''}
+                    </p>
+
+                    <p>
+                      <b>日時:</b>
+                      ${st.selDate || ''} ${st.selTime || ''}
+                    </p>
+
+                    <hr>
+
+                    <p>
+                      ご来店をお待ちしております。
+                    </p>
+
+                  </div>
+                  `
+              })
+
+            }
+          );
+
+        })
+        .then(function(res){
+
+          return res.json();
+
+        })
+        .then(function(data){
+
+          debugLog('booking email sent');
+
+        })
+        .catch(function(err){
+
+          console.error(err);
+
+          debugLog('booking email failed');
+
+        });
+
       goScreen('s-s6');
     });
   }
