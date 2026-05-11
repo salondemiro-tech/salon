@@ -404,6 +404,11 @@ body{font-family:Georgia,serif;background:var(--s2);display:flex;align-items:cen
 <script>
 var DOWS = ['日','月','火','水','木','金','土'];
 var authReady = false;
+// Phase 4: Auth状態変化を uid 単位で管理する
+// 以前の authReady だけの制御だと、新規登録・ログイン後の再発火を全部 skip してしまう。
+var lastAuthUid = '__torita_not_checked__';
+var manualLoginInProgress = false;
+var manualRegisterInProgress = false;
 var st = { name: '', phone: '', email: '', isLine: false, menus: [], options: [], selDate: null, selTime: null, agreed: false };
 var custId = null, chgId = null, canId = null;
 var calY = new Date().getFullYear(), calM = new Date().getMonth();
@@ -510,12 +515,16 @@ function doLogin() {
   var p = document.getElementById('lPass').value;
   document.getElementById('loginBtn').disabled = true;
   document.getElementById('loginBtn').textContent = '確認中...';
-  authReady = true;
+  manualLoginInProgress = true;
   debugLog('login start: ' + e);
   window.auth.signInWithEmailAndPassword(e, p)
-    .then(function() {
+    .then(function(cred) {
       debugLog('auth ok');
+      // ログインボタン側で画面遷移まで処理するため、Auth監視側の二重実行を防ぐ
+      lastAuthUid = cred && cred.user ? cred.user.uid : (window.auth.currentUser ? window.auth.currentUser.uid : null);
+      authReady = true;
       loadAllData(function() {
+        manualLoginInProgress = false;
         document.getElementById('loginBtn').disabled = false;
         document.getElementById('loginBtn').textContent = 'ログイン';
         var cust = null;
@@ -530,7 +539,7 @@ function doLogin() {
     })
     .catch(function(err) {
       debugLog('auth fail: ' + err.code);
-      authReady = false;
+      manualLoginInProgress = false;
       document.getElementById('loginBtn').disabled = false;
       document.getElementById('loginBtn').textContent = 'ログイン';
       var msg = 'メールアドレスまたはパスワードが正しくありません';
@@ -585,13 +594,18 @@ function doRegister() {
   }
   document.getElementById('regBtn').disabled = true;
   document.getElementById('regBtn').textContent = '登録中...';
+  manualRegisterInProgress = true;
   window.auth.createUserWithEmailAndPassword(email, pass)
     .then(function(cred) {
       cred.user.sendEmailVerification();
       var uid = cred.user.uid;
+      // 登録処理中はAuth監視側が先に走って「顧客未登録」と誤判定しないようにする
+      lastAuthUid = uid;
+      authReady = true;
       var name = sei + ' ' + mei;
       var nc = { name: name, phone: phone, email: email, authUid: uid, isLine: false, stamps: 0 };
       dbAddCustomer(nc, function(err, c) {
+        manualRegisterInProgress = false;
         document.getElementById('regBtn').disabled = false;
         document.getElementById('regBtn').textContent = '登録する';
         if (err) {
@@ -604,6 +618,7 @@ function doRegister() {
       });
     })
     .catch(function(err) {
+      manualRegisterInProgress = false;
       document.getElementById('regBtn').disabled = false;
       document.getElementById('regBtn').textContent = '登録する';
       var msg = '登録に失敗しました';
@@ -1109,11 +1124,29 @@ onFbReady(function() {
 
   debugLog('using salonId=' + TARGET_SALON_ID);
 
-  // Firebase Auth 状態監視
+  // Firebase Auth 状態監視（Phase 4: authReady だけでなく uid で変化判定）
   window.auth.onAuthStateChanged(function(user) {
-    debugLog('onAuthStateChanged: user=' + (user ? user.email : 'null'));
-    if (authReady) { debugLog('skip (authReady=true)'); return; }
+    var curUid = user ? user.uid : null;
+    debugLog('onAuthStateChanged: user=' + (user ? user.email : 'null') + ', uid=' + (curUid || 'null'));
+
+    // ログインボタン処理・新規登録処理の最中は、それぞれの処理側で画面遷移まで行う。
+    // ここで先に動くと二重loadや「顧客未登録」誤判定が起きるため、監視側は状態だけ記録して抜ける。
+    if ((manualLoginInProgress || manualRegisterInProgress) && curUid) {
+      lastAuthUid = curUid;
+      authReady = true;
+      debugLog('skip (manual auth flow in progress)');
+      return;
+    }
+
+    // 同じログイン状態の再通知は無視。別ユーザー・ログアウト・初回のみ処理する。
+    if (authReady && curUid === lastAuthUid) {
+      debugLog('skip (same uid)');
+      return;
+    }
+
+    lastAuthUid = curUid;
     authReady = true;
+
     loadAllData(function() {
       debugLog('loadAllData callback fired');
       if (user) {
