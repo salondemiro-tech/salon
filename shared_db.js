@@ -539,3 +539,45 @@ function dbAuthGetCurrentUser() {
 function dbAuthOnStateChanged(cb) {
   if (window.auth) window.auth.onAuthStateChanged(cb);
 }
+
+
+// –––––––––– サロン管理画面用 認証ガード（Phase 3 最小版） ––––––––––
+// 目的：サロン管理画面を開いた時、
+// 1) 未ログインならログイン画面へ戻す
+// 2) 顧客アカウントでログイン中ならサインアウトしてログイン画面へ戻す
+// 3) サロン本人なら cb() を実行して各画面の初期化を続ける
+//
+// 注意：customer_app_v8.html では使わない。サロン管理画面専用。
+function requireSalonAuth(cb) {
+  if (!window.auth || !window.db) {
+    window.location.href = 'salon_auth_v2.html';
+    return;
+  }
+
+  var user = window.auth.currentUser;
+  if (!user) {
+    window.location.href = 'salon_auth_v2.html';
+    return;
+  }
+
+  var uid = user.uid;
+
+  // getCurrentSalonId() が管理画面で UID を返せる状態にするため、
+  // 旧 setCurrentSalonId は使わず、Auth UID を正とする。
+  salonDoc(uid).get().then(function(doc) {
+    if (doc.exists) {
+      if (cb) cb();
+      return;
+    }
+
+    // 顧客アカウントなど、salons/{uid} が存在しないユーザーは管理画面に入れない
+    window.auth.signOut().then(function() {
+      window.location.href = 'salon_auth_v2.html';
+    }).catch(function() {
+      window.location.href = 'salon_auth_v2.html';
+    });
+  }).catch(function() {
+    // 通信エラーや権限エラー時も、安全側に倒してログイン画面へ戻す
+    window.location.href = 'salon_auth_v2.html';
+  });
+}
