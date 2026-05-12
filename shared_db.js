@@ -15,43 +15,43 @@
 
 // –––––––––– Firebase設定 ––––––––––
 var FIREBASE_CONFIG = {
-  apiKey: 'AIzaSyCbU0t9GipUCu6WQFOJ5QLUjAjiFl3j3TY',
-  authDomain: 'salon-booking-1d9de.firebaseapp.com',
-  projectId: 'salon-booking-1d9de',
-  storageBucket: 'salon-booking-1d9de.firebasestorage.app',
-  messagingSenderId: '230269330263',
-  appId: '1:230269330263:web:0aa2f6b624f2f3803dd412'
+apiKey: ‘AIzaSyCbU0t9GipUCu6WQFOJ5QLUjAjiFl3j3TY’,
+authDomain: ‘salon-booking-1d9de.firebaseapp.com’,
+projectId: ‘salon-booking-1d9de’,
+storageBucket: ‘salon-booking-1d9de.firebasestorage.app’,
+messagingSenderId: ‘230269330263’,
+appId: ‘1:230269330263:web:0aa2f6b624f2f3803dd412’
 };
 
 // –––––––––– サロンID管理（Phase 1） ––––––––––
 // SALON_ID_KEY は廃止予定だが、互換性のため変数だけ残す
-var SALON_ID_KEY = 'salon_current_id';
+var SALON_ID_KEY = ‘salon_current_id’;
 
 // 明示的にセットされた salonId
 var _explicitSalonId = null;
 
 // URL パラメータ ?salon=xxx から salonId を自動取得（ファイル読み込み時に即実行）
 (function() {
-  try {
-    var query = window.location.search;
-    if (query && query.length > 1) {
-      var pairs = query.substring(1).split('&');
-      for (var i = 0; i < pairs.length; i++) {
-        var pair = pairs[i].split('=');
-        if (pair[0] === 'salon' && pair[1]) {
-          _explicitSalonId = decodeURIComponent(pair[1]);
-          break;
-        }
-      }
-    }
-  } catch (e) {
-    // URL 解析失敗時は何もしない
-  }
+try {
+var query = window.location.search;
+if (query && query.length > 1) {
+var pairs = query.substring(1).split(’&’);
+for (var i = 0; i < pairs.length; i++) {
+var pair = pairs[i].split(’=’);
+if (pair[0] === ‘salon’ && pair[1]) {
+_explicitSalonId = decodeURIComponent(pair[1]);
+break;
+}
+}
+}
+} catch (e) {
+// URL 解析失敗時は何もしない
+}
 })();
 
 // 外部から明示的に salonId をセットするための関数（互換性のため残す）
 function setExplicitSalonId(id) {
-  _explicitSalonId = id;
+_explicitSalonId = id;
 }
 
 // 現在の salonId を取得
@@ -60,524 +60,485 @@ function setExplicitSalonId(id) {
 //   2. Firebase Auth の currentUser.uid（サロン管理画面用）
 //   3. null
 function getCurrentSalonId() {
-  if (_explicitSalonId) return _explicitSalonId;
-  if (window.auth && window.auth.currentUser) return window.auth.currentUser.uid;
-  return null;
+if (_explicitSalonId) return _explicitSalonId;
+if (window.auth && window.auth.currentUser) return window.auth.currentUser.uid;
+return null;
 }
 
 // 旧 setCurrentSalonId / clearCurrentSalonId は localStorage を廃止
 // 既存呼び出し箇所の互換性のため空関数として残す
 function setCurrentSalonId(id) {
-  // localStorage 書き込みは廃止
+// localStorage 書き込みは廃止
 }
 function clearCurrentSalonId() {
-  // localStorage 削除は廃止
+// localStorage 削除は廃止
 }
 
 // –––––––––– Firebase SDK読み込み（Phase 2：Auth 確定まで待つ） ––––––––––
 (function() {
-  var scripts = [
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js',
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js'
-  ];
+var scripts = [
+‘https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js’,
+‘https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js’,
+‘https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js’
+];
 
-  window._fbReady = false;
-  window._fbReadyCbs = [];
-  window.onFbReady = function(cb) {
-    if (window._fbReady) { cb(); } else { window._fbReadyCbs.push(cb); }
-  };
+window._fbReady = false;
+window._fbReadyCbs = [];
+window.onFbReady = function(cb) {
+if (window._fbReady) { cb(); } else { window._fbReadyCbs.push(cb); }
+};
 
-  function fireReady() {
-    window._fbReady = true;
-    for (var i = 0; i < window._fbReadyCbs.length; i++) {
-      window._fbReadyCbs[i]();
-    }
-    window._fbReadyCbs = [];
-  }
+function fireReady() {
+window._fbReady = true;
+for (var i = 0; i < window._fbReadyCbs.length; i++) {
+window._fbReadyCbs[i]();
+}
+window._fbReadyCbs = [];
+}
 
-  function onAllLoaded() {
-    firebase.initializeApp(FIREBASE_CONFIG);
-    window.db = firebase.firestore();
-    window.auth = firebase.auth();
+function onAllLoaded() {
+firebase.initializeApp(FIREBASE_CONFIG);
+window.db = firebase.firestore();
+window.auth = firebase.auth();
 
-    // Phase 2：onAuthStateChanged が一度発火するまで ready にしない
-    // これにより auth.currentUser が確定した状態で各画面の初期化が始まる
-    var authConfirmed = false;
-    var unsub = window.auth.onAuthStateChanged(function() {
-      if (authConfirmed) return;
-      authConfirmed = true;
-      if (unsub) unsub();
-      fireReady();
-    });
-  }
+```
+// Phase 2：onAuthStateChanged が一度発火するまで ready にしない
+// これにより auth.currentUser が確定した状態で各画面の初期化が始まる
+var authConfirmed = false;
+var unsub = window.auth.onAuthStateChanged(function() {
+  if (authConfirmed) return;
+  authConfirmed = true;
+  if (unsub) unsub();
+  fireReady();
+});
+```
 
-  function loadScript(src, cb) {
-    var s = document.createElement('script');
-    s.src = src;
-    s.onload = cb;
-    s.onerror = cb;
-    document.head.appendChild(s);
-  }
+}
 
-  loadScript(scripts[0], function() {
-    var done = 0;
-    function check() { done++; if (done === 2) onAllLoaded(); }
-    loadScript(scripts[1], check);
-    loadScript(scripts[2], check);
-  });
+function loadScript(src, cb) {
+var s = document.createElement(‘script’);
+s.src = src;
+s.onload = cb;
+s.onerror = cb;
+document.head.appendChild(s);
+}
+
+loadScript(scripts[0], function() {
+var done = 0;
+function check() { done++; if (done === 2) onAllLoaded(); }
+loadScript(scripts[1], check);
+loadScript(scripts[2], check);
+});
 })();
 
 // –––––––––– Firestore パス ––––––––––
 function salonDoc(salonId) {
-  return window.db.collection('salons').doc(salonId);
+return window.db.collection(‘salons’).doc(salonId);
 }
 function salonCol(salonId, colName) {
-  return salonDoc(salonId).collection(colName);
+return salonDoc(salonId).collection(colName);
 }
 
 // –––––––––– デフォルト値 ––––––––––
 var DEFAULT_SETTINGS = {
-  openTime: '10:00', closeTime: '19:00',
-  intervalMin: 30, slotMin: 30,
-  closedDows: [2],
-  weeklyClose: [{ dow: 3, start: '12:00', end: '13:00' }],
-  bookingWeeks: 8,
-  lastMin: 'same1h',
-  deadline: '前日24時まで'
+openTime: ‘10:00’, closeTime: ‘19:00’,
+intervalMin: 30, slotMin: 30,
+closedDows: [2],
+weeklyClose: [{ dow: 3, start: ‘12:00’, end: ‘13:00’ }],
+bookingWeeks: 8,
+lastMin: ‘same1h’,
+deadline: ‘前日24時まで’
 };
 
 var DEFAULT_STAMP_CARD = {
-  enabled: true,
-  goal: 10,
-  reward: '次回施術10%OFF',
-  bonusStamps: [{ at: 5, reward: 'オプション1品無料' }],
-  color: '#b5845a'
+enabled: true,
+goal: 10,
+reward: ‘次回施術10%OFF’,
+bonusStamps: [{ at: 5, reward: ‘オプション1品無料’ }],
+color: ‘#b5845a’
 };
 
 var DEFAULT_CANCEL_POLICY = {
-  text: '・3日前まで:無料\n・2日前〜前日:ご予約料金の50%\n・当日:ご予約料金の100%\n・無断キャンセル:ご予約料金の100%',
-  rates: [
-    { id: 1, label: '3日前から',     percent: 0   },
-    { id: 2, label: '前日から',      percent: 50  },
-    { id: 3, label: '当日',          percent: 100 },
-    { id: 4, label: '無断キャンセル', percent: 100 }
-  ],
-  qrUrl: '',
-  qrMsg: '{顧客名} 様\n\nキャンセル規定に基づき、下記のキャンセル料が発生しております。\n\n■ 予約日時:{予約日時}\n■ メニュー:{メニュー}\n■ キャンセル料:{キャンセル料}\n\n下記よりお支払いをお願いいたします。\n{QRリンク}',
-  showOnBook: true,
-  showOnCancel: true
+text: ‘・3日前まで:無料\n・2日前〜前日:ご予約料金の50%\n・当日:ご予約料金の100%\n・無断キャンセル:ご予約料金の100%’,
+rates: [
+{ id: 1, label: ‘3日前から’,     percent: 0   },
+{ id: 2, label: ‘前日から’,      percent: 50  },
+{ id: 3, label: ‘当日’,          percent: 100 },
+{ id: 4, label: ‘無断キャンセル’, percent: 100 }
+],
+qrUrl: ‘’,
+qrMsg: ‘{顧客名} 様\n\nキャンセル規定に基づき、下記のキャンセル料が発生しております。\n\n■ 予約日時:{予約日時}\n■ メニュー:{メニュー}\n■ キャンセル料:{キャンセル料}\n\n下記よりお支払いをお願いいたします。\n{QRリンク}’,
+showOnBook: true,
+showOnCancel: true
 };
 
 var DEFAULT_MENUS = [
-  { id: 'm1', name: 'フェイシャルトリートメント', duration: 90,  price: 12000, type: 'main',   public: true },
-  { id: 'm2', name: 'ボディケア',                 duration: 60,  price: 8000,  type: 'main',   public: true },
-  { id: 'm3', name: 'フェイシャル+アイ',          duration: 120, price: 16000, type: 'main',   public: true },
-  { id: 'm4', name: '目元ケア',                   duration: 30,  price: 3000,  type: 'option', public: true },
-  { id: 'm5', name: 'ヘッドスパ',                 duration: 20,  price: 2500,  type: 'option', public: true },
-  { id: 'm6', name: 'デコルテケア',               duration: 15,  price: 2000,  type: 'option', public: true }
+{ id: ‘m1’, name: ‘フェイシャルトリートメント’, duration: 90,  price: 12000, type: ‘main’,   public: true },
+{ id: ‘m2’, name: ‘ボディケア’,                 duration: 60,  price: 8000,  type: ‘main’,   public: true },
+{ id: ‘m3’, name: ‘フェイシャル+アイ’,          duration: 120, price: 16000, type: ‘main’,   public: true },
+{ id: ‘m4’, name: ‘目元ケア’,                   duration: 30,  price: 3000,  type: ‘option’, public: true },
+{ id: ‘m5’, name: ‘ヘッドスパ’,                 duration: 20,  price: 2500,  type: ‘option’, public: true },
+{ id: ‘m6’, name: ‘デコルテケア’,               duration: 15,  price: 2000,  type: ‘option’, public: true }
 ];
 
 // –––––––––– salon ––––––––––
 function dbGetSalon(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb(null); return; }
-  salonDoc(id).get().then(function(doc) {
-    cb(doc.exists ? doc.data() : null);
-  }).catch(function() { cb(null); });
+var id = getCurrentSalonId();
+if (!id) { cb(null); return; }
+salonDoc(id).get().then(function(doc) {
+cb(doc.exists ? doc.data() : null);
+}).catch(function() { cb(null); });
 }
 
 function dbSaveSalon(salon, cb) {
-  salonDoc(salon.id).set(salon, { merge: true }).then(function() {
-    setCurrentSalonId(salon.id);
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
+salonDoc(salon.id).set(salon, { merge: true }).then(function() {
+setCurrentSalonId(salon.id);
+if (cb) cb(null);
+}).catch(function(e) { if (cb) cb(e); });
 }
 
 function dbSalonExists(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb(false); return; }
-  salonDoc(id).get().then(function(doc) { cb(doc.exists); }).catch(function() { cb(false); });
+var id = getCurrentSalonId();
+if (!id) { cb(false); return; }
+salonDoc(id).get().then(function(doc) { cb(doc.exists); }).catch(function() { cb(false); });
 }
 
 // –––––––––– settings ––––––––––
 function dbGetSettings(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb(Object.assign({}, DEFAULT_SETTINGS)); return; }
-  salonDoc(id).collection('config').doc('settings').get().then(function(doc) {
-    cb(doc.exists ? Object.assign({}, DEFAULT_SETTINGS, doc.data()) : Object.assign({}, DEFAULT_SETTINGS));
-  }).catch(function() { cb(Object.assign({}, DEFAULT_SETTINGS)); });
+var id = getCurrentSalonId();
+if (!id) { cb(Object.assign({}, DEFAULT_SETTINGS)); return; }
+salonDoc(id).collection(‘config’).doc(‘settings’).get().then(function(doc) {
+cb(doc.exists ? Object.assign({}, DEFAULT_SETTINGS, doc.data()) : Object.assign({}, DEFAULT_SETTINGS));
+}).catch(function() { cb(Object.assign({}, DEFAULT_SETTINGS)); });
 }
 
 function dbSaveSettings(s, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonDoc(id).collection('config').doc('settings').set(s).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’); return; }
+salonDoc(id).collection(‘config’).doc(‘settings’).set(s).then(function() {
+if (cb) cb(null);
+}).catch(function(e) { if (cb) cb(e); });
 }
 
 // –––––––––– menus ––––––––––
 function dbGetMenus(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb([]); return; }
-  salonCol(id, 'menus').orderBy('id').get().then(function(snap) {
-    var menus = [];
-    snap.forEach(function(doc) { menus.push(doc.data()); });
-    cb(menus);
-  }).catch(function() { cb([]); });
+var id = getCurrentSalonId();
+if (!id) { cb([]); return; }
+salonCol(id, ‘menus’).orderBy(‘id’).get().then(function(snap) {
+var menus = [];
+snap.forEach(function(doc) { menus.push(doc.data()); });
+cb(menus);
+}).catch(function() { cb([]); });
 }
 
 function dbGetPublicMenus(cb) {
-  dbGetMenus(function(menus) {
-    cb(menus.filter(function(m) { return m.public; }));
-  });
+dbGetMenus(function(menus) {
+cb(menus.filter(function(m) { return m.public; }));
+});
 }
 
 function dbSaveMenus(menus, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  var batch = window.db.batch();
-  salonCol(id, 'menus').get().then(function(snap) {
-    snap.forEach(function(doc) { batch.delete(doc.ref); });
-    menus.forEach(function(m) {
-      batch.set(salonCol(id, 'menus').doc(m.id), m);
-    });
-    return batch.commit();
-  }).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’); return; }
+var batch = window.db.batch();
+salonCol(id, ‘menus’).get().then(function(snap) {
+snap.forEach(function(doc) { batch.delete(doc.ref); });
+menus.forEach(function(m) {
+batch.set(salonCol(id, ‘menus’).doc(m.id), m);
+});
+return batch.commit();
+}).then(function() {
+if (cb) cb(null);
+}).catch(function(e) { if (cb) cb(e); });
 }
 
 // –––––––––– customers ––––––––––
 function dbGetCustomers(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb([]); return; }
-  salonCol(id, 'customers').orderBy('name').get().then(function(snap) {
-    var list = [];
-    snap.forEach(function(doc) { list.push(doc.data()); });
-    cb(list);
-  }).catch(function() { cb([]); });
+var id = getCurrentSalonId();
+if (!id) { cb([]); return; }
+salonCol(id, ‘customers’).orderBy(‘name’).get().then(function(snap) {
+var list = [];
+snap.forEach(function(doc) { list.push(doc.data()); });
+cb(list);
+}).catch(function() { cb([]); });
 }
 
 function dbFindCustomer(query, cb) {
-  dbGetCustomers(function(customers) {
-    var found = customers.find(function(c) {
-      return (!query.name || c.name === query.name) && (!query.email || c.email === query.email);
-    });
-    cb(found || null);
-  });
+dbGetCustomers(function(customers) {
+var found = customers.find(function(c) {
+return (!query.name || c.name === query.name) && (!query.email || c.email === query.email);
+});
+cb(found || null);
+});
 }
 
 function dbAddCustomer(c, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon', null); return; }
-  c.id = c.id || ('c' + Date.now());
-  c.stamps = c.stamps || 0;
-  salonCol(id, 'customers').doc(c.id).set(c).then(function() {
-    if (cb) cb(null, c);
-  }).catch(function(e) { if (cb) cb(e, null); });
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’, null); return; }
+c.id = c.id || (‘c’ + Date.now());
+c.stamps = c.stamps || 0;
+salonCol(id, ‘customers’).doc(c.id).set(c).then(function() {
+if (cb) cb(null, c);
+}).catch(function(e) { if (cb) cb(e, null); });
 }
 
 function dbUpdateCustomer(customerId, changes, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonCol(id, 'customers').doc(customerId).update(changes).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’); return; }
+salonCol(id, ‘customers’).doc(customerId).update(changes).then(function() {
+if (cb) cb(null);
+}).catch(function(e) { if (cb) cb(e); });
 }
 
 // –––––––––– stamps ––––––––––
 function dbAddStamp(customerId, count, cb) {
-  count = count || 1;
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  var ref = salonCol(id, 'customers').doc(customerId);
-  ref.get().then(function(doc) {
-    if (!doc.exists) { if (cb) cb('not found'); return; }
-    var cur = doc.data().stamps || 0;
-    return ref.update({ stamps: cur + count });
-  }).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
+count = count || 1;
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’); return; }
+var ref = salonCol(id, ‘customers’).doc(customerId);
+ref.get().then(function(doc) {
+if (!doc.exists) { if (cb) cb(‘not found’); return; }
+var cur = doc.data().stamps || 0;
+return ref.update({ stamps: cur + count });
+}).then(function() {
+if (cb) cb(null);
+}).catch(function(e) { if (cb) cb(e); });
 }
 
 function dbResetStamps(customerId, cb) {
-  dbUpdateCustomer(customerId, { stamps: 0 }, cb);
+dbUpdateCustomer(customerId, { stamps: 0 }, cb);
 }
 
 function dbGetStampCard(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb(Object.assign({}, DEFAULT_STAMP_CARD)); return; }
-  salonDoc(id).collection('config').doc('stampCard').get().then(function(doc) {
-    cb(doc.exists ? Object.assign({}, DEFAULT_STAMP_CARD, doc.data()) : Object.assign({}, DEFAULT_STAMP_CARD));
-  }).catch(function() { cb(Object.assign({}, DEFAULT_STAMP_CARD)); });
+var id = getCurrentSalonId();
+if (!id) { cb(Object.assign({}, DEFAULT_STAMP_CARD)); return; }
+salonDoc(id).collection(‘config’).doc(‘stampCard’).get().then(function(doc) {
+cb(doc.exists ? Object.assign({}, DEFAULT_STAMP_CARD, doc.data()) : Object.assign({}, DEFAULT_STAMP_CARD));
+}).catch(function() { cb(Object.assign({}, DEFAULT_STAMP_CARD)); });
 }
 
 function dbSaveStampCard(sc, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonDoc(id).collection('config').doc('stampCard').set(sc).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’); return; }
+salonDoc(id).collection(‘config’).doc(‘stampCard’).set(sc).then(function() {
+if (cb) cb(null);
+}).catch(function(e) { if (cb) cb(e); });
 }
 
 // –––––––––– appointments ––––––––––
 function dbGetAppointments(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb([]); return; }
-  salonCol(id, 'appointments').orderBy('date').get().then(function(snap) {
-    var list = [];
-    snap.forEach(function(doc) { list.push(doc.data()); });
-    cb(list);
-  }).catch(function() { cb([]); });
+var id = getCurrentSalonId();
+if (!id) { cb([]); return; }
+salonCol(id, ‘appointments’).orderBy(‘date’).get().then(function(snap) {
+var list = [];
+snap.forEach(function(doc) { list.push(doc.data()); });
+cb(list);
+}).catch(function() { cb([]); });
 }
 
 function dbAddAppointment(a, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon', null); return; }
-  a.id = a.id || ('a' + Date.now());
-  salonCol(id, 'appointments').doc(a.id).set(a).then(function() {
-    if (cb) cb(null, a);
-  }).catch(function(e) { if (cb) cb(e, null); });
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’, null); return; }
+a.id = a.id || (‘a’ + Date.now());
+salonCol(id, ‘appointments’).doc(a.id).set(a).then(function() {
+if (cb) cb(null, a);
+}).catch(function(e) { if (cb) cb(e, null); });
 }
 
 function dbUpdateAppointment(appointmentId, changes, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonCol(id, 'appointments').doc(appointmentId).update(changes).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’); return; }
+salonCol(id, ‘appointments’).doc(appointmentId).update(changes).then(function() {
+if (cb) cb(null);
+}).catch(function(e) { if (cb) cb(e); });
 }
 
 function dbCancelAppointment(appointmentId, cb) {
-  dbUpdateAppointment(appointmentId, { status: 'cancelled' }, cb);
+dbUpdateAppointment(appointmentId, { status: ‘cancelled’ }, cb);
 }
 
 // –––––––––– closeBlocks ––––––––––
 function dbGetCloseBlocks(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb([]); return; }
-  salonCol(id, 'closeBlocks').get().then(function(snap) {
-    var list = [];
-    snap.forEach(function(doc) { list.push(doc.data()); });
-    cb(list);
-  }).catch(function() { cb([]); });
+var id = getCurrentSalonId();
+if (!id) { cb([]); return; }
+salonCol(id, ‘closeBlocks’).get().then(function(snap) {
+var list = [];
+snap.forEach(function(doc) { list.push(doc.data()); });
+cb(list);
+}).catch(function() { cb([]); });
 }
 
 function dbAddCloseBlock(b, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon', null); return; }
-  b.id = b.id || ('b' + Date.now());
-  salonCol(id, 'closeBlocks').doc(b.id).set(b).then(function() {
-    if (cb) cb(null, b);
-  }).catch(function(e) { if (cb) cb(e, null); });
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’, null); return; }
+b.id = b.id || (‘b’ + Date.now());
+salonCol(id, ‘closeBlocks’).doc(b.id).set(b).then(function() {
+if (cb) cb(null, b);
+}).catch(function(e) { if (cb) cb(e, null); });
 }
 
 function dbDeleteCloseBlock(blockId, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonCol(id, 'closeBlocks').doc(blockId).delete().then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’); return; }
+salonCol(id, ‘closeBlocks’).doc(blockId).delete().then(function() {
+if (cb) cb(null);
+}).catch(function(e) { if (cb) cb(e); });
 }
 
 // –––––––––– cancelPolicy ––––––––––
 function dbGetCancelPolicy(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb(Object.assign({}, DEFAULT_CANCEL_POLICY)); return; }
-  salonDoc(id).collection('config').doc('cancelPolicy').get().then(function(doc) {
-    cb(doc.exists ? Object.assign({}, DEFAULT_CANCEL_POLICY, doc.data()) : Object.assign({}, DEFAULT_CANCEL_POLICY));
-  }).catch(function() { cb(Object.assign({}, DEFAULT_CANCEL_POLICY)); });
+var id = getCurrentSalonId();
+if (!id) { cb(Object.assign({}, DEFAULT_CANCEL_POLICY)); return; }
+salonDoc(id).collection(‘config’).doc(‘cancelPolicy’).get().then(function(doc) {
+cb(doc.exists ? Object.assign({}, DEFAULT_CANCEL_POLICY, doc.data()) : Object.assign({}, DEFAULT_CANCEL_POLICY));
+}).catch(function() { cb(Object.assign({}, DEFAULT_CANCEL_POLICY)); });
 }
 
 function dbSaveCancelPolicy(p, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonDoc(id).collection('config').doc('cancelPolicy').set(p).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
+var id = getCurrentSalonId();
+if (!id) { if (cb) cb(‘no salon’); return; }
+salonDoc(id).collection(‘config’).doc(‘cancelPolicy’).set(p).then(function() {
+if (cb) cb(null);
+}).catch(function(e) { if (cb) cb(e); });
 }
 
 // –––––––––– 予約可能日範囲 ––––––––––
 function dbGetBookingDateRange(settings) {
-  var weeks = (settings && settings.bookingWeeks) || 8;
-  var today = new Date(); today.setHours(0, 0, 0, 0);
-  var last = new Date(today); last.setDate(today.getDate() + weeks * 7);
-  return { from: today, to: last, fromStr: fmtDate(today), toStr: fmtDate(last) };
+var weeks = (settings && settings.bookingWeeks) || 8;
+var today = new Date(); today.setHours(0, 0, 0, 0);
+var last = new Date(today); last.setDate(today.getDate() + weeks * 7);
+return { from: today, to: last, fromStr: fmtDate(today), toStr: fmtDate(last) };
 }
 
 // –––––––––– 予約可否チェック ––––––––––
 function canBook(dateStr, startMin, totalDur, excludeId, settings, appointments, closeBlocks, cb) {
-  var s = settings;
-  var a = appointments;
-  var bl = closeBlocks;
-  var endMin = startMin + totalDur;
-  var dow = new Date(dateStr).getDay();
-  var range = dbGetBookingDateRange(s);
-  if (dateStr < range.fromStr || dateStr > range.toStr) { cb({ ok: false, reason: '受付期間外' }); return; }
-  if (s.closedDows.indexOf(dow) >= 0) { cb({ ok: false, reason: '定休日' }); return; }
-  if (startMin < toMin(s.openTime)) { cb({ ok: false, reason: '営業時間外' }); return; }
-  if (endMin + s.intervalMin > toMin(s.closeTime)) { cb({ ok: false, reason: '閉店時間' }); return; }
-  var wc = s.weeklyClose || [];
-  for (var i = 0; i < wc.length; i++) {
-    if (wc[i].dow === dow) {
-      var ws = toMin(wc[i].start), we = toMin(wc[i].end);
-      if (startMin < we && endMin > ws) { cb({ ok: false, reason: '定期クローズ' }); return; }
-    }
-  }
-  for (var j = 0; j < bl.length; j++) {
-    if (bl[j].date === dateStr) {
-      var bs = toMin(bl[j].start), be = toMin(bl[j].end);
-      if (startMin < be && endMin > bs) { cb({ ok: false, reason: 'クローズ時間' }); return; }
-    }
-  }
-  for (var k = 0; k < a.length; k++) {
-    if (a[k].status !== 'active' && a[k].status !== 'visited') continue;
-    if (a[k].id === excludeId) continue;
-    if (a[k].date === dateStr) {
-      var as = toMin(a[k].start), ae = as + a[k].durationMin + a[k].intervalMin;
-      if (startMin < ae && endMin + s.intervalMin > as) { cb({ ok: false, reason: '予約済み' }); return; }
-    }
-  }
-  cb({ ok: true });
+var s = settings;
+var a = appointments;
+var bl = closeBlocks;
+var endMin = startMin + totalDur;
+var dow = new Date(dateStr).getDay();
+var range = dbGetBookingDateRange(s);
+if (dateStr < range.fromStr || dateStr > range.toStr) { cb({ ok: false, reason: ‘受付期間外’ }); return; }
+if (s.closedDows.indexOf(dow) >= 0) { cb({ ok: false, reason: ‘定休日’ }); return; }
+if (startMin < toMin(s.openTime)) { cb({ ok: false, reason: ‘営業時間外’ }); return; }
+if (endMin + s.intervalMin > toMin(s.closeTime)) { cb({ ok: false, reason: ‘閉店時間’ }); return; }
+var wc = s.weeklyClose || [];
+for (var i = 0; i < wc.length; i++) {
+if (wc[i].dow === dow) {
+var ws = toMin(wc[i].start), we = toMin(wc[i].end);
+if (startMin < we && endMin > ws) { cb({ ok: false, reason: ‘定期クローズ’ }); return; }
+}
+}
+for (var j = 0; j < bl.length; j++) {
+if (bl[j].date === dateStr) {
+var bs = toMin(bl[j].start), be = toMin(bl[j].end);
+if (startMin < be && endMin > bs) { cb({ ok: false, reason: ‘クローズ時間’ }); return; }
+}
+}
+for (var k = 0; k < a.length; k++) {
+if (a[k].status !== ‘active’ && a[k].status !== ‘visited’) continue;
+if (a[k].id === excludeId) continue;
+if (a[k].date === dateStr) {
+var as = toMin(a[k].start), ae = as + a[k].durationMin + a[k].intervalMin;
+if (startMin < ae && endMin + s.intervalMin > as) { cb({ ok: false, reason: ‘予約済み’ }); return; }
+}
+}
+cb({ ok: true });
 }
 
 function hasAvailableSlot(dateStr, totalDur, excludeId, settings, appointments, closeBlocks) {
-  var s = settings, open = toMin(s.openTime), close = toMin(s.closeTime);
-  for (var m = open; m + totalDur + s.intervalMin <= close; m += s.slotMin) {
-    var result = { ok: false };
-    canBook(dateStr, m, totalDur, excludeId, settings, appointments, closeBlocks, function(r) { result = r; });
-    if (result.ok) return true;
-  }
-  return false;
+var s = settings, open = toMin(s.openTime), close = toMin(s.closeTime);
+for (var m = open; m + totalDur + s.intervalMin <= close; m += s.slotMin) {
+var result = { ok: false };
+canBook(dateStr, m, totalDur, excludeId, settings, appointments, closeBlocks, function(r) { result = r; });
+if (result.ok) return true;
+}
+return false;
 }
 
 // –––––––––– ユーティリティ ––––––––––
-function toMin(t) { var parts = t.split(':'); return Number(parts[0]) * 60 + Number(parts[1]); }
-function toTime(m) { return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); }
+function toMin(t) { var parts = t.split(’:’); return Number(parts[0]) * 60 + Number(parts[1]); }
+function toTime(m) { return String(Math.floor(m / 60)).padStart(2, ‘0’) + ‘:’ + String(m % 60).padStart(2, ‘0’); }
 function fmtDate(d) {
-  return d.getFullYear() + '-' +
-    String(d.getMonth() + 1).padStart(2, '0') + '-' +
-    String(d.getDate()).padStart(2, '0');
+return d.getFullYear() + ‘-’ +
+String(d.getMonth() + 1).padStart(2, ‘0’) + ‘-’ +
+String(d.getDate()).padStart(2, ‘0’);
 }
 
 // –––––––––– パスワードバリデーション ––––––––––
 function validatePassword(pw) {
-  if (!pw || pw.length < 8) return { ok: false, msg: '8文字以上で入力してください' };
-  if (!/[a-zA-Z]/.test(pw)) return { ok: false, msg: '英字を含めてください' };
-  if (!/[0-9]/.test(pw)) return { ok: false, msg: '数字を含めてください' };
-  return { ok: true };
+if (!pw || pw.length < 8) return { ok: false, msg: ‘8文字以上で入力してください’ };
+if (!/[a-zA-Z]/.test(pw)) return { ok: false, msg: ‘英字を含めてください’ };
+if (!/[0-9]/.test(pw)) return { ok: false, msg: ‘数字を含めてください’ };
+return { ok: true };
 }
 
 // –––––––––– ログアウト ––––––––––
 function dbLogout() {
-  clearCurrentSalonId();
-  if (window.auth) window.auth.signOut();
+clearCurrentSalonId();
+if (window.auth) window.auth.signOut();
 }
 
 // –––––––––– Firebase Authentication ––––––––––
 // サロン新規登録
 function dbAuthRegister(name, email, password, cb) {
-  window.auth.createUserWithEmailAndPassword(email, password)
-    .then(function(cred) {
-      var uid = cred.user.uid;
-      var salon = { id: uid, name: name, email: email };
-      var batch = window.db.batch();
-      batch.set(salonDoc(uid), salon);
-      batch.set(salonDoc(uid).collection('config').doc('settings'), DEFAULT_SETTINGS);
-      batch.set(salonDoc(uid).collection('config').doc('stampCard'), DEFAULT_STAMP_CARD);
-      batch.set(salonDoc(uid).collection('config').doc('cancelPolicy'), DEFAULT_CANCEL_POLICY);
-      DEFAULT_MENUS.forEach(function(m) {
-        batch.set(salonCol(uid, 'menus').doc(m.id), m);
-      });
-      return batch.commit().then(function() {
-        setCurrentSalonId(uid);
-        cred.user.sendEmailVerification();
-        if (cb) cb(null, salon);
-      });
-    })
-    .catch(function(e) {
-      var msg = 'エラーが発生しました';
-      if (e.code === 'auth/email-already-in-use') msg = 'このメールアドレスはすでに登録されています';
-      if (e.code === 'auth/invalid-email') msg = 'メールアドレスの形式が正しくありません';
-      if (e.code === 'auth/weak-password') msg = 'パスワードは6文字以上で入力してください';
-      if (cb) cb({ message: msg });
-    });
+window.auth.createUserWithEmailAndPassword(email, password)
+.then(function(cred) {
+var uid = cred.user.uid;
+var salon = { id: uid, name: name, email: email };
+var batch = window.db.batch();
+batch.set(salonDoc(uid), salon);
+batch.set(salonDoc(uid).collection(‘config’).doc(‘settings’), DEFAULT_SETTINGS);
+batch.set(salonDoc(uid).collection(‘config’).doc(‘stampCard’), DEFAULT_STAMP_CARD);
+batch.set(salonDoc(uid).collection(‘config’).doc(‘cancelPolicy’), DEFAULT_CANCEL_POLICY);
+DEFAULT_MENUS.forEach(function(m) {
+batch.set(salonCol(uid, ‘menus’).doc(m.id), m);
+});
+return batch.commit().then(function() {
+setCurrentSalonId(uid);
+cred.user.sendEmailVerification();
+if (cb) cb(null, salon);
+});
+})
+.catch(function(e) {
+var msg = ‘エラーが発生しました’;
+if (e.code === ‘auth/email-already-in-use’) msg = ‘このメールアドレスはすでに登録されています’;
+if (e.code === ‘auth/invalid-email’) msg = ‘メールアドレスの形式が正しくありません’;
+if (e.code === ‘auth/weak-password’) msg = ‘パスワードは6文字以上で入力してください’;
+if (cb) cb({ message: msg });
+});
 }
 
 // サロンログイン
 function dbAuthLogin(email, password, cb) {
-  window.auth.signInWithEmailAndPassword(email, password)
-    .then(function(cred) {
-      var uid = cred.user.uid;
-      setCurrentSalonId(uid);
-      return salonDoc(uid).get().then(function(doc) {
-        if (cb) cb(null, doc.exists ? doc.data() : { id: uid, email: email, name: '' });
-      });
-    })
-    .catch(function(e) {
-      if (cb) cb({ message: 'メールアドレスまたはパスワードが正しくありません' });
-    });
+window.auth.signInWithEmailAndPassword(email, password)
+.then(function(cred) {
+var uid = cred.user.uid;
+setCurrentSalonId(uid);
+return salonDoc(uid).get().then(function(doc) {
+if (cb) cb(null, doc.exists ? doc.data() : { id: uid, email: email, name: ‘’ });
+});
+})
+.catch(function(e) {
+if (cb) cb({ message: ‘メールアドレスまたはパスワードが正しくありません’ });
+});
 }
 
 // パスワードリセットメール送信
 function dbAuthSendPasswordReset(email, cb) {
-  window.auth.sendPasswordResetEmail(email)
-    .then(function() { if (cb) cb(null); })
-    .catch(function(e) {
-      if (cb) cb({ message: 'メールアドレスが見つかりません' });
-    });
+window.auth.sendPasswordResetEmail(email)
+.then(function() { if (cb) cb(null); })
+.catch(function(e) {
+if (cb) cb({ message: ‘メールアドレスが見つかりません’ });
+});
 }
 
 // 現在のユーザー
 function dbAuthGetCurrentUser() {
-  return window.auth ? window.auth.currentUser : null;
+return window.auth ? window.auth.currentUser : null;
 }
 
 // 認証状態の変化を監視
 function dbAuthOnStateChanged(cb) {
-  if (window.auth) window.auth.onAuthStateChanged(cb);
-}
-
-
-// –––––––––– サロン管理画面用 認証ガード（Phase 3 最小版） ––––––––––
-// 目的：サロン管理画面を開いた時、
-// 1) 未ログインならログイン画面へ戻す
-// 2) 顧客アカウントでログイン中ならサインアウトしてログイン画面へ戻す
-// 3) サロン本人なら cb() を実行して各画面の初期化を続ける
-//
-// 注意：customer_app_v8.html では使わない。サロン管理画面専用。
-function requireSalonAuth(cb) {
-  if (!window.auth || !window.db) {
-    window.location.href = 'salon_auth_v2.html';
-    return;
-  }
-
-  var user = window.auth.currentUser;
-  if (!user) {
-    window.location.href = 'salon_auth_v2.html';
-    return;
-  }
-
-  var uid = user.uid;
-
-  // getCurrentSalonId() が管理画面で UID を返せる状態にするため、
-  // 旧 setCurrentSalonId は使わず、Auth UID を正とする。
-  salonDoc(uid).get().then(function(doc) {
-    if (doc.exists) {
-      if (cb) cb();
-      return;
-    }
-
-    // 顧客アカウントなど、salons/{uid} が存在しないユーザーは管理画面に入れない
-    window.auth.signOut().then(function() {
-      window.location.href = 'salon_auth_v2.html';
-    }).catch(function() {
-      window.location.href = 'salon_auth_v2.html';
-    });
-  }).catch(function() {
-    // 通信エラーや権限エラー時も、安全側に倒してログイン画面へ戻す
-    window.location.href = 'salon_auth_v2.html';
-  });
+if (window.auth) window.auth.onAuthStateChanged(cb);
 }
