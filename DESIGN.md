@@ -1,0 +1,1092 @@
+# TORITA 販売前提設計書 v6
+作成日：2026/5/12（v6：GPTレビュー 12項目反映版。「最高」5項目は本体、「高」「中」7項目は DESIGN_NOTES.md）
+方針：**ゼロから作り直し**（既存コードは参考、データは全消去）
+
+---
+
+## 0. このアプリは何か
+
+**TORITA は、エステ・美容サロン向けの予約管理 SaaS。**
+1人〜数人で運営する小規模サロンのオーナーが、自分のサロンの予約・顧客・メニューを管理し、顧客はスマホから予約・変更・キャンセルできる。
+
+**売り方**：月額制 SaaS として、複数のサロンオーナーが個別にアカウントを持って使う。
+
+**現状**：実運用していないテスト段階。既存コード（v8系）は参考として残すが、販売できる完璧な形にするため、**新規ファイル名で1から作り直す**。Firestore データも全消去して空から始める。
+
+### 0-1. 製品の段階展開（重要）
+
+TORITA は2つの段階で展開する：
+
+**フェーズ1：1人用版（=現在作っているもの）**
+- サロンオーナー1名で運営する個人サロン向け
+- 1サロン = 1アカウント = 1人のオーナー
+- スタッフ管理機能なし
+
+**フェーズ2：2〜10人用版（将来）**
+- 小規模なスタッフチーム（2〜10人）で運営するサロン向け
+- 1サロン = 1オーナーアカウント + 複数スタッフアカウント
+- スタッフごとに担当顧客・担当予約・編集権限
+- リアルタイム同期（`onSnapshot`）で複数端末の同時編集に対応
+- スタッフ間の編集ロック（同じ予約を2人が同時に編集しない仕組み）
+
+### 0-2. 1人用版を作る今、絶対に守る設計指針
+
+**「1人用」として動けばOKではなく、フェーズ2に進む時にDBもコードも大改修にならない設計にする。**
+
+#### 中核となる考え方：「予約 = 時間 × スタッフ × 設備」の3次元モデル
+
+予約とは「店全体の時間を押さえるもの」ではなく、「**特定のスタッフと特定の設備を、特定の時間で押さえるもの**」として最初から設計する。
+
+フェーズ1（1人用）では：
+- スタッフ = オーナー1人だけ（`staffs/owner`）
+- 設備 = デフォルト1個（`resources/default`）
+- 予約画面・メニュー設定画面では「スタッフを選ぶ」「設備を選ぶ」UIを出さない（裏で自動的に紐付け）
+
+フェーズ2（複数人用）になっても、**DB構造を変える必要はなく、UIを追加するだけで済む**。
+
+#### 必要となる概念（フェーズ2で使う、フェーズ1でも箱だけ用意）
+
+1. **スタッフ**（`salons/{salonId}/staffs/{staffId}`）
+   - 名前、Auth UID、役職（オーナー/スタッフ）、有効/無効
+
+2. **設備・スペース**（`salons/{salonId}/resources/{resourceId}`）
+   - ベッド1、ベッド2、個室A、シャンプー台 など
+   - 名前、種類、有効/無効
+
+3. **メニュー**（`salons/{salonId}/menus/{menuId}`）
+   - 名前、所要時間、料金、種類（メイン/オプション）、公開/非公開
+   - このメニューを施術できるスタッフID配列 `eligibleStaffIds: ['owner']`
+   - このメニューに必要な設備ID配列 `requiredResourceIds: ['default']`
+   - インターバル（前後の片付け時間）
+
+4. **スタッフのシフト**（`salons/{salonId}/shifts/{shiftId}`）
+   - スタッフID、日付、開始時刻、終了時刻
+   - フェーズ1ではオーナーの営業時間 = シフトとして自動扱い
+
+5. **設備の空き状況**（予約ドキュメントから動的に計算）
+   - その時間帯にその設備を使う予約があるか
+
+6. **指名予約**（フェーズ2の機能）
+   - 顧客が予約時に「このスタッフ希望」を指定できる
+
+7. **同時施術不可チェック**
+   - 同じスタッフが同じ時間に2つの予約を持てない
+   - 同じ設備が同じ時間に2つの予約に使われない
+   - メニューが要求する設備とスタッフが両方確保できる時間だけ予約可能
+
+#### 予約ドキュメントの設計（最初からこの形）
+
+```
+salons/{salonId}/appointments/{appointmentId} {
+  // === 顧客が書き込めるフィールド ===
+  dateKey: "2026-05-14",                 // 営業日キー（並べ替え・日別取得用）
+  start: "10:00",                        // 時刻ラベル（表示用）
+  customerId: "<顧客Auth UID>",          // = 顧客の Auth UID
+  menuId: "m1",                          // メインメニュー1つ
+  optionMenuIds: ["m4"],                 // オプションメニュー（任意）
+
+  // === サーバ側で確定するフィールド（顧客は書けない）===
+  end: "11:00",                          // start + menu.duration から算出
+  startAt: <Timestamp>,                  // 厳密な開始時刻（タイムゾーン安全）
+  endAt: <Timestamp>,                    // 厳密な終了時刻
+  staffId: "owner",                      // フェーズ1：'owner' 固定
+  resourceIds: ["default"],              // フェーズ1：['default'] 固定
+  status: "confirmed",                   // 作成時は confirmed 固定
+  priceSnapshot: 12000,                  // menus.price から計算
+  createdAt: <serverTimestamp>,          // serverTimestamp() で確定
+
+  // === フェーズ2の箱（フェーズ1では null）===
+  editingBy: null
+}
+```
+
+**核心原則：顧客入力を信用するのは最小限のフィールドだけ**
+
+顧客が送れるフィールド：`dateKey`, `start`, `customerId`, `menuId`, `optionMenuIds` のみ。
+それ以外（`end`, `startAt`, `endAt`, `staffId`, `resourceIds`, `status`, `priceSnapshot`, `createdAt`）は **すべてサーバー側で確定**する。
+
+**なぜ`end` も顧客に書かせないか**：
+顧客が `start: "10:00", end: "10:05"` のように短く送って、本来90分のメニュー予約を5分で押さえる攻撃を防ぐため。サーバ側で `start + menu.duration + optionMenusのduration合計 + intervalAfter` から算出する。
+
+**なぜ`priceSnapshot` をサーバ確定にするか**：
+顧客が `priceSnapshot: 0` で送る改ざんを防ぐ。Cloud Functions が `menus/{menuId}.price + sum(optionMenuIds.price)` から計算してセット。過去予約は当時の価格が残る。
+
+**なぜ`createdAt` をサーバ確定にするか**：
+顧客が過去日・未来日の createdAt を入れて並べ替えやログを混乱させる攻撃を防ぐ。`serverTimestamp()` で確定。
+
+**status の値域（許可リスト）**：
+- `confirmed`：予約確定（初期値、サーバ側で必ずこの値）
+- `cancelled`：顧客またはサロンによるキャンセル
+- `no_show`：顧客が来店しなかった（サロンのみ設定可能）
+- `completed`：施術完了（サロンのみ設定可能）
+- `refunded`：返金処理済み（サロンのみ設定可能）
+
+**status 変更の許可ルール**：
+| 現状 | 変更可能 | 誰が |
+|---|---|---|
+| confirmed | cancelled | 顧客 or サロン |
+| confirmed | no_show | サロンのみ |
+| confirmed | completed | サロンのみ |
+| completed | refunded | サロンのみ |
+| その他の遷移 | 全て禁止 | - |
+
+このルールは `shared_db_reservation.js` の専用関数 `customerCancelAppointment` / `salonMarkNoShow` / `salonMarkCompleted` 経由でのみ呼び出される。Firestoreルールでもこの遷移を強制する。
+
+#### 顧客ドキュメントの設計（最初からこの形）
+
+```
+salons/{salonId}/customers/{customerId} {
+  // === 顧客自身が編集できるフィールド ===
+  name: "山田 花子",
+  phone: "090-1234-5678",
+  notifyChannels: {
+    email: true,                       // メール通知ON/OFF
+    line: false                        // LINE通知ON/OFF
+    // lineUserId はここに含まない（サーバ側のみ書き込み）
+  },
+
+  // === サロンスタッフのみ編集できるフィールド ===
+  memo: "敏感肌、ヘッドスパ希望多",     // スタッフ用メモ（顧客は読めない）
+  stampCount: 5,                       // スタンプカード残数
+  lastVisit: <Timestamp>,              // 最終来店日
+  totalSpent: 84000,                   // 累計使用金額
+
+  // === サーバ側 (Functions) のみ書き込めるフィールド ===
+  lineUserId: null,                    // LINE 友だち追加時に Webhook が設定
+  createdAt: <serverTimestamp>,
+  updatedAt: <serverTimestamp>
+}
+```
+
+**核心原則：顧客は自分のドキュメントを「自由には書けない」**
+
+顧客がスタンプカード残数 `stampCount` を勝手に増やしたり、累計使用金額 `totalSpent` を改ざんしたりできないように、編集可能フィールドを厳密に分離する。
+
+| カテゴリ | フィールド | 顧客本人 | サロンスタッフ | サーバ(Functions) |
+|---|---|---|---|---|
+| プロフィール | `name`, `phone` | ✅ | ✅ | ✅ |
+| 通知ON/OFF | `notifyChannels.email`, `notifyChannels.line` | ✅ | ✅ | ✅ |
+| サロン管理 | `memo`, `stampCount`, `lastVisit`, `totalSpent` | ❌ | ✅ | ✅ |
+| サーバ管理 | `lineUserId` | ❌ | ❌ | ✅ |
+| メタ | `createdAt`, `updatedAt` | ❌ | ❌ | ✅ |
+
+**読み取り権限**：
+- 顧客は自分のドキュメントを読める（ただし `memo` は将来的に分離検討）
+- サロンスタッフは全顧客を読み書きできる
+
+Firestoreルールでは `diff().affectedKeys().hasOnly([顧客許可リスト])` で顧客の書き込みフィールドを制限する。
+
+
+
+```
+salons/{salonId}/menus/{menuId} {
+  id: "m1",
+  name: "フェイシャル",
+  duration: 90,
+  price: 12000,
+  type: "main",                        // main / option
+  public: true,                        // true: 顧客の予約画面に表示 / false: サロン内部用
+  eligibleStaffIds: ["owner"],         // フェーズ1では常に ['owner']
+  requiredResourceIds: ["default"],    // フェーズ1では常に ['default']
+  intervalBefore: 0,                   // 前のインターバル（分）
+  intervalAfter: 15                    // 後のインターバル（分）
+}
+```
+
+**メニューの読み取り権限ルール（重要）**：
+- `public: true` のメニュー → 認証ユーザーなら誰でも読める（顧客の予約画面で表示するため）
+- `public: false` のメニュー → サロンスタッフのみ読める（内部用メニュー、スタッフ研修用、開発中など）
+- これにより、顧客アプリは「自分が来店するサロンの公開メニューだけ」見える状態を作る
+- Firestoreルールで `public == true || isSalonStaff(salonId)` の条件で制御
+
+#### フェーズ1での見せ方
+
+- スタッフ登録画面：**作らない**（オーナー自身が裏で `staffs/owner` として自動登録される）
+- 設備登録画面：**作らない**（裏で `resources/default` が自動作成される）
+- シフト管理画面：**作らない**（営業時間 = オーナーのシフトとして扱う）
+- メニュー設定画面：「施術可能スタッフ」「必要設備」のUIは**出さない**（自動で `['owner']` と `['default']` をセット）
+- 予約画面：「スタッフを選ぶ」「設備を選ぶ」UIは**出さない**（自動で `owner` と `default` に割当）
+
+#### フェーズ2で追加する画面
+
+1. **スタッフ登録画面**：スタッフを追加・編集
+2. **設備・スペース登録画面**：ベッドや施術室を追加・編集
+3. **シフト管理画面**：誰がいつ出勤するか
+4. **メニュー設定画面に追記**：施術可能スタッフ・必要設備を選ぶUI
+5. **予約画面に追記**：顧客が「指名」できるUI
+
+これらの画面追加だけで、フェーズ1のDB・コード・既存画面は**一切変えない**で済む。
+
+#### 9つの設計ルール（フェーズ1の実装で必ず守る）
+
+1. **データ構造を3次元予約モデルで固定**
+   - 予約には常に `staffId`, `resourceIds`, `editingBy` を含める
+   - メニューには常に `eligibleStaffIds`, `requiredResourceIds`, `intervalBefore`, `intervalAfter` を含める
+   - フェーズ1では全部 `'owner'` や `['default']` で固定値が入る
+
+2. **権限チェックを「サロン所属スタッフ」で抽象化**
+   - Firestoreルールは「`staffs/{request.auth.uid}` が存在するか」で判定
+   - フェーズ1では `staffs/owner` 1個だけ。フェーズ2でスタッフ追加してもルール変更不要
+
+3. **DB アクセス層を抽象化**
+   - 各画面は直接 Firestore を呼ばず、`shared_db.js` の API 経由で呼ぶ
+   - 内部実装を `get()` から `onSnapshot()` に切り替えればリアルタイム化できる
+
+4. **予約可能時間の計算ロジックを「スタッフ×設備の空き」で書く**
+   - フェーズ1では `staffId='owner'` と `resourceIds=['default']` が固定だが、計算ロジック自体は3次元
+   - フェーズ2でスタッフ・設備が増えても、ロジックは変えない
+
+5. **インターバル（前後の片付け時間）を最初から考慮**
+   - フェーズ1の現状は `intervalAfter: 0` でいいが、機能としては最初から存在させる
+
+6. **salonId 直書き禁止、必ず `getCurrentSalonId()` 経由（GPT指摘①）**
+   - すべての DB アクセスで `salonId` を `getCurrentSalonId()` から取得
+   - HTML ファイルに `salonId = 'Ej3Sdlce...'` のような直書きは絶対しない
+   - 「ログイン中ユーザーの salonId しか読めない」を Firestoreルールで強制
+
+7. **DB ルールをUIより先に作る（GPT指摘②）**
+   - 各 Phase の最初のステップで、まず Firestoreルールを書く
+   - ルール書く → テスト用2サロンで分離確認 → そのあとUI実装
+   - 順番を逆にしない（UIから作ると、後でルールを当てた時に動かなくなる）
+
+8. **1ファイル巨大化を避ける（GPT指摘③）**
+   - 機能ごとにファイル分割：
+     - `shared_auth.js` - 認証
+     - `shared_db.js` - DB アクセス（読み書き API）
+     - `shared_db_reservation.js` - 予約専用ロジック（予約可能時間計算など）
+     - `shared_db_menu.js` - メニュー専用ロジック
+     - `shared_db_calendar.js` - カレンダー専用ロジック
+     - `shared_ui.js` - 共通UI（モーダル、トーストなど）
+     - `shared_notify.js` - 通知（メール / LINE）
+   - 1ファイル 1000行を超えたら分割を検討
+   - HTML ファイル内に JavaScript を巨大に書かない（外部 .js に切り出す）
+
+9. **顧客アプリと管理画面を完全分離（GPT指摘④）**
+   - 顧客アプリ（`customer_*.html`）：予約することだけ
+   - 管理画面（`salon_*.html`）：店舗運営のすべて
+   - 共通の `shared_*.js` は読み込むが、画面 HTML とロジックは完全に分ける
+   - 共通ファイルにも「顧客用」「サロン用」の境界を明確化
+     - 例：`shared_db.js` 内で `dbCustomer*` / `dbSalon*` の関数命名で分離
+   - 混ぜると後で崩壊しやすい（今回の v8 系の失敗もここに起因）
+
+これらを守れば、**フェーズ1の動作には何も影響しない**が、フェーズ2への移行は「画面追加と表示UI解放」だけで済む。
+
+#### 将来の検討事項（実装は据え置き、覚えておく）
+
+**Auth UID = salonId 設計の限界**：
+現状の設計では「サロンオーナーの Auth UID = salonId」としているが、これは以下のケースで詰まる：
+- サロン譲渡（オーナーが店を売却して別の人がオーナーになる）
+- オーナー変更（離婚や独立で代表者が変わる）
+- 複数オーナー（共同経営）
+- 法人化（個人事業 → 株式会社）
+
+理想は `salons/{自動採番ID}.ownerUid: '<Auth UID>'` の分離設計。
+ただし今すぐ変えるとPhase A の実装が複雑化するので**現状は据え置き**。
+販売後にこの限界が見えてきたら、マイグレーションスクリプトで自動採番ID方式に切り替える。
+今は「販売できる状態に早く到達する」が優先。
+
+**ES5縛りの将来見直し**：
+今は iPad + GitHub Web UI の制約で ES5 互換維持。
+将来 PC 環境が整ったら、Babel 変換工程（ES2020 → ES5）を導入することも検討。
+ただしビルドツール（npm, Webpack/Vite, Babel）を学ぶコストがあるので、それまでは ES5 で書く + 自動 lint チェックで運用。
+
+#### Claude と GPT の役割分担（実装の進め方）
+
+設計書を踏まえた実装フェーズでは、以下の役割分担を活用する：
+
+- **Claude**：画面実装、UIのたたき台、素早いプロトタイプ、既存コードの修正
+- **GPT**：設計レビュー、DB設計、セキュリティ、料金体系、仕様の矛盾チェック、将来拡張の地雷探し
+
+実装は Claude が進め、各フェーズ完了時に GPT にレビューしてもらう。両者の指摘が一致したら本番反映する。
+
+#### ES5 自動チェックツール
+
+Phase A で `tools/es5_check.sh` を作成：
+
+```bash
+#!/bin/bash
+# ES5 違反を検出するスクリプト
+echo "=== ES5 互換性チェック ==="
+FOUND=0
+for FILE in *.html *.js; do
+  if grep -nE "\b(const|let)\s|=>\s*[\{\(]|async\s+function|await\s|\?\." "$FILE" > /dev/null 2>&1; then
+    echo "❌ $FILE に ES6+ 構文が含まれている可能性:"
+    grep -nE "\b(const|let)\s|=>\s*[\{\(]|async\s+function|await\s|\?\." "$FILE"
+    FOUND=1
+  fi
+done
+[ $FOUND -eq 0 ] && echo "✅ 全ファイル ES5 互換"
+exit $FOUND
+```
+
+各 Phase 完了時にこのスクリプトを必ず実行。違反があればその場で `var`/`function` に書き直す。
+
+---
+
+## 1. 絶対に守る前提（販売要件）
+
+### 1-1. マルチサロン完全分離
+- サロンAのデータは、サロンAのオーナーとサロンAの顧客しか見れない
+- サロンBの顧客が URL を書き換えても、サロンAのデータには絶対アクセスできない
+- これはコードのロジックではなく、**Firestore セキュリティルール**で強制する（=サーバー側で拒否する）
+
+### 1-2. ログイン速度
+- サロンオーナーのログイン：3秒以内
+- 顧客アプリの初回表示：3秒以内
+- 「60秒待ち」は販売ライン以下、絶対NG
+
+### 1-3. iPad 編集の罠を回避
+- いけさんは iPad + GitHub Web UI で作業
+- iPad のスマートクォート自動変換が SyntaxError を起こす
+- **対策：コードは必ず ZIP ファイルでやり取りする（コピペ禁止）**
+
+### 1-4. 各サロンが自分のメール送信元を使える
+- 今は EmailJS（いけさん個人アカウント）
+- 販売後は各サロンが自分のドメイン or 共通の `torita-app.com` から送信
+- Cloud Functions + Resend が既に deploy 済み → これを使う
+
+---
+
+## 2. システム構成（販売後の姿）
+
+```
+┌─────────────────────────────────────────────┐
+│  サロンオーナー（複数）                          │
+│  - 各自の Firebase Auth アカウントでログイン      │
+│  - 自分のサロンの管理画面のみ操作可能              │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  顧客（複数 × サロン分）                          │
+│  - URL: customer_app.html?salon=<salonId>     │
+│  - 自分のメール+認証コードでログイン               │
+│  - そのサロンの予約のみ可能                       │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  Firestore（データベース）                       │
+│  salons/                                       │
+│    {salonIdA}/                                 │
+│      info: { name, email, ownerUid, ... }     │
+│      menus/                                    │
+│      customers/                                │
+│      appointments/                             │
+│      closeBlocks/                              │
+│      config/ (settings, stampCard, cancelPolicy)│
+│    {salonIdB}/  ← サロンAから絶対見えない        │
+│      ...                                       │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  Cloud Functions (asia-northeast1)             │
+│  - sendBookingEmail: 予約/変更/キャンセル通知    │
+│  - Bearer auth で認証済みユーザーのみ呼び出せる   │
+└─────────────────────────────────────────────┘
+                    ↓
+┌─────────────────────────────────────────────┐
+│  Resend (メール配信)                            │
+│  - from: noreply@torita-app.com                │
+└─────────────────────────────────────────────┘
+```
+
+---
+
+## 3. 認証の設計（誰が何にアクセスできるか）
+
+### 3-1. サロンオーナー
+- Firebase Auth でメール+パスワード登録
+- 登録時、Auth UID = salonId として `salons/{uid}/info` ドキュメントが作られる
+- ログイン後、自分の `salonId` 配下のデータを読み書き可能
+
+### 3-2. 顧客
+- 顧客の認証は **Firebase Auth のメール+パスワード認証**（オーナーと同じ方式）
+- フロー（新規登録）:
+  1. 顧客が予約画面で「新規登録」を選ぶ
+  2. 名前・メールアドレス・パスワードを入力
+  3. Firebase が自動で認証メールを送信（`sendEmailVerification`）
+  4. 顧客がメール内のリンクをタップ（=メール所有確認）
+  5. リンクタップ後、顧客はログイン画面に戻る
+  6. 登録したメールアドレスとパスワードを入力してログイン
+  7. Firebase Auth が `emailVerified=true` を確認してログイン許可
+- フロー（再ログイン）: メール+パスワード入力のみ
+- 顧客にも Firebase Auth UID が発行される
+- 顧客ドキュメント ID = 顧客の Auth UID（最初からこの設計で作る）
+- パスワード忘れた時：Firebase 標準の `sendPasswordResetEmail` を使う
+
+### 3-3. Firestore セキュリティルール（最小限の関所）
+
+**設計指針**：Firestoreルールは「**最小限の関所**」とし、複雑なロジックは Cloud Functions が担う。
+Rules でやるのは「認証」「フィールド存在」「型」「単純な値域」「読み書きできる人」だけ。
+営業時間チェック、重複検知、価格計算、複雑な状態遷移マシンなどは **Rules に書かない**（複雑化すると Phase 2 拡張時に壊れるため）。
+
+「サロンに所属するスタッフ」概念を最初から用意することで、フェーズ1（1人用）でもフェーズ2（複数人用）でもルール構造を書き換えずに済む。
+フェーズ1では `salons/{salonId}/staffs/owner` の1ドキュメントだけが存在し、その UID = salonId（オーナー本人）。
+
+```
+// ヘルパー関数
+function isSignedIn() {
+  return request.auth != null;
+}
+function isSalonStaff(salonId) {
+  return isSignedIn() &&
+         exists(/databases/$(database)/documents/salons/$(salonId)/staffs/$(request.auth.uid));
+}
+function isSalonOwner(salonId) {
+  return isSignedIn() && request.auth.uid == salonId;
+}
+
+match /salons/{salonId} {
+  // info: オーナーのみ書き込み、認証ユーザーは読み取り可（顧客アプリ用）
+  allow read: if isSignedIn();
+  allow write: if isSalonOwner(salonId);
+  
+  match /staffs/{staffId} {
+    allow read: if isSalonOwner(salonId) || request.auth.uid == staffId;
+    allow write: if isSalonOwner(salonId);
+  }
+  
+  match /resources/{resourceId} {
+    // 認証ユーザーは読み取り可（予約可能時間計算で必要）
+    allow read: if isSignedIn();
+    allow write: if isSalonOwner(salonId);
+  }
+  
+  match /shifts/{shiftId} {
+    allow read: if isSalonStaff(salonId);
+    allow write: if isSalonOwner(salonId);
+  }
+  
+  match /menus/{menuId} {
+    // 公開メニューは認証ユーザー誰でも読める、非公開メニューはスタッフのみ
+    allow read: if isSignedIn() && 
+                  (resource.data.public == true || isSalonStaff(salonId));
+    allow write: if isSalonStaff(salonId);
+  }
+  
+  match /customers/{customerId} {
+    // 読み取り：サロンスタッフは全員、顧客は自分自身のみ
+    allow read: if isSalonStaff(salonId) || request.auth.uid == customerId;
+    
+    // 作成：本人だけが自分のドキュメントを作成可能（フィールドホワイトリスト）
+    allow create: if request.auth.uid == customerId &&
+                    request.resource.data.keys().hasOnly([
+                      'name', 'phone', 'notifyChannels', 'createdAt'
+                    ]) &&
+                    request.resource.data.notifyChannels.keys().hasOnly(['email', 'line']);
+    
+    // 更新：
+    //  - 顧客本人は name, phone, notifyChannels.email, notifyChannels.line のみ
+    //  - サロンスタッフは memo, stampCount, lastVisit, totalSpent も含めて全部
+    //  - lineUserId はサーバー(Functions)のみ書き込み可能 → Rules では誰も書き込めない
+    allow update: if (
+      // 顧客本人
+      (request.auth.uid == customerId &&
+       request.resource.data.diff(resource.data).affectedKeys()
+         .hasOnly(['name', 'phone', 'notifyChannels', 'updatedAt']))
+      ||
+      // サロンスタッフ（lineUserId 変更だけは禁止 = サーバ専用フィールド）
+      (isSalonStaff(salonId) &&
+       !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lineUserId']))
+    );
+    
+    allow delete: if isSalonOwner(salonId);
+  }
+  
+  match /appointments/{appointmentId} {
+    // 読み取り：サロンのスタッフ or 予約本人
+    allow read: if isSalonStaff(salonId) 
+                || request.auth.uid == resource.data.customerId;
+
+    // 作成：顧客が直接書き込めるフィールドを最小限に絞る（end/staffId/resourceIds/priceSnapshot/createdAt/status はサーバ確定）
+    allow create: if isSignedIn() &&
+                    request.resource.data.customerId == request.auth.uid &&
+                    // ★ 顧客が書き込めるフィールドはこの6つだけ
+                    request.resource.data.keys().hasOnly([
+                      'dateKey', 'start', 'customerId',
+                      'menuId', 'optionMenuIds',
+                      'pendingCreate'  // 作成中マーカー（Functions が処理後に削除）
+                    ]) &&
+                    // 必須フィールド
+                    request.resource.data.keys().hasAll([
+                      'dateKey', 'start', 'customerId', 'menuId'
+                    ]) &&
+                    // 日付・時刻の形式チェック
+                    request.resource.data.dateKey is string &&
+                    request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+                    request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
+                    request.resource.data.menuId is string;
+
+    // 更新：顧客は status を cancelled に変えるだけ。それ以外はサロンスタッフのみ
+    //       複雑な状態遷移マシンは Functions 側で検証する（Rules に詰め込みすぎない）
+    allow update: if (
+      // 顧客は cancelled 限定
+      (request.auth.uid == resource.data.customerId &&
+       resource.data.status == 'confirmed' &&
+       request.resource.data.status == 'cancelled' &&
+       request.resource.data.diff(resource.data).affectedKeys()
+         .hasOnly(['status', 'updatedAt']))
+      ||
+      // サロンスタッフは customerId 改ざんだけ禁止、他は OK
+      (isSalonStaff(salonId) &&
+       request.resource.data.customerId == resource.data.customerId)
+    );
+
+    // 削除：サロンオーナーのみ
+    allow delete: if isSalonOwner(salonId);
+  }
+
+  // appointments_archive も appointments と同じ権限（ただし作成は Functions のみ）
+  match /appointments_archive/{appointmentId} {
+    allow read: if isSalonStaff(salonId) 
+                || request.auth.uid == resource.data.customerId;
+    // 作成・更新・削除は Functions のみ → クライアントからは触れない
+    allow write: if false;
+  }
+}
+```
+
+**Rules で「やらない」こと（=Functions が責任を持つ）**：
+- 営業時間内かどうかの判定
+- 他予約との重複チェック
+- メニューの所要時間と end の整合性
+- 価格計算（`priceSnapshot`）
+- 詳細な status 遷移ルール（`no_show`、`completed`、`refunded` の許可判定）
+- スタッフ・設備の同時利用チェック
+- インターバル時間の確保
+
+これらを Rules に詰め込むと、Phase 2 でフィールド追加した時に予想外に通る/落ちる問題が起きる。Rules はあくまで「悪意ある書き込みを最低限ブロックする関所」にとどめる。
+
+
+### 3-4. 予約作成の防御フロー（pendingCreate 方式）
+
+**問題**：`onAppointmentCreate` トリガーで「作成後に検証→NGなら削除」だと、一瞬だけ不正予約が存在する。通知が誤送信される、UIに一瞬表示される、などの事故が起きうる。
+
+**対策（フェーズ1）**：
+顧客が直接書き込めるのは `pendingCreate: true` フラグ付きの予約ドキュメントのみ。
+このフラグが付いている予約は「**まだ確定していない予約**」として扱う。
+Cloud Functions onCreate トリガーが検証して、OK なら `pendingCreate` を削除して `status: 'confirmed'` 等を確定する。NG なら予約自体を削除。
+
+```
+顧客が予約画面で確定ボタン
+  ↓
+[UI検証] shared_db_reservation.js でフロント検証
+  ↓
+[書き込み] appointments/{id} に { dateKey, start, menuId, ..., pendingCreate: true } を書き込み
+  ↓
+[Firestoreルール] フィールドホワイトリスト、形式チェック
+  ↓
+書き込み成功（pendingCreate=true なので「未確定」扱い）
+  ↓
+[Cloud Functions onCreate] サーバ側で全検証
+  - 営業時間内か
+  - 過去日でないか  
+  - 他予約と衝突しないか
+  - スタッフ・設備が確保できるか
+  - メニューが存在するか
+  ↓
+OK の場合:
+  - end, startAt, endAt, staffId, resourceIds を確定
+  - priceSnapshot を menus から計算してセット
+  - status を 'confirmed' に
+  - pendingCreate フィールドを削除
+  - 通知メール送信
+NG の場合:
+  - 予約ドキュメントを削除
+  - notificationLogs にエラー記録
+  - 顧客に「予約失敗」を返す
+```
+
+**UI 側の表示ルール**：
+- カレンダー・予約一覧・通知は `pendingCreate: true` の予約を **表示しない**
+- これにより「一瞬だけ不正予約が見える」事故を回避
+
+**Firestoreルールでも `pendingCreate: true` の予約は読めない人を制限**：
+- 顧客本人（書いた本人）と Functions のみ読める
+- スタッフのカレンダーには表示されない
+
+**将来移行（販売後のセキュリティ強化）**：
+- 顧客が `appointments` に直接書き込むのを **完全に禁止**
+- 予約作成は Cloud Functions の **callable Function** 経由のみ
+  - `createAppointment({dateKey, start, menuId, optionMenuIds})` を呼ぶ
+  - Functions 内で全検証 → Firestore に書き込み → 結果を返す
+- これにより「Firestore に直接書き込む経路」が消える = 最も安全
+- Phase G（販売準備）の前後で段階的に移行
+
+**Phase 2 以降の検討**：
+- 楽観ロック（バージョン番号 or `updatedAt` チェック）
+- 競合予約防止（同じ時間枠を別の顧客が同時に押した場合の処理）
+
+
+
+---
+
+## 4. 速度設計（3秒以内）
+
+### 4-1. ログイン時の処理
+**現状（NG）**: 8コレクションをシリアル取得 → 合計60秒
+
+**新設計**: 
+- ログイン後、必要最小限のデータだけ取得（例：サロン名、settings）
+- 各画面に遷移したタイミングで、その画面に必要なデータのみ取得
+- カレンダー画面なら appointments + closeBlocks、メニュー設定画面なら menus、など
+- すべて並列取得（Promise.all 相当）
+
+### 4-2. 顧客アプリの初回表示
+**現状（NG）**: ログイン前に loadAllData で全部読み込み
+
+**新設計**:
+- 起動時：settings + menus + cancelPolicy のみ（メニュー選択画面に必要なもの）→ 並列で1〜2秒
+- 日時選択画面に進む時：appointments + closeBlocks を追加取得
+- 顧客ログイン時：その顧客のデータのみ
+- 全部並列、シリアル禁止
+
+### 4-3. キャッシュ戦略
+- 一度取得したデータはセッション中はメモリに保持
+- 「最新を見たい」時だけ強制再取得（ボタンで明示）
+- **リアルタイム同期（`onSnapshot`）は製品フェーズ2（複数人版）で導入**
+- ただし shared_db.js の API 設計は `onSnapshot` への差し替えを見越して抽象化しておく（セクション0-2の指針に従う）
+
+---
+
+## 5. コード構造の設計（保守しやすさ）
+
+### 5-1. ファイル構成（販売版）
+```
+shared_db.js      ← Firestore アクセス層。グローバル関数の数を最小化
+shared_auth.js    ← 認証層（サロンオーナー用 + 顧客匿名認証）
+shared_ui.js      ← 共通UI（モーダル、トースト、エラー表示）
+
+salon_*.html      ← サロン管理画面（既存維持）
+customer_app_v8.html ← 顧客アプリ（既存維持、ただし冒頭スクリプトを整理）
+
+functions/index.js ← Cloud Functions（既存維持）
+```
+
+### 5-2. salonId 取得の単一ルール
+- **`shared_db.js` だけが `getCurrentSalonId()` を定義する**
+- どの HTML ファイルもこの関数を上書きしない
+- URL パラメータ `?salon=xxx` は `shared_db.js` が冒頭で自動取得
+- サロン管理画面は Auth UID を salonId として使う（`shared_db.js` 内で吸収）
+
+### 5-3. データ取得 API の統一
+- 各画面が必要なデータをまとめて取得できる API を `shared_db.js` に用意
+  - `dbLoadForCustomerHome(cb)` → 顧客アプリのホーム画面用
+  - `dbLoadForSalonCalendar(cb)` → サロンカレンダー用
+  - `dbLoadForMenuSettings(cb)` → メニュー設定用
+- 中で並列取得し、すべて揃ったら一度だけコールバック
+- これで「画面ごとに必要なものだけ、並列で、速く」が実現
+
+### 5-4. ES5 互換維持
+- いけさんの環境が iPad の古い Safari なので ES5 互換
+- `var`, `function`, `Promise.then` のみ。`const`/`let`/アロー関数禁止
+- これは設計書に明記して守る
+
+### 5-5. iPad 編集事故防止
+- 全ファイルは ZIP で受け渡し（コピペ禁止）
+- GitHub への上書きアップロードのみ
+- スマートクォート混入の自動チェックを定期的に実施
+
+---
+
+## 6. 通知の設計（メール + LINE）
+
+予約・変更・キャンセル時の顧客への通知は、**メール**と**LINE**の両方をサポートする。顧客が登録時にどちらか（または両方）を選べる。
+
+### 6-1. メール送信の現状と移行
+
+**現状**: EmailJS（いけさん個人アカウント）で送信中。他サロンに販売したら、いけさんのEmailJS残量が他サロンに食われる → NG。
+
+**販売版**:
+- Cloud Functions `sendBookingEmail` を使用（既に deploy 済み）
+- 送信元：`noreply@torita-app.com`（共通）
+- 送信元の表示名：各サロンの名前（"Salon de Miro <noreply@torita-app.com>"）
+- 顧客は Firebase Auth → Bearer トークン → Functions 呼び出し → Resend → 配信
+
+**移行ステップ**:
+1. 顧客アプリで Functions fetch を実装、EmailJS と並走（旧 v8 系で着手済み、v2 系で正式実装）
+2. 数日 Functions の安定確認
+3. EmailJS の呼び出しを削除
+4. EmailJS アカウント解約
+
+### 6-2. LINE 連携（将来追加、設計だけ最初から組み込む）
+
+販売前提として、サロン顧客は **メールよりLINEを使う人が多い**。LINE通知を提供できることは販売上の大きな強みになる。
+
+**実装は後（PC環境が整ってから）だが、設計は最初から組み込む。**
+
+#### 6-2-1. LINE連携の方式（LINE Messaging API + 公式アカウント）
+
+- 各サロンが自分の LINE 公式アカウントを作成（または TORITA 共通の公式アカウントを使う、後述）
+- 顧客は LINE で公式アカウントを友だち追加 → LINE User ID が TORITA に登録される
+- 予約・変更・キャンセル時に、サロンの公式アカウント名で顧客の LINE にメッセージが届く
+
+**2つのモデル**:
+
+**モデルA: 各サロンが自分の LINE 公式アカウントを持つ（販売プランの上位プラン向け）**
+- 各サロンが LINE Developers で公式アカウント作成 + Messaging API 設定
+- TORITA に LINE Channel Access Token を登録
+- メッセージはそのサロンの公式アカウント名で届く
+- ブランディング◎、設定がやや複雑
+
+**モデルB: TORITA 共通の公式アカウント1つを使う（販売プランの下位プラン向け）**
+- TORITA が「TORITA予約」のような公式アカウントを運営
+- 全サロンの顧客がこの公式アカウントを友だち追加
+- メッセージは「【Salon de Miro】予約のご確認」のようにサロン名をテキストに含める
+- 設定が簡単、サロンごとの LINE 設定不要
+- 顧客から見ると複数サロン使う時に1つの公式アカウントで済む（メリット）
+
+販売開始時は **モデルB から始める**のが現実的（サロン側の設定負担ゼロ）。
+将来モデルAも選択肢として追加する。
+
+#### 6-2-2. 顧客の通知設定
+
+顧客ドキュメントに通知チャネル設定を持つ：
+
+```
+customers/{customerId} {
+  ...
+  notifyChannels: {
+    email: true,           // メール通知ON
+    line: false,           // LINE通知ON
+    lineUserId: null       // LINE User ID（友だち追加時に取得）
+  }
+}
+```
+
+顧客はマイページで「メール通知ON/OFF」「LINE通知ON/OFF」を切り替えられる。
+
+#### 6-2-3. 通知送信の共通API
+
+`shared_notify.js` に統一APIを用意し、メールと LINE の違いを吸収する：
+
+```javascript
+// 予約完了通知を送る（顧客の設定に応じてメール・LINE両方 or 片方）
+sendBookingNotification(customerId, appointment, cb);
+
+// キャンセル通知
+sendCancelNotification(customerId, appointment, cb);
+
+// 変更通知
+sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
+```
+
+各画面はこれを呼ぶだけ。内部で顧客の `notifyChannels` を見て、メールなら Functions、LINE なら別の Functions（後述）に振り分ける。
+
+#### 6-2-4. LINE 用の Cloud Function
+
+メール送信と同じ構造で、LINE 用の Function を追加する：
+
+- `sendBookingLine` Function を作成（`asia-northeast1`）
+- 環境変数に LINE Channel Access Token を Secret として登録
+- Bearer auth + CORS（メール送信と同じ）
+- 引数：`lineUserId`, `salonName`, `messageType`, `data...`
+- LINE Messaging API の push message を呼ぶ
+
+#### 6-2-5. 友だち追加フロー（顧客が LINE通知を有効にする）
+
+1. 顧客がマイページで「LINE通知ON」をタップ
+2. TORITA が QR コード or 友だち追加リンクを表示
+3. 顧客が公式アカウントを友だち追加
+4. LINE Webhook（Functions）が `follow` イベントを受信
+5. Webhook が顧客に「ご登録ありがとうございます。メールアドレスを入力してください」と返答
+6. 顧客がメールアドレスを入力
+7. Webhook が `customers` から該当顧客を探して、`lineUserId` を保存
+
+これで友だち追加と顧客紐付けが完了する。
+
+#### 6-2-6. フェーズ1での扱い
+
+- `customers/{customerId}` に `notifyChannels` フィールドを**最初から持たせる**（デフォルト `email: true, line: false`）
+- 顧客マイページに「LINE通知」のチェックボックスを**置かない**（フェーズ1では表示しない）
+- `shared_notify.js` の `sendBookingNotification` は実装するが、内部では LINE 分岐をスキップしてメールだけ送る
+- LINE Function はまだ作らない
+
+これにより、PC環境が整って LINE 実装する時には、**画面UIに「LINE通知」を表示する**ことと **LINE Function を作る**だけで、既存コードを変えずに済む。
+
+### 6-3. 通知の信頼性
+
+- Cloud Functions が失敗した場合、Firestore の `notificationLogs/{logId}` にエラーを記録
+- 管理画面で「通知失敗」が見える
+- 顧客に「メールが届かない」と言われた時に、ログから原因特定可能
+
+---
+
+## 7. 実装フェーズ（ゼロから作り直し）
+
+**前提**：このアプリはまだ実運用していない。既存のコード資産（HTML/JS）は **参考として残すが、新規実装は別ファイル名で1から書く**。Firestore の既存データ（テスト用サロン、テスト顧客）は **全削除して空から始める**。
+これにより、移行処理や互換性維持の複雑さがゼロになり、最初から販売できる完璧な設計を作れる。
+
+### Phase A：基盤ファイル新規作成
+
+**Phase A は2ステップ構成**：
+- A-step1：**Firestoreセキュリティルールを先に書く**（GPT指摘②）
+- A-step2：そのルール下で動く基盤 JS ファイルを実装
+
+#### A-step1：Firestoreセキュリティルール＋インデックス＋サーバ側関数（最初に作る）
+- A-step1-1. 本設計書 3-3 のルールを Firebase 公式記法で書き起こす
+  - フィールドホワイトリスト、status 遷移、フィールドレベル検証を全部入れる
+- A-step1-2. **Firestore 複合インデックスを最初に作成**（B-7 参照）
+  - `(date)`、`(staffId, date)`、`(customerAuthUid, date desc)`、`(status, date)`
+  - 後付けはトラブルが起きやすいので先に
+- A-step1-3. **Cloud Functions `onAppointmentCreate` トリガーを作成**
+  - 予約作成時に自動実行
+  - サーバ側で全検証（営業時間、過去日、重複、メニュー整合性）
+  - `priceSnapshot` を `menus/{menuId}.price + sum(optionMenuIds.price)` で確定
+  - 検証 NG なら予約を即削除 + サロンに通知メール + `notificationLogs` に記録
+- A-step1-4. テスト用サロン2つ（A, B）を作って、以下を確認：
+  - AからBが見えないこと
+  - 顧客が `price`, `priceSnapshot`, `status` を改ざんできないこと（Firestoreコンソールから直接書き込みテスト）
+  - 顧客が `customerAuthUid` を偽装できないこと
+  - 顧客が `status` を `cancelled` 以外に変えられないこと
+- A-step1-5. このルール＋関数を先に本番反映してから、JSの実装に入る
+- これにより「動いてるけどルール緩い」状態を防ぐ
+
+#### A-step2：基盤 JS ファイル作成（GPT指摘③：1ファイル巨大化禁止）
+- A-1. `shared_db.js` を新規作成（DB アクセス層、関数200個まで）
+  - `getCurrentSalonId()` の単一定義
+  - 「URLパラメータ ?salon → Auth UID → null」の優先順位
+  - 旧 localStorage 機能・固定ID完全廃止
+  - 全 HTML ファイルが上書きしないルールを徹底
+  - 各データの基本 CRUD：`dbGetMenus`, `dbAddMenu`, `dbGetAppointments`, ...
+  - 内部実装を `get()` から `onSnapshot()` に切り替えられる抽象化
+  - 顧客用 / サロン用 の関数命名で分離（`dbCustomer*` / `dbSalon*`）
+
+- A-2. `shared_db_reservation.js` を新規作成（予約専用ロジック）
+  - 予約可能時間の3次元計算（時間×スタッフ×設備）
+  - 予約の重複チェック
+  - インターバル計算
+  - 予約 CRUD の上位ラッパー（バリデーション込み）
+
+- A-3. `shared_db_menu.js` を新規作成（メニュー専用ロジック）
+  - メニュー CRUD
+  - メニューの並べ替え、公開/非公開切り替え
+
+- A-4. `shared_db_calendar.js` を新規作成（カレンダー専用ロジック）
+  - 月別予約取得、closeBlocks 取得
+  - 営業時間と組み合わせた表示用データ生成
+
+- A-5. `shared_auth.js` を新規作成（認証）
+  - サロンオーナー認証（メール+パスワード+メール確認）
+  - 顧客認証（同じくメール+パスワード+メール確認）
+  - `requireSalonStaff` / `requireCustomerAuth` ヘルパー
+  - **オーナー登録時、`salons/{uid}/staffs/owner` ドキュメントを自動作成**
+
+- A-6. `shared_ui.js` を新規作成（共通UI）
+  - 共通モーダル、トースト、エラー表示、ローディング表示
+  - 全画面で同じ見た目になる
+
+- A-7. `shared_notify.js` を新規作成（通知）
+  - `sendBookingNotification`, `sendCancelNotification`, `sendChangeNotification`
+  - 内部でメール / LINE を顧客設定に応じて振り分け
+  - フェーズ1ではメールのみ（LINE分岐はスケルトンだけ）
+
+- A-8. **データ構造の初期化スクリプト**
+  - サロン新規登録時、以下を一括作成：
+    - `salons/{uid}/info` （サロン基本情報）
+    - `salons/{uid}/staffs/owner` （オーナー自身を単一スタッフとして）
+    - `salons/{uid}/resources/default` （デフォルト設備1個）
+    - `salons/{uid}/config/settings` （営業時間など）
+    - `salons/{uid}/config/cancelPolicy`
+    - `salons/{uid}/config/stampCard`
+  - 予約ドキュメントには `staffId: 'owner'`, `resourceIds: ['default']`, `editingBy: null` を最初から含める
+  - メニュー作成時は `eligibleStaffIds: ['owner']`, `requiredResourceIds: ['default']`, `intervalBefore: 0`, `intervalAfter: 0` を自動付与
+  - 顧客作成時は `notifyChannels: {email: true, line: false, lineUserId: null}` を最初から含める
+
+### Phase B：速度設計＋3次元予約計算ロジック＋Firestoreコスト最適化
+- B-1. `shared_db.js` に画面別の並列取得 API を実装
+  - `dbLoadSalonDashboard(cb)` → サロンのトップ画面
+  - `dbLoadSalonCalendar(monthStr, cb)` → カレンダー画面（**指定月の appointments のみ**）
+  - `dbLoadSalonCustomers(cb)` → 顧客管理画面
+  - `dbLoadSalonMenus(cb)` → メニュー設定（menus + staffs + resources）
+  - `dbLoadSalonSettings(cb)` → 営業時間など
+  - `dbLoadCustomerHome(cb)` → 顧客アプリ初期表示
+  - `dbLoadCustomerBooking(dateStr, cb)` → 予約日時選択用（**指定日の appointments のみ**）
+  - `dbLoadCustomerHistory(cb)` → 顧客の予約履歴（current + archive 両方）
+- B-2. 各 API は内部で並列取得（Promise.all 相当のコールバック合成）
+- B-3. 必要最小限のフィールドだけ取得（無駄なデータを引かない）
+- B-4. ログイン時は **最小限のサロン情報だけ**取得、画面遷移時に追加取得
+- B-5. **予約可能時間の計算ロジックを 3次元（時間×スタッフ×設備）で実装**
+  - 入力：メニューID、日付、現在の予約一覧、スタッフ一覧、設備一覧、シフト
+  - 出力：予約可能な時間枠リスト
+  - ロジック：
+    1. メニューの `eligibleStaffIds` から候補スタッフを抽出
+    2. メニューの `requiredResourceIds` から必要設備を抽出
+    3. 各時間枠について：
+       - 候補スタッフのうち、その時間に予約が入っていないスタッフがいるか
+       - 必要設備のうち、その時間に予約が入っていない設備が確保できるか
+       - スタッフのシフト内か
+       - インターバル時間も加味
+    4. 両方OKな時間枠だけ返す
+  - フェーズ1では候補スタッフ=`['owner']`、必要設備=`['default']` だが、ロジックは3次元のまま動く
+
+- B-6. **Firestore クエリ絞り込みでコスト最適化**
+  - カレンダー：`where('date', '>=', monthStart).where('date', '<=', monthEnd)` で1ヶ月分のみ取得
+  - 予約画面：`where('date', '==', selectedDate)` でその日だけ取得
+  - 顧客履歴：`where('customerAuthUid', '==', myUid).orderBy('date', 'desc').limit(20)` で最近20件
+  - 全件取得は禁止（`appointments` を `get()` で全取得しない）
+
+- B-7. **Firestore 複合インデックス設計（Phase A-step1 で作成）**
+  - `(date)` 単一インデックス：カレンダー用
+  - `(staffId, date)` 複合：将来スタッフ別カレンダー用
+  - `(customerAuthUid, date desc)` 複合：顧客履歴用
+  - `(status, date)` 複合：「未完了予約のみ」絞り込み用
+  - 後付けは順序が不安定になるので、最初にまとめて作る
+
+- B-8. **アーカイブ戦略（appointments の肥大化対策）**
+  - `appointments`（current）：直近6ヶ月以内の予約
+  - `appointments_archive`：6ヶ月以上前の予約
+  - Cloud Functions Scheduler で月次バッチ実行（毎月1日 03:00）：
+    - 6ヶ月超過した予約を `appointments` → `appointments_archive` に移動
+    - サロンごとに `appointments_archive_summary` も生成（年月別の予約件数・売上集計）
+  - **顧客履歴 / 顧客詳細画面**は `appointments`（current）と `appointments_archive` の両方を読みに行く（`dbLoadCustomerHistory` 内で統合）
+  - **カレンダー / 予約画面 / ダッシュボード**は `appointments`（current）のみ読む
+  - Phase A-step1 で `appointments_archive` のFirestoreルールも書く（current と同じ権限ルール）
+
+### Phase C：サロン管理画面の作り直し（v2）
+- C-1. `salon_auth_v2_new.html` 新規登録/ログイン画面
+- C-2. `salon_dashboard_v1.html` ダッシュボード（新規追加）
+- C-3. `salon_calendar_v8.html` カレンダー
+- C-4. `salon_customers_v1.html` 顧客管理
+- C-5. `salon_menus_v1.html` メニュー設定
+- C-6. `salon_hours_v1.html` 営業時間
+- C-7. `salon_cancel_v1.html` キャンセル規定
+- C-8. `salon_stamp_v1.html` スタンプ設定
+- 全画面が `shared_db.js` / `shared_db_*.js` / `shared_auth.js` / `shared_ui.js` を読み込む
+- 各画面が独立して必要なデータだけ取得する
+- HTML ファイル内の JavaScript は最小限（イベントハンドラと画面固有のロジックだけ）、複雑な処理は `shared_*.js` に切り出す
+
+### Phase D：顧客アプリの作り直し（v2）
+- D-1. `customer_app.html` を新規作成（v8 とは別ファイル名）
+- D-2. 起動時：URL `?salon=xxx` を読み込み、サロン名と settings だけ取得（瞬時表示）
+- D-3. メニュー選択画面：menus 取得（このタイミングで初）
+- D-4. ログイン/新規登録：Firebase メール+パスワード+メール確認
+- D-5. 日時選択画面：appointments + closeBlocks（このタイミングで初）
+- D-6. 予約確定：appointment 追加 + `shared_notify.js` 経由で通知送信
+- D-7. 履歴画面：自分の予約のみ取得（Firestoreルールで保証）
+- D-8. 顧客マイページ：プロフィール表示・パスワード変更・LINE通知設定（フェーズ1では LINE 部分は非表示）
+- 管理画面 HTML とロジックを完全分離（GPT指摘④）
+
+### Phase E：通知統一（メール経路の完成）
+- E-1. `shared_notify.js` を新規作成
+  - `sendBookingNotification(customerId, appointment, cb)` などの統一API
+  - 内部で顧客の `notifyChannels.email` を見て Functions 経由でメール送信
+  - LINE 分岐は最初から実装するが、フェーズ1ではスキップする条件で動かす
+- E-2. 顧客アプリの予約/変更/キャンセル通知を `shared_notify.js` 経由に
+- E-3. EmailJS 呼び出しコードを完全削除
+- E-4. EmailJS アカウント解約
+- E-5. `notificationLogs/{logId}` への失敗記録機能を実装
+
+### Phase F：Firestoreセキュリティルール最終確認
+- Phase A-step1 でルール基本形は完成しているはず
+- 全機能実装後、Phase F で総合テスト：
+  - F-1. テスト用サロン2つ（A, B）でフル機能動作確認
+  - F-2. サロンAの顧客がURL書き換えてサロンBにアクセス→拒否されること
+  - F-3. サロンAのスタッフがサロンBのデータ読もうとして→拒否されること
+  - F-4. 顧客が他の顧客の予約を読もうとして→拒否されること
+  - F-5. 認証なしユーザーが Firestore に直接アクセス→拒否されること
+- 必要に応じてルールを微調整
+
+### Phase G：販売準備
+- G-1. サロン新規登録の入り口（ランディング → 登録）
+- G-2. 利用規約・プライバシーポリシー
+- G-3. 決済（Stripe Subscriptions など）
+- G-4. ランディングページ
+- G-5. サポート体制（問い合わせフォーム）
+
+### Phase H：LINE連携追加（販売後、PC環境が整ってから）
+- H-1. TORITA 共通の LINE 公式アカウントを作成（モデルB方式）
+- H-2. LINE Messaging API の設定、Channel Access Token を Functions の Secret に登録
+- H-3. `sendBookingLine` Cloud Function を作成（メール用と同じ構造）
+- H-4. LINE Webhook Function を作成（友だち追加 → メール照合 → `lineUserId` 保存）
+- H-5. `shared_notify.js` の LINE 分岐を有効化
+- H-6. 顧客マイページに「LINE通知」設定UIを追加
+- H-7. 顧客アプリのマイページに「公式アカウントを友だち追加」QRコード表示
+- 所要：PC借りた後、1〜2週間程度の追加実装
+- ※フェーズ1のDB・既存コードは一切変更不要（設計書通り箱は最初から用意されている）
+
+### Phase I：複数人版（フェーズ2）追加
+- I-1. スタッフ登録画面
+- I-2. 設備登録画面
+- I-3. シフト管理画面
+- I-4. メニュー画面に「施術可能スタッフ」「必要設備」UI追加
+- I-5. 予約画面に「指名」UI追加
+- I-6. 予約可能時間計算ロジックを3次元化（フェーズ1で既に実装済みなら不要）
+- I-7. リアルタイム同期（`onSnapshot`）導入
+- I-8. 編集ロック機能の実装
+
+### 旧ファイルの扱い
+- Phase D 完了時点で、旧ファイル（`customer_app_v8.html`, `shared_db.js`, `salon_*_v6/v7.html`）を `legacy/` フォルダに退避
+- GitHub Pages からのリンクも v2 系に切り替え
+- 旧ファイルは数週間残してから削除
+
+---
+
+## 8. 進め方
+
+| フェーズ | 内容 | 完了基準 |
+|---|---|---|
+| A | 基盤ファイル新規作成 | shared_*_v2.js 3ファイルが完成し、単体動作確認OK |
+| B | 速度設計実装 | 全 dbLoad* API が3秒以内に完了 |
+| C | サロン管理画面 v2 | 全画面でログイン→操作→保存が動く |
+| D | 顧客アプリ v2 | 起動3秒、予約完了まで一通り動く |
+| E | 通知統一（メール経路） | EmailJS 完全撤去、shared_notify.js 完成 |
+| F | セキュリティルール最終確認 | テスト2サロンで分離確認、全機能でルール動作OK |
+| G | 販売準備 | ランディング・決済・規約 |
+| H | LINE連携追加（販売後） | LINE Function deploy、shared_notify.js の LINE 経路有効化 |
+| I | 複数人版（フェーズ2） | スタッフ・設備・シフト・指名予約・リアルタイム同期 |
+
+各フェーズ完了時に：
+1. **Firestoreデータを空にしてゼロから動作確認**（既存データ依存を排除）
+2. **テスト用サロン2つで分離テスト**
+3. **ZIP でいけさんに渡す → GitHub アップロード → 動作確認 → 次フェーズ**
+
+---
+
+## 9. 注意事項
+
+### 9-1. 優先順位の鉄則
+**機能量より、データ構造・権限・分離の方が100倍重要。**
+販売後にデータ混線・他サロン情報漏洩が起きたら、信用は二度と戻らない。
+だから機能を減らしてでも、土台を正しく作る。「見た目がショボくても壊れない」を優先する。
+
+### 9-2. 守る作業ルール
+1. **どんなに焦っても、設計書を変えずに実装はしない**。今夜の Claude の失敗（タイムアウト追加）は、設計書なしで応急処置したのが原因。
+
+2. **iPad での編集はもう絶対にしない**。ZIP でファイル渡し、GitHub Web UI ではアップロードだけ。スマートクォート混入で動かなくなる事故が起きる。
+
+3. **Claude も完璧じゃない**。設計書をレビューする時、GPT にも見てもらって、3者で合意してから実装するのが安全。
+
+4. **Phase ごとに動作確認**。1 Phase 終わるごとに「動くかテスト」してから次へ。
+
+5. **DB ルールはコードより先**（GPT指摘）。各 Phase の最初のステップで Firestoreルールを書く・確認する。UIだけ作って後で当てるのは禁止。
+
+6. **「全部入りを最初から目指さない」**（GPT指摘）。販売開始時の最小機能で完璧に動くことが、機能たくさんで不安定よりずっと価値がある。
+
+### 9-3. 販売開始時の最小機能（参考）
+
+**オーナー側**
+- ログイン
+- 自店舗だけ閲覧可能
+- メニュー登録
+- 営業時間設定
+- 予約一覧（カレンダー）
+- 顧客管理（一覧・詳細）
+
+**顧客側**
+- 店舗URLアクセス
+- 新規登録 / ログイン
+- メニュー選択
+- 日時選択
+- 予約確定
+- 予約履歴
+
+これだけで販売開始できる。LINE 連携・スタッフ管理・設備管理・指名予約・スタンプカードなどは「追加機能」として後から差し込める設計にしておく。
+
+---
+
+## 10. 設計書の使い方
+
+このファイルは GitHub に `DESIGN.md` として置く。
+今後、コードを変える時は必ずこの設計書を参照する。
+設計書と矛盾する変更は、設計書を先に直してから実装する。
+
