@@ -1,0 +1,314 @@
+// ============================================================
+// TORITA Firestore Security Rules
+// 設計書 v6 (DESIGN.md セクション 3-3) 準拠
+// 作成: 2026/5/13 (Phase A-step1-1)
+//
+// 設計方針:
+//   - Rules は「最低限の関所」
+//   - 認証チェック、フィールドホワイトリスト、型チェック、単純な値域チェックのみ
+//   - 複雑なロジック（営業時間、重複、価格計算）は Cloud Functions の責任
+//   - フィールドホワイトリストで顧客の不正書き込みを防ぐ
+// ============================================================
+
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // ============================================================
+    // ヘルパー関数
+    // ============================================================
+    
+    // ログイン済みか
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    // サロンオーナー本人か（Auth UID == salonId）
+    function isSalonOwner(salonId) {
+      return isSignedIn() && request.auth.uid == salonId;
+    }
+    
+    // サロンに所属するスタッフか
+    // staffs/{request.auth.uid} ドキュメントが存在すれば所属スタッフ
+    // フェーズ1: staffs/owner だけ存在（オーナー本人）
+    // フェーズ2: staffs/{各スタッフのAuth UID} が増える
+    function isSalonStaff(salonId) {
+      return isSignedIn() && 
+             exists(/databases/$(database)/documents/salons/$(salonId)/staffs/$(request.auth.uid));
+    }
+    
+    // ============================================================
+    // /salons/{salonId}
+    // ============================================================
+    
+    match /salons/{salonId} {
+      // サロン情報（info）
+      // 読み取り: ログイン済みなら誰でも（顧客アプリでサロン名表示用）
+      // 書き込み: オーナー本人のみ
+      allow read: if isSignedIn();
+      
+      allow create: if isSalonOwner(salonId) &&
+                      request.resource.data.keys().hasOnly([
+                        'name', 'email', 'phone', 'address',
+                        'createdAt', 'plan'
+                      ]) &&
+                      request.resource.data.keys().hasAll(['name', 'email', 'createdAt']) &&
+                      request.resource.data.email is string &&
+                      request.resource.data.name is string;
+      
+      allow update: if isSalonOwner(salonId) &&
+                      // email は変更不可（Auth と整合性を保つ）
+                      request.resource.data.email == resource.data.email;
+      
+      allow delete: if false;  // サロン削除は Functions 経由のみ（関連データ整理が必要）
+      
+      // ============================================================
+      // /salons/{salonId}/staffs/{staffId}
+      // フェーズ1: staffs/owner の1つだけ
+      // ============================================================
+      
+      match /staffs/{staffId} {
+        // 読み取り: オーナー or スタッフ本人
+        allow read: if isSalonOwner(salonId) || 
+                      (isSignedIn() && request.auth.uid == staffId);
+        
+        // 作成: オーナー本人が自分のスタッフドキュメントを作成（owner として）
+        //       または、オーナーが他スタッフを追加（フェーズ2）
+        allow create: if isSalonOwner(salonId) &&
+                        request.resource.data.keys().hasOnly([
+                          'name', 'role', 'email', 'active', 'createdAt'
+                        ]) &&
+                        request.resource.data.keys().hasAll(['name', 'role', 'active']) &&
+                        request.resource.data.role in ['owner', 'staff'] &&
+                        request.resource.data.active is bool;
+        
+        allow update: if isSalonOwner(salonId);
+        allow delete: if isSalonOwner(salonId) && staffId != 'owner';  // owner は削除不可
+      }
+      
+      // ============================================================
+      // /salons/{salonId}/resources/{resourceId}
+      // フェーズ1: resources/default の1つだけ
+      // ============================================================
+      
+      match /resources/{resourceId} {
+        // 読み取り: ログイン済みなら誰でも（予約可能時間計算で必要）
+        allow read: if isSignedIn();
+        
+        allow create: if isSalonOwner(salonId) &&
+                        request.resource.data.keys().hasOnly([
+                          'name', 'type', 'active', 'createdAt'
+                        ]) &&
+                        request.resource.data.keys().hasAll(['name', 'active']) &&
+                        request.resource.data.active is bool;
+        
+        allow update: if isSalonOwner(salonId);
+        allow delete: if isSalonOwner(salonId) && resourceId != 'default';  // default は削除不可
+      }
+      
+      // ============================================================
+      // /salons/{salonId}/shifts/{shiftId}
+      // フェーズ1: 使わない（営業時間 = オーナーのシフト扱い）
+      // フェーズ2で本格利用
+      // ============================================================
+      
+      match /shifts/{shiftId} {
+        allow read: if isSalonStaff(salonId);
+        allow write: if isSalonOwner(salonId);
+      }
+      
+      // ============================================================
+      // /salons/{salonId}/menus/{menuId}
+      // ============================================================
+      
+      match /menus/{menuId} {
+        // 読み取り: public=true は誰でも、public=false はスタッフのみ
+        allow read: if isSignedIn() && 
+                      (resource.data.public == true || isSalonStaff(salonId));
+        
+        // 作成: スタッフのみ、フィールド検証
+        allow create: if isSalonStaff(salonId) &&
+                        request.resource.data.keys().hasOnly([
+                          'name', 'duration', 'price', 'type', 'public',
+                          'eligibleStaffIds', 'requiredResourceIds',
+                          'intervalBefore', 'intervalAfter',
+                          'description', 'contraindications',
+                          'photoUrl', 'createdAt'
+                        ]) &&
+                        request.resource.data.keys().hasAll([
+                          'name', 'duration', 'price', 'type', 'public',
+                          'eligibleStaffIds', 'requiredResourceIds'
+                        ]) &&
+                        request.resource.data.name is string &&
+                        request.resource.data.duration is int &&
+                        request.resource.data.duration > 0 &&
+                        request.resource.data.price is int &&
+                        request.resource.data.price >= 0 &&
+                        request.resource.data.type in ['main', 'option'] &&
+                        request.resource.data.public is bool &&
+                        request.resource.data.eligibleStaffIds is list &&
+                        request.resource.data.requiredResourceIds is list;
+        
+        allow update: if isSalonStaff(salonId);
+        allow delete: if isSalonOwner(salonId);
+      }
+      
+      // ============================================================
+      // /salons/{salonId}/customers/{customerId}
+      // customerId == 顧客の Auth UID（設計書通り、二重管理は廃止）
+      // ============================================================
+      
+      match /customers/{customerId} {
+        // 読み取り: サロンスタッフは全員、顧客は自分自身のみ
+        allow read: if isSalonStaff(salonId) || 
+                      (isSignedIn() && request.auth.uid == customerId);
+        
+        // 作成: 本人だけが自分のドキュメントを作成可能
+        //       フィールドホワイトリスト（顧客が書ける項目のみ）
+        allow create: if isSignedIn() &&
+                        request.auth.uid == customerId &&
+                        request.resource.data.keys().hasOnly([
+                          'name', 'phone', 'email',
+                          'notifyChannels', 'createdAt'
+                        ]) &&
+                        request.resource.data.keys().hasAll([
+                          'name', 'email', 'notifyChannels'
+                        ]) &&
+                        request.resource.data.name is string &&
+                        request.resource.data.email is string &&
+                        request.resource.data.notifyChannels.keys().hasOnly(['email', 'line']) &&
+                        request.resource.data.notifyChannels.email is bool;
+        
+        // 更新:
+        //  - 顧客本人: name, phone, notifyChannels.email/line のみ（差分制限）
+        //  - サロンスタッフ: memo, stampCount, lastVisit, totalSpent も含めて全部
+        //  - lineUserId は Functions のみ（Rules では誰も書けない）
+        allow update: if (
+          // 顧客本人
+          (isSignedIn() && request.auth.uid == customerId &&
+           request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['name', 'phone', 'notifyChannels', 'updatedAt']))
+          ||
+          // サロンスタッフ（lineUserId 変更だけは禁止）
+          (isSalonStaff(salonId) &&
+           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lineUserId']))
+        );
+        
+        // 削除: オーナーのみ
+        allow delete: if isSalonOwner(salonId);
+      }
+      
+      // ============================================================
+      // /salons/{salonId}/appointments/{appointmentId}
+      // 設計書 v6 セクション 3-4 の pendingCreate 方式
+      // ============================================================
+      
+      match /appointments/{appointmentId} {
+        // 読み取り: サロンスタッフ or 予約本人
+        allow read: if isSalonStaff(salonId) || 
+                      (isSignedIn() && request.auth.uid == resource.data.customerId);
+        
+        // 作成: 顧客が pendingCreate=true で書き込む（未確定状態）
+        //       Functions が後で確定処理する
+        //       顧客が書き込めるフィールドを最小限に絞る
+        allow create: if isSignedIn() &&
+                        request.resource.data.customerId == request.auth.uid &&
+                        // ホワイトリスト: 顧客が書ける項目のみ
+                        request.resource.data.keys().hasOnly([
+                          'dateKey', 'start', 'customerId',
+                          'menuId', 'optionMenuIds', 'pendingCreate',
+                          'createdAt'
+                        ]) &&
+                        // 必須フィールド
+                        request.resource.data.keys().hasAll([
+                          'dateKey', 'start', 'customerId',
+                          'menuId', 'pendingCreate'
+                        ]) &&
+                        // pendingCreate は必ず true（未確定状態で作成）
+                        request.resource.data.pendingCreate == true &&
+                        // dateKey の形式: YYYY-MM-DD
+                        request.resource.data.dateKey is string &&
+                        request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+                        // start の形式: HH:MM
+                        request.resource.data.start is string &&
+                        request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
+                        // menuId は string
+                        request.resource.data.menuId is string &&
+                        // optionMenuIds は省略可、あればリスト
+                        (!('optionMenuIds' in request.resource.data) || 
+                          request.resource.data.optionMenuIds is list);
+        
+        // 更新:
+        //  - 顧客は自分の予約を confirmed → cancelled にのみ変更可能
+        //  - サロンスタッフは customerId 改ざん以外は何でも可能
+        //  - 詳細な status 遷移ルールは Cloud Functions の責任
+        allow update: if (
+          // 顧客本人: status を confirmed → cancelled に変えるのみ
+          (isSignedIn() && request.auth.uid == resource.data.customerId &&
+           resource.data.status == 'confirmed' &&
+           request.resource.data.status == 'cancelled' &&
+           request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'updatedAt']))
+          ||
+          // サロンスタッフ: customerId 改ざんは禁止、他は OK
+          (isSalonStaff(salonId) &&
+           request.resource.data.customerId == resource.data.customerId)
+        );
+        
+        // 削除: オーナーのみ（通常は status=cancelled でソフト削除）
+        allow delete: if isSalonOwner(salonId);
+      }
+      
+      // ============================================================
+      // /salons/{salonId}/appointments_archive/{appointmentId}
+      // 18ヶ月以上前の予約。クライアントからは読み取り専用
+      // ============================================================
+      
+      match /appointments_archive/{appointmentId} {
+        allow read: if isSalonStaff(salonId) || 
+                      (isSignedIn() && request.auth.uid == resource.data.customerId);
+        // 作成・更新・削除は Cloud Functions のみ
+        allow write: if false;
+      }
+      
+      // ============================================================
+      // /salons/{salonId}/closeBlocks/{blockId}
+      // 臨時休業・営業時間外ブロック
+      // ============================================================
+      
+      match /closeBlocks/{blockId} {
+        allow read: if isSignedIn();  // 予約可能時間計算で必要
+        allow write: if isSalonStaff(salonId);
+      }
+      
+      // ============================================================
+      // /salons/{salonId}/config/{configId}
+      // settings, cancelPolicy, stampCard など
+      // ============================================================
+      
+      match /config/{configId} {
+        allow read: if isSignedIn();
+        allow write: if isSalonStaff(salonId);
+      }
+      
+      // ============================================================
+      // /salons/{salonId}/notificationLogs/{logId}
+      // 通知失敗ログ。Cloud Functions のみ書き込み、スタッフは読み取り可
+      // ============================================================
+      
+      match /notificationLogs/{logId} {
+        allow read: if isSalonStaff(salonId);
+        allow write: if false;  // Functions のみ
+      }
+    }
+    
+    // ============================================================
+    // 上記以外のすべてのパスを拒否（明示的に許可されていないものは禁止）
+    // ============================================================
+    
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
