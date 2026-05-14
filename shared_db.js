@@ -1,562 +1,712 @@
-// ============================================================
-//  shared_db.js  - Firebase Firestore対応版
-//  Phase 1+2 統合版（2026/5/12）
-//
-//  【Phase 1：salonId 取得の一元化】
-//  - URL パラメータ ?salon=xxx を冒頭で自動取得
-//  - getCurrentSalonId は「URL → Auth UID → null」優先順位
-//  - 旧 localStorage 方式と旧固定ID Ej3SdlceD3PZYJWd9t2dwZLHvx32 フォールバック廃止
-//  - setCurrentSalonId / clearCurrentSalonId は互換性のため空関数として残す
-//
-//  【Phase 2：onFbReady を Auth 確定まで待つ】
-//  - SDK 読み込み完了 ＋ onAuthStateChanged が一度発火するまで _fbReady = true にしない
-//  - これにより auth.currentUser が null の状態で getCurrentSalonId が呼ばれる事故を防止
-// ============================================================
+/*
+ * shared_db.js  -  TORITA Phase A-step2 / A-1
+ * 作成: 2026/5/14
+ *
+ * 役割:
+ *   Firestore アクセス層の土台。すべての画面はこのファイル経由で DB を読み書きする。
+ *
+ * 設計準拠:
+ *   - DESIGN.md v6 セクション 0-2, 3-3, 3-4, 5-2, 5-4
+ *   - firestore.rules (Phase A-step1-1 で deploy 済み) と完全整合
+ *   - functions/index.js onAppointmentCreate (Phase A-step1-3 で deploy 済み) と整合
+ *
+ * 主要な設計判断 (2026/5/14):
+ *   - staffs ドキュメント ID は Auth UID (ルールの isSalonStaff() の exists() に従う)
+ *   - 予約の staffId フィールド値は 'owner' (Functions が確定するのでクライアントは送らない)
+ *   - 顧客作成時 email 必須 (ルール 175-176 行)
+ *   - 予約作成時 createdAt はクライアントから送らない (Functions に任せる)
+ *
+ * ES5 互換:
+ *   - var / function / Promise.then のみ
+ *   - const / let / アロー関数 / async-await / テンプレートリテラル / ?. は全て禁止
+ *
+ * コールバック規約:
+ *   - 全関数 cb(result) 形式
+ *   - 成功時: result = データ または true
+ *   - 失敗時: result = null (console.error にログ)
+ *   - getCurrentSalonId 等の同期関数のみ例外
+ *
+ * Firebase SDK 前提:
+ *   - firebase-app-compat / firebase-auth-compat / firebase-firestore-compat
+ *   - グローバル window.firebase が存在する compat 版で動作
+ */
 
-// –––––––––– Firebase設定 ––––––––––
-var FIREBASE_CONFIG = {
-  apiKey: 'AIzaSyCbU0t9GipUCu6WQFOJ5QLUjAjiFl3j3TY',
-  authDomain: 'salon-booking-1d9de.firebaseapp.com',
-  projectId: 'salon-booking-1d9de',
-  storageBucket: 'salon-booking-1d9de.firebasestorage.app',
-  messagingSenderId: '230269330263',
-  appId: '1:230269330263:web:0aa2f6b624f2f3803dd412'
-};
+(function () {
 
-// –––––––––– サロンID管理（Phase 1） ––––––––––
-// SALON_ID_KEY は廃止予定だが、互換性のため変数だけ残す
-var SALON_ID_KEY = 'salon_current_id';
+  // ============================================================
+  // 内部状態
+  // ============================================================
 
-// 明示的にセットされた salonId
-var _explicitSalonId = null;
+  var _fbReady = false;
+  var _readyCallbacks = [];
+  var _urlSalonId = null;
+  var _staffCheckCache = {};
 
-// URL パラメータ ?salon=xxx から salonId を自動取得（ファイル読み込み時に即実行）
-(function() {
-  try {
-    var query = window.location.search;
-    if (query && query.length > 1) {
-      var pairs = query.substring(1).split('&');
-      for (var i = 0; i < pairs.length; i++) {
-        var pair = pairs[i].split('=');
-        if (pair[0] === 'salon' && pair[1]) {
-          _explicitSalonId = decodeURIComponent(pair[1]);
-          break;
+  // ============================================================
+  // URL パラメータ ?salon=xxx 解析 (即時実行)
+  // ============================================================
+
+  function _parseUrlSalonId() {
+    try {
+      var qs = window.location.search || '';
+      if (qs.charAt(0) === '?') {
+        qs = qs.substring(1);
+      }
+      if (!qs) {
+        return null;
+      }
+      var pairs = qs.split('&');
+      var i;
+      for (i = 0; i < pairs.length; i++) {
+        var kv = pairs[i].split('=');
+        if (kv[0] === 'salon' && kv[1]) {
+          return decodeURIComponent(kv[1]);
         }
       }
+    } catch (e) {
+      console.error('[shared_db] URL salon parse error', e);
     }
-  } catch (e) {
-    // URL 解析失敗時は何もしない
+    return null;
   }
-})();
+  _urlSalonId = _parseUrlSalonId();
 
-// 外部から明示的に salonId をセットするための関数（互換性のため残す）
-function setExplicitSalonId(id) {
-  _explicitSalonId = id;
-}
+  // ============================================================
+  // getCurrentSalonId / getCurrentUserUid (設計書 5-2: 単一定義)
+  //
+  // 優先順位: URL ?salon=xxx  →  Auth UID  →  null
+  // HTML 側は絶対にこの関数を上書きしないこと。
+  // ============================================================
 
-// 現在の salonId を取得
-// 優先順位：
-//   1. _explicitSalonId（URL パラメータまたは明示セット）
-//   2. Firebase Auth の currentUser.uid（サロン管理画面用）
-//   3. null
-function getCurrentSalonId() {
-  if (_explicitSalonId) return _explicitSalonId;
-  if (window.auth && window.auth.currentUser) return window.auth.currentUser.uid;
-  return null;
-}
+  function getCurrentSalonId() {
+    if (_urlSalonId) {
+      return _urlSalonId;
+    }
+    if (window.firebase && firebase.auth) {
+      var u = firebase.auth().currentUser;
+      if (u && u.uid) {
+        return u.uid;
+      }
+    }
+    return null;
+  }
+  window.getCurrentSalonId = getCurrentSalonId;
 
-// 旧 setCurrentSalonId / clearCurrentSalonId は localStorage を廃止
-// 既存呼び出し箇所の互換性のため空関数として残す
-function setCurrentSalonId(id) {
-  // localStorage 書き込みは廃止
-}
-function clearCurrentSalonId() {
-  // localStorage 削除は廃止
-}
+  function getCurrentUserUid() {
+    if (window.firebase && firebase.auth) {
+      var u = firebase.auth().currentUser;
+      if (u && u.uid) {
+        return u.uid;
+      }
+    }
+    return null;
+  }
+  window.getCurrentUserUid = getCurrentUserUid;
 
-// –––––––––– Firebase SDK読み込み（Phase 2：Auth 確定まで待つ） ––––––––––
-(function() {
-  var scripts = [
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js',
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js',
-    'https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js'
-  ];
+  // ============================================================
+  // onFbReady / isFbReady
+  //
+  // Firebase SDK ロード直後は currentUser が null なので、
+  // onAuthStateChanged が 1 度発火するまで _fbReady=true にしない。
+  // 各画面は必ず onFbReady(function(){ ... }) でラップして処理を開始する。
+  // ============================================================
 
-  window._fbReady = false;
-  window._fbReadyCbs = [];
-  window.onFbReady = function(cb) {
-    if (window._fbReady) { cb(); } else { window._fbReadyCbs.push(cb); }
+  function _initFirebaseReady() {
+    if (!window.firebase || !firebase.auth) {
+      setTimeout(_initFirebaseReady, 100);
+      return;
+    }
+    firebase.auth().onAuthStateChanged(function (user) {
+      _staffCheckCache = {};
+      if (!_fbReady) {
+        _fbReady = true;
+        var cbs = _readyCallbacks;
+        _readyCallbacks = [];
+        var i;
+        for (i = 0; i < cbs.length; i++) {
+          try {
+            cbs[i]();
+          } catch (e) {
+            console.error('[shared_db] onFbReady cb error', e);
+          }
+        }
+      }
+    });
+  }
+  _initFirebaseReady();
+
+  function onFbReady(cb) {
+    if (typeof cb !== 'function') {
+      return;
+    }
+    if (_fbReady) {
+      try {
+        cb();
+      } catch (e) {
+        console.error('[shared_db] onFbReady cb error', e);
+      }
+    } else {
+      _readyCallbacks.push(cb);
+    }
+  }
+  window.onFbReady = onFbReady;
+
+  function isFbReady() {
+    return _fbReady;
+  }
+  window.isFbReady = isFbReady;
+
+  // ============================================================
+  // 内部ヘルパー
+  // ============================================================
+
+  function _db() {
+    return firebase.firestore();
+  }
+
+  function _serverTimestamp() {
+    return firebase.firestore.FieldValue.serverTimestamp();
+  }
+
+  function _deleteField() {
+    return firebase.firestore.FieldValue.delete();
+  }
+
+  function _salonRef() {
+    var sid = getCurrentSalonId();
+    if (!sid) {
+      return null;
+    }
+    return _db().collection('salons').doc(sid);
+  }
+
+  function _safeCb(cb, value) {
+    if (typeof cb === 'function') {
+      try {
+        cb(value);
+      } catch (e) {
+        console.error('[shared_db] cb error', e);
+      }
+    }
+  }
+
+  function _logErr(label, err) {
+    var msg = (err && err.message) ? err.message : String(err);
+    var code = (err && err.code) ? err.code : '';
+    console.error('[shared_db] ' + label + ' failed:', code, msg);
+  }
+
+  // ============================================================
+  // requireSalonStaff / requireCustomerAuth
+  //
+  // 各画面が「自分が読み書きできる立場か」を確認するヘルパー。
+  // 実際の権限制御は Firestore Rules が行うが、これはクライアント側で
+  // 「無駄なリクエストを送る前に弾く」「画面遷移を制御する」ために使う。
+  // ============================================================
+
+  // ログイン中ユーザが現在の salonId のスタッフか
+  // 判定: salons/{salonId}/staffs/{Auth UID} が存在するか
+  function requireSalonStaff(cb) {
+    onFbReady(function () {
+      var uid = getCurrentUserUid();
+      var sid = getCurrentSalonId();
+      if (!uid || !sid) {
+        _safeCb(cb, false);
+        return;
+      }
+      var cacheKey = sid + '|' + uid;
+      if (_staffCheckCache.hasOwnProperty(cacheKey)) {
+        _safeCb(cb, _staffCheckCache[cacheKey]);
+        return;
+      }
+      _db().collection('salons').doc(sid)
+        .collection('staffs').doc(uid).get()
+        .then(function (snap) {
+          var ok = snap.exists;
+          _staffCheckCache[cacheKey] = ok;
+          _safeCb(cb, ok);
+        })
+        .catch(function (err) {
+          _logErr('requireSalonStaff', err);
+          _safeCb(cb, false);
+        });
+    });
+  }
+  window.requireSalonStaff = requireSalonStaff;
+
+  // ログイン中ユーザが顧客 (メール認証済み) か
+  // 判定: ログイン済み かつ emailVerified == true
+  function requireCustomerAuth(cb) {
+    onFbReady(function () {
+      if (!window.firebase || !firebase.auth) {
+        _safeCb(cb, false);
+        return;
+      }
+      var u = firebase.auth().currentUser;
+      if (!u) {
+        _safeCb(cb, false);
+        return;
+      }
+      if (u.emailVerified !== true) {
+        _safeCb(cb, false);
+        return;
+      }
+      _safeCb(cb, true);
+    });
+  }
+  window.requireCustomerAuth = requireCustomerAuth;
+
+  // ============================================================
+  // 抽象化レイヤ (将来 onSnapshot に差し替え可能)
+  //
+  // 各画面は直接 firebase.firestore() を呼ばず、できるだけここを通す。
+  // フェーズ 2 でリアルタイム同期に切り替えるとき、ここだけ書き換えれば済む。
+  // ============================================================
+
+  function dbReadDoc(path, cb) {
+    onFbReady(function () {
+      _db().doc(path).get()
+        .then(function (snap) {
+          if (!snap.exists) {
+            _safeCb(cb, null);
+            return;
+          }
+          var data = snap.data();
+          data._id = snap.id;
+          _safeCb(cb, data);
+        })
+        .catch(function (err) {
+          _logErr('dbReadDoc(' + path + ')', err);
+          _safeCb(cb, null);
+        });
+    });
+  }
+  window.dbReadDoc = dbReadDoc;
+
+  // queryBuilder は省略可。あれば function(colRef){ return colRef.where(...).orderBy(...) } の形
+  function dbReadCollection(path, queryBuilder, cb) {
+    onFbReady(function () {
+      var ref = _db().collection(path);
+      var q = ref;
+      if (typeof queryBuilder === 'function') {
+        try {
+          q = queryBuilder(ref);
+        } catch (e) {
+          _logErr('dbReadCollection queryBuilder', e);
+          _safeCb(cb, null);
+          return;
+        }
+      }
+      q.get()
+        .then(function (snap) {
+          var arr = [];
+          snap.forEach(function (d) {
+            var data = d.data();
+            data._id = d.id;
+            arr.push(data);
+          });
+          _safeCb(cb, arr);
+        })
+        .catch(function (err) {
+          _logErr('dbReadCollection(' + path + ')', err);
+          _safeCb(cb, null);
+        });
+    });
+  }
+  window.dbReadCollection = dbReadCollection;
+
+  function dbWriteDoc(path, data, mergeBool, cb) {
+    onFbReady(function () {
+      var opt = mergeBool ? { merge: true } : {};
+      _db().doc(path).set(data, opt)
+        .then(function () { _safeCb(cb, true); })
+        .catch(function (err) {
+          _logErr('dbWriteDoc(' + path + ')', err);
+          _safeCb(cb, null);
+        });
+    });
+  }
+  window.dbWriteDoc = dbWriteDoc;
+
+  function dbUpdateDoc(path, patch, cb) {
+    onFbReady(function () {
+      _db().doc(path).update(patch)
+        .then(function () { _safeCb(cb, true); })
+        .catch(function (err) {
+          _logErr('dbUpdateDoc(' + path + ')', err);
+          _safeCb(cb, null);
+        });
+    });
+  }
+  window.dbUpdateDoc = dbUpdateDoc;
+
+  function dbDeleteDoc(path, cb) {
+    onFbReady(function () {
+      _db().doc(path).delete()
+        .then(function () { _safeCb(cb, true); })
+        .catch(function (err) {
+          _logErr('dbDeleteDoc(' + path + ')', err);
+          _safeCb(cb, null);
+        });
+    });
+  }
+  window.dbDeleteDoc = dbDeleteDoc;
+
+  function dbAddDoc(collectionPath, data, cb) {
+    onFbReady(function () {
+      _db().collection(collectionPath).add(data)
+        .then(function (ref) {
+          _safeCb(cb, { _id: ref.id });
+        })
+        .catch(function (err) {
+          _logErr('dbAddDoc(' + collectionPath + ')', err);
+          _safeCb(cb, null);
+        });
+    });
+  }
+  window.dbAddDoc = dbAddDoc;
+
+  // ============================================================
+  // サロン側 CRUD  (dbSalon*)
+  //
+  // ログイン中のサロンスタッフが操作する想定。
+  // 各関数は内部で getCurrentSalonId() を取得して使う。
+  // ============================================================
+
+  // サロン本体ドキュメント (salons/{salonId}) を取得
+  function dbSalonGetInfo(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    dbReadDoc('salons/' + sid, cb);
+  }
+  window.dbSalonGetInfo = dbSalonGetInfo;
+
+  // サロン本体ドキュメントを更新 (email は変更不可: ルール 62 行)
+  function dbSalonUpdateInfo(patch, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    // email 変更はルールで弾かれるが、念のためクライアント側でも防ぐ
+    if (patch && patch.hasOwnProperty('email')) {
+      delete patch.email;
+    }
+    dbUpdateDoc('salons/' + sid, patch, cb);
+  }
+  window.dbSalonUpdateInfo = dbSalonUpdateInfo;
+
+  // config 取得 (settings / cancelPolicy / stampCard など)
+  function dbSalonGetConfig(configId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    dbReadDoc('salons/' + sid + '/config/' + configId, cb);
+  }
+  window.dbSalonGetConfig = dbSalonGetConfig;
+
+  // config 設定 (merge:true で部分更新)
+  function dbSalonSetConfig(configId, data, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    dbWriteDoc('salons/' + sid + '/config/' + configId, data, true, cb);
+  }
+  window.dbSalonSetConfig = dbSalonSetConfig;
+
+  // 顧客一覧
+  function dbSalonListCustomers(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    dbReadCollection('salons/' + sid + '/customers', null, cb);
+  }
+  window.dbSalonListCustomers = dbSalonListCustomers;
+
+  // 顧客 1 件取得
+  function dbSalonGetCustomer(customerId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !customerId) { _safeCb(cb, null); return; }
+    dbReadDoc('salons/' + sid + '/customers/' + customerId, cb);
+  }
+  window.dbSalonGetCustomer = dbSalonGetCustomer;
+
+  // 顧客更新 (memo / stampCount / lastVisit / totalSpent などスタッフ専用フィールド含む)
+  // lineUserId はルールで誰も書けないので、誤って送らないよう除外
+  function dbSalonUpdateCustomer(customerId, patch, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !customerId) { _safeCb(cb, null); return; }
+    if (patch && patch.hasOwnProperty('lineUserId')) {
+      delete patch.lineUserId;
+    }
+    if (patch) {
+      patch.updatedAt = _serverTimestamp();
+    }
+    dbUpdateDoc('salons/' + sid + '/customers/' + customerId, patch, cb);
+  }
+  window.dbSalonUpdateCustomer = dbSalonUpdateCustomer;
+
+  // 顧客削除 (オーナーのみ: ルール 199 行)
+  function dbSalonDeleteCustomer(customerId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !customerId) { _safeCb(cb, null); return; }
+    dbDeleteDoc('salons/' + sid + '/customers/' + customerId, cb);
+  }
+  window.dbSalonDeleteCustomer = dbSalonDeleteCustomer;
+
+  // 予約一覧
+  // filterObj: { dateKey: '2026-05-14' } のように指定可能 (任意)
+  //            指定なしなら全件
+  // 注: 大量取得を避けるため、画面側で必ず日付や status などを指定すること
+  function dbSalonListAppointments(filterObj, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    dbReadCollection('salons/' + sid + '/appointments', function (col) {
+      var q = col;
+      if (filterObj && filterObj.dateKey) {
+        q = q.where('dateKey', '==', filterObj.dateKey);
+      }
+      if (filterObj && filterObj.dateFrom && filterObj.dateTo) {
+        q = q.where('dateKey', '>=', filterObj.dateFrom)
+             .where('dateKey', '<=', filterObj.dateTo);
+      }
+      if (filterObj && filterObj.status) {
+        q = q.where('status', '==', filterObj.status);
+      }
+      if (filterObj && filterObj.customerId) {
+        q = q.where('customerId', '==', filterObj.customerId);
+      }
+      return q;
+    }, cb);
+  }
+  window.dbSalonListAppointments = dbSalonListAppointments;
+
+  // 予約 1 件取得
+  function dbSalonGetAppointment(appointmentId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !appointmentId) { _safeCb(cb, null); return; }
+    dbReadDoc('salons/' + sid + '/appointments/' + appointmentId, cb);
+  }
+  window.dbSalonGetAppointment = dbSalonGetAppointment;
+
+  // 予約更新 (サロン側: status 変更や時間変更など)
+  // 注: customerId は変更不可 (ルール 256 行)
+  function dbSalonUpdateAppointment(appointmentId, patch, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !appointmentId) { _safeCb(cb, null); return; }
+    if (patch && patch.hasOwnProperty('customerId')) {
+      delete patch.customerId;
+    }
+    if (patch) {
+      patch.updatedAt = _serverTimestamp();
+    }
+    dbUpdateDoc('salons/' + sid + '/appointments/' + appointmentId, patch, cb);
+  }
+  window.dbSalonUpdateAppointment = dbSalonUpdateAppointment;
+
+  // 予約削除 (オーナーのみ: ルール 260 行)
+  // 通常は status='cancelled' でソフト削除する方を推奨
+  function dbSalonDeleteAppointment(appointmentId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !appointmentId) { _safeCb(cb, null); return; }
+    dbDeleteDoc('salons/' + sid + '/appointments/' + appointmentId, cb);
+  }
+  window.dbSalonDeleteAppointment = dbSalonDeleteAppointment;
+
+  // ============================================================
+  // 顧客側 CRUD  (dbCustomer*)
+  //
+  // 顧客アプリ (customer_app.html) から呼ばれる想定。
+  // URL に ?salon=xxx を持っている前提で getCurrentSalonId() が値を返す。
+  // ============================================================
+
+  // 予約画面の最初に表示するサロン情報 (info ドキュメント)
+  function dbCustomerGetSalonInfo(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    dbReadDoc('salons/' + sid, cb);
+  }
+  window.dbCustomerGetSalonInfo = dbCustomerGetSalonInfo;
+
+  // 公開メニューのみ取得 (public:true)
+  function dbCustomerGetPublicMenus(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    dbReadCollection('salons/' + sid + '/menus', function (col) {
+      return col.where('public', '==', true);
+    }, cb);
+  }
+  window.dbCustomerGetPublicMenus = dbCustomerGetPublicMenus;
+
+  // 自分の顧客プロフィール (customers/{Auth UID})
+  function dbCustomerGetMyProfile(cb) {
+    var sid = getCurrentSalonId();
+    var uid = getCurrentUserUid();
+    if (!sid || !uid) { _safeCb(cb, null); return; }
+    dbReadDoc('salons/' + sid + '/customers/' + uid, cb);
+  }
+  window.dbCustomerGetMyProfile = dbCustomerGetMyProfile;
+
+  // 初回ログイン後の自分のプロフィール作成
+  // ルール 169-181 行のホワイトリスト:
+  //   許可: name, phone, email, notifyChannels, createdAt
+  //   必須: name, email, notifyChannels
+  //   notifyChannels: { email: bool, line: bool } のみ
+  function dbCustomerCreateMyProfile(data, cb) {
+    var sid = getCurrentSalonId();
+    var uid = getCurrentUserUid();
+    if (!sid || !uid) { _safeCb(cb, null); return; }
+
+    if (!data || !data.name || !data.email) {
+      console.error('[shared_db] dbCustomerCreateMyProfile: name and email are required');
+      _safeCb(cb, null);
+      return;
+    }
+
+    // notifyChannels のデフォルト
+    var notifyChannels;
+    if (data.notifyChannels && typeof data.notifyChannels === 'object') {
+      notifyChannels = {
+        email: (data.notifyChannels.email !== false),
+        line: (data.notifyChannels.line === true)
+      };
+    } else {
+      notifyChannels = { email: true, line: false };
+    }
+
+    // ホワイトリストに沿った形でドキュメント構築
+    var doc = {
+      name: String(data.name),
+      email: String(data.email),
+      notifyChannels: notifyChannels,
+      createdAt: _serverTimestamp()
+    };
+    if (data.phone) {
+      doc.phone = String(data.phone);
+    }
+
+    dbWriteDoc('salons/' + sid + '/customers/' + uid, doc, false, cb);
+  }
+  window.dbCustomerCreateMyProfile = dbCustomerCreateMyProfile;
+
+  // 自分のプロフィール更新 (顧客本人が編集可能なフィールドのみ)
+  // ルール 187-191 行:
+  //   許可: name, phone, notifyChannels, updatedAt
+  function dbCustomerUpdateMyProfile(patch, cb) {
+    var sid = getCurrentSalonId();
+    var uid = getCurrentUserUid();
+    if (!sid || !uid) { _safeCb(cb, null); return; }
+    if (!patch) { _safeCb(cb, null); return; }
+
+    // 許可フィールド以外を除去
+    var safe = {};
+    if (patch.hasOwnProperty('name')) { safe.name = String(patch.name); }
+    if (patch.hasOwnProperty('phone')) { safe.phone = String(patch.phone); }
+    if (patch.hasOwnProperty('notifyChannels')) {
+      var nc = patch.notifyChannels || {};
+      safe.notifyChannels = {
+        email: (nc.email !== false),
+        line: (nc.line === true)
+      };
+    }
+    safe.updatedAt = _serverTimestamp();
+
+    dbUpdateDoc('salons/' + sid + '/customers/' + uid, safe, cb);
+  }
+  window.dbCustomerUpdateMyProfile = dbCustomerUpdateMyProfile;
+
+  // 自分の予約一覧
+  // ルール 209-210 行: 自分が customerId の予約は読める
+  function dbCustomerListMyAppointments(cb) {
+    var sid = getCurrentSalonId();
+    var uid = getCurrentUserUid();
+    if (!sid || !uid) { _safeCb(cb, null); return; }
+    dbReadCollection('salons/' + sid + '/appointments', function (col) {
+      return col.where('customerId', '==', uid);
+    }, cb);
+  }
+  window.dbCustomerListMyAppointments = dbCustomerListMyAppointments;
+
+  // 予約作成 (pendingCreate=true 方式)
+  //
+  // 設計書 3-4 + ルール 215-240 行:
+  //   送れるフィールド:    dateKey, start, customerId, menuId, optionMenuIds, pendingCreate, createdAt
+  //   必須フィールド:      dateKey, start, customerId, menuId, pendingCreate
+  //   pendingCreate は必ず true
+  //
+  // 注: end / staffId / resourceIds / status / priceSnapshot 等は Functions が確定する。
+  //     クライアントからは絶対に送らない。
+  //     createdAt も Functions の serverTimestamp で確定するため、ここでは送らない。
+  //
+  // data: { dateKey, start, menuId, optionMenuIds? }
+  function dbCustomerCreateAppointment(data, cb) {
+    var sid = getCurrentSalonId();
+    var uid = getCurrentUserUid();
+    if (!sid || !uid) {
+      console.error('[shared_db] dbCustomerCreateAppointment: not authenticated');
+      _safeCb(cb, null);
+      return;
+    }
+    if (!data || !data.dateKey || !data.start || !data.menuId) {
+      console.error('[shared_db] dbCustomerCreateAppointment: missing required fields');
+      _safeCb(cb, null);
+      return;
+    }
+
+    // 形式チェック (ルール側でも弾かれるが、ここで先に弾いて無駄なリクエストを防ぐ)
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(data.dateKey)) {
+      console.error('[shared_db] dbCustomerCreateAppointment: invalid dateKey');
+      _safeCb(cb, null);
+      return;
+    }
+    if (!/^[0-9]{2}:[0-9]{2}$/.test(data.start)) {
+      console.error('[shared_db] dbCustomerCreateAppointment: invalid start');
+      _safeCb(cb, null);
+      return;
+    }
+
+    var doc = {
+      dateKey: String(data.dateKey),
+      start: String(data.start),
+      customerId: uid,
+      menuId: String(data.menuId),
+      pendingCreate: true
+    };
+    if (data.optionMenuIds && data.optionMenuIds.length > 0) {
+      // 配列だけを通す
+      var opts = [];
+      var i;
+      for (i = 0; i < data.optionMenuIds.length; i++) {
+        opts.push(String(data.optionMenuIds[i]));
+      }
+      doc.optionMenuIds = opts;
+    }
+
+    dbAddDoc('salons/' + sid + '/appointments', doc, cb);
+  }
+  window.dbCustomerCreateAppointment = dbCustomerCreateAppointment;
+
+  // 自分の予約をキャンセル
+  // ルール 246-252 行: 顧客は confirmed -> cancelled に変更可能
+  function dbCustomerCancelMyAppointment(appointmentId, cb) {
+    var sid = getCurrentSalonId();
+    var uid = getCurrentUserUid();
+    if (!sid || !uid || !appointmentId) { _safeCb(cb, null); return; }
+    dbUpdateDoc(
+      'salons/' + sid + '/appointments/' + appointmentId,
+      {
+        status: 'cancelled',
+        updatedAt: _serverTimestamp()
+      },
+      cb
+    );
+  }
+  window.dbCustomerCancelMyAppointment = dbCustomerCancelMyAppointment;
+
+  // ============================================================
+  // デバッグ用 (本番では呼ばれない想定)
+  // ============================================================
+
+  window._sharedDbDebug = {
+    getUrlSalonId: function () { return _urlSalonId; },
+    getReadyState: function () { return _fbReady; },
+    getStaffCache: function () { return _staffCheckCache; },
+    clearStaffCache: function () { _staffCheckCache = {}; }
   };
 
-  function fireReady() {
-    window._fbReady = true;
-    for (var i = 0; i < window._fbReadyCbs.length; i++) {
-      window._fbReadyCbs[i]();
-    }
-    window._fbReadyCbs = [];
-  }
+  console.log('[shared_db] loaded. urlSalonId =', _urlSalonId);
 
-  function onAllLoaded() {
-    firebase.initializeApp(FIREBASE_CONFIG);
-    window.db = firebase.firestore();
-    window.auth = firebase.auth();
-
-    // Phase 2：onAuthStateChanged が一度発火するまで ready にしない
-    // これにより auth.currentUser が確定した状態で各画面の初期化が始まる
-    var authConfirmed = false;
-    window.auth.onAuthStateChanged(function() {
-      if (authConfirmed) return;
-      authConfirmed = true;
-      fireReady();
-    });
-    // 保険：3秒待っても onAuthStateChanged が発火しなかった場合に強制発火
-    setTimeout(function() {
-      if (!authConfirmed) {
-        authConfirmed = true;
-        fireReady();
-      }
-    }, 3000);
-  }
-
-  function loadScript(src, cb) {
-    var s = document.createElement('script');
-    s.src = src;
-    s.onload = cb;
-    s.onerror = cb;
-    document.head.appendChild(s);
-  }
-
-  loadScript(scripts[0], function() {
-    var done = 0;
-    function check() { done++; if (done === 2) onAllLoaded(); }
-    loadScript(scripts[1], check);
-    loadScript(scripts[2], check);
-  });
 })();
-
-// –––––––––– Firestore パス ––––––––––
-function salonDoc(salonId) {
-  return window.db.collection('salons').doc(salonId);
-}
-function salonCol(salonId, colName) {
-  return salonDoc(salonId).collection(colName);
-}
-
-// –––––––––– デフォルト値 ––––––––––
-var DEFAULT_SETTINGS = {
-  openTime: '10:00', closeTime: '19:00',
-  intervalMin: 30, slotMin: 30,
-  closedDows: [2],
-  weeklyClose: [{ dow: 3, start: '12:00', end: '13:00' }],
-  bookingWeeks: 8,
-  lastMin: 'same1h',
-  deadline: '前日24時まで'
-};
-
-var DEFAULT_STAMP_CARD = {
-  enabled: true,
-  goal: 10,
-  reward: '次回施術10%OFF',
-  bonusStamps: [{ at: 5, reward: 'オプション1品無料' }],
-  color: '#b5845a'
-};
-
-var DEFAULT_CANCEL_POLICY = {
-  text: '・3日前まで:無料\n・2日前〜前日:ご予約料金の50%\n・当日:ご予約料金の100%\n・無断キャンセル:ご予約料金の100%',
-  rates: [
-    { id: 1, label: '3日前から',     percent: 0   },
-    { id: 2, label: '前日から',      percent: 50  },
-    { id: 3, label: '当日',          percent: 100 },
-    { id: 4, label: '無断キャンセル', percent: 100 }
-  ],
-  qrUrl: '',
-  qrMsg: '{顧客名} 様\n\nキャンセル規定に基づき、下記のキャンセル料が発生しております。\n\n■ 予約日時:{予約日時}\n■ メニュー:{メニュー}\n■ キャンセル料:{キャンセル料}\n\n下記よりお支払いをお願いいたします。\n{QRリンク}',
-  showOnBook: true,
-  showOnCancel: true
-};
-
-var DEFAULT_MENUS = [
-  { id: 'm1', name: 'フェイシャルトリートメント', duration: 90,  price: 12000, type: 'main',   public: true },
-  { id: 'm2', name: 'ボディケア',                 duration: 60,  price: 8000,  type: 'main',   public: true },
-  { id: 'm3', name: 'フェイシャル+アイ',          duration: 120, price: 16000, type: 'main',   public: true },
-  { id: 'm4', name: '目元ケア',                   duration: 30,  price: 3000,  type: 'option', public: true },
-  { id: 'm5', name: 'ヘッドスパ',                 duration: 20,  price: 2500,  type: 'option', public: true },
-  { id: 'm6', name: 'デコルテケア',               duration: 15,  price: 2000,  type: 'option', public: true }
-];
-
-// –––––––––– salon ––––––––––
-function dbGetSalon(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb(null); return; }
-  salonDoc(id).get().then(function(doc) {
-    cb(doc.exists ? doc.data() : null);
-  }).catch(function() { cb(null); });
-}
-
-function dbSaveSalon(salon, cb) {
-  salonDoc(salon.id).set(salon, { merge: true }).then(function() {
-    setCurrentSalonId(salon.id);
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
-function dbSalonExists(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb(false); return; }
-  salonDoc(id).get().then(function(doc) { cb(doc.exists); }).catch(function() { cb(false); });
-}
-
-// –––––––––– settings ––––––––––
-function dbGetSettings(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb(Object.assign({}, DEFAULT_SETTINGS)); return; }
-  salonDoc(id).collection('config').doc('settings').get().then(function(doc) {
-    cb(doc.exists ? Object.assign({}, DEFAULT_SETTINGS, doc.data()) : Object.assign({}, DEFAULT_SETTINGS));
-  }).catch(function() { cb(Object.assign({}, DEFAULT_SETTINGS)); });
-}
-
-function dbSaveSettings(s, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonDoc(id).collection('config').doc('settings').set(s).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
-// –––––––––– menus ––––––––––
-function dbGetMenus(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb([]); return; }
-  salonCol(id, 'menus').orderBy('id').get().then(function(snap) {
-    var menus = [];
-    snap.forEach(function(doc) { menus.push(doc.data()); });
-    cb(menus);
-  }).catch(function() { cb([]); });
-}
-
-function dbGetPublicMenus(cb) {
-  dbGetMenus(function(menus) {
-    cb(menus.filter(function(m) { return m.public; }));
-  });
-}
-
-function dbSaveMenus(menus, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  var batch = window.db.batch();
-  salonCol(id, 'menus').get().then(function(snap) {
-    snap.forEach(function(doc) { batch.delete(doc.ref); });
-    menus.forEach(function(m) {
-      batch.set(salonCol(id, 'menus').doc(m.id), m);
-    });
-    return batch.commit();
-  }).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
-// –––––––––– customers ––––––––––
-function dbGetCustomers(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb([]); return; }
-  salonCol(id, 'customers').orderBy('name').get().then(function(snap) {
-    var list = [];
-    snap.forEach(function(doc) { list.push(doc.data()); });
-    cb(list);
-  }).catch(function() { cb([]); });
-}
-
-function dbFindCustomer(query, cb) {
-  dbGetCustomers(function(customers) {
-    var found = customers.find(function(c) {
-      return (!query.name || c.name === query.name) && (!query.email || c.email === query.email);
-    });
-    cb(found || null);
-  });
-}
-
-function dbAddCustomer(c, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon', null); return; }
-  c.id = c.id || ('c' + Date.now());
-  c.stamps = c.stamps || 0;
-  salonCol(id, 'customers').doc(c.id).set(c).then(function() {
-    if (cb) cb(null, c);
-  }).catch(function(e) { if (cb) cb(e, null); });
-}
-
-function dbUpdateCustomer(customerId, changes, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonCol(id, 'customers').doc(customerId).update(changes).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
-// –––––––––– stamps ––––––––––
-function dbAddStamp(customerId, count, cb) {
-  count = count || 1;
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  var ref = salonCol(id, 'customers').doc(customerId);
-  ref.get().then(function(doc) {
-    if (!doc.exists) { if (cb) cb('not found'); return; }
-    var cur = doc.data().stamps || 0;
-    return ref.update({ stamps: cur + count });
-  }).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
-function dbResetStamps(customerId, cb) {
-  dbUpdateCustomer(customerId, { stamps: 0 }, cb);
-}
-
-function dbGetStampCard(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb(Object.assign({}, DEFAULT_STAMP_CARD)); return; }
-  salonDoc(id).collection('config').doc('stampCard').get().then(function(doc) {
-    cb(doc.exists ? Object.assign({}, DEFAULT_STAMP_CARD, doc.data()) : Object.assign({}, DEFAULT_STAMP_CARD));
-  }).catch(function() { cb(Object.assign({}, DEFAULT_STAMP_CARD)); });
-}
-
-function dbSaveStampCard(sc, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonDoc(id).collection('config').doc('stampCard').set(sc).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
-// –––––––––– appointments ––––––––––
-function dbGetAppointments(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb([]); return; }
-  salonCol(id, 'appointments').orderBy('date').get().then(function(snap) {
-    var list = [];
-    snap.forEach(function(doc) { list.push(doc.data()); });
-    cb(list);
-  }).catch(function() { cb([]); });
-}
-
-function dbAddAppointment(a, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon', null); return; }
-  a.id = a.id || ('a' + Date.now());
-  salonCol(id, 'appointments').doc(a.id).set(a).then(function() {
-    if (cb) cb(null, a);
-  }).catch(function(e) { if (cb) cb(e, null); });
-}
-
-function dbUpdateAppointment(appointmentId, changes, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonCol(id, 'appointments').doc(appointmentId).update(changes).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
-function dbCancelAppointment(appointmentId, cb) {
-  dbUpdateAppointment(appointmentId, { status: 'cancelled' }, cb);
-}
-
-// –––––––––– closeBlocks ––––––––––
-function dbGetCloseBlocks(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb([]); return; }
-  salonCol(id, 'closeBlocks').get().then(function(snap) {
-    var list = [];
-    snap.forEach(function(doc) { list.push(doc.data()); });
-    cb(list);
-  }).catch(function() { cb([]); });
-}
-
-function dbAddCloseBlock(b, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon', null); return; }
-  b.id = b.id || ('b' + Date.now());
-  salonCol(id, 'closeBlocks').doc(b.id).set(b).then(function() {
-    if (cb) cb(null, b);
-  }).catch(function(e) { if (cb) cb(e, null); });
-}
-
-function dbDeleteCloseBlock(blockId, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonCol(id, 'closeBlocks').doc(blockId).delete().then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
-// –––––––––– cancelPolicy ––––––––––
-function dbGetCancelPolicy(cb) {
-  var id = getCurrentSalonId();
-  if (!id) { cb(Object.assign({}, DEFAULT_CANCEL_POLICY)); return; }
-  salonDoc(id).collection('config').doc('cancelPolicy').get().then(function(doc) {
-    cb(doc.exists ? Object.assign({}, DEFAULT_CANCEL_POLICY, doc.data()) : Object.assign({}, DEFAULT_CANCEL_POLICY));
-  }).catch(function() { cb(Object.assign({}, DEFAULT_CANCEL_POLICY)); });
-}
-
-function dbSaveCancelPolicy(p, cb) {
-  var id = getCurrentSalonId();
-  if (!id) { if (cb) cb('no salon'); return; }
-  salonDoc(id).collection('config').doc('cancelPolicy').set(p).then(function() {
-    if (cb) cb(null);
-  }).catch(function(e) { if (cb) cb(e); });
-}
-
-// –––––––––– 予約可能日範囲 ––––––––––
-function dbGetBookingDateRange(settings) {
-  var weeks = (settings && settings.bookingWeeks) || 8;
-  var today = new Date(); today.setHours(0, 0, 0, 0);
-  var last = new Date(today); last.setDate(today.getDate() + weeks * 7);
-  return { from: today, to: last, fromStr: fmtDate(today), toStr: fmtDate(last) };
-}
-
-// –––––––––– 予約可否チェック ––––––––––
-function canBook(dateStr, startMin, totalDur, excludeId, settings, appointments, closeBlocks, cb) {
-  var s = settings;
-  var a = appointments;
-  var bl = closeBlocks;
-  var endMin = startMin + totalDur;
-  var dow = new Date(dateStr).getDay();
-  var range = dbGetBookingDateRange(s);
-  if (dateStr < range.fromStr || dateStr > range.toStr) { cb({ ok: false, reason: '受付期間外' }); return; }
-  if (s.closedDows.indexOf(dow) >= 0) { cb({ ok: false, reason: '定休日' }); return; }
-  if (startMin < toMin(s.openTime)) { cb({ ok: false, reason: '営業時間外' }); return; }
-  if (endMin + s.intervalMin > toMin(s.closeTime)) { cb({ ok: false, reason: '閉店時間' }); return; }
-  var wc = s.weeklyClose || [];
-  for (var i = 0; i < wc.length; i++) {
-    if (wc[i].dow === dow) {
-      var ws = toMin(wc[i].start), we = toMin(wc[i].end);
-      if (startMin < we && endMin > ws) { cb({ ok: false, reason: '定期クローズ' }); return; }
-    }
-  }
-  for (var j = 0; j < bl.length; j++) {
-    if (bl[j].date === dateStr) {
-      var bs = toMin(bl[j].start), be = toMin(bl[j].end);
-      if (startMin < be && endMin > bs) { cb({ ok: false, reason: 'クローズ時間' }); return; }
-    }
-  }
-  for (var k = 0; k < a.length; k++) {
-    if (a[k].status !== 'active' && a[k].status !== 'visited') continue;
-    if (a[k].id === excludeId) continue;
-    if (a[k].date === dateStr) {
-      var as = toMin(a[k].start), ae = as + a[k].durationMin + a[k].intervalMin;
-      if (startMin < ae && endMin + s.intervalMin > as) { cb({ ok: false, reason: '予約済み' }); return; }
-    }
-  }
-  cb({ ok: true });
-}
-
-function hasAvailableSlot(dateStr, totalDur, excludeId, settings, appointments, closeBlocks) {
-  var s = settings, open = toMin(s.openTime), close = toMin(s.closeTime);
-  for (var m = open; m + totalDur + s.intervalMin <= close; m += s.slotMin) {
-    var result = { ok: false };
-    canBook(dateStr, m, totalDur, excludeId, settings, appointments, closeBlocks, function(r) { result = r; });
-    if (result.ok) return true;
-  }
-  return false;
-}
-
-// –––––––––– ユーティリティ ––––––––––
-function toMin(t) { var parts = t.split(':'); return Number(parts[0]) * 60 + Number(parts[1]); }
-function toTime(m) { return String(Math.floor(m / 60)).padStart(2, '0') + ':' + String(m % 60).padStart(2, '0'); }
-function fmtDate(d) {
-  return d.getFullYear() + '-' +
-    String(d.getMonth() + 1).padStart(2, '0') + '-' +
-    String(d.getDate()).padStart(2, '0');
-}
-
-// –––––––––– パスワードバリデーション ––––––––––
-function validatePassword(pw) {
-  if (!pw || pw.length < 8) return { ok: false, msg: '8文字以上で入力してください' };
-  if (!/[a-zA-Z]/.test(pw)) return { ok: false, msg: '英字を含めてください' };
-  if (!/[0-9]/.test(pw)) return { ok: false, msg: '数字を含めてください' };
-  return { ok: true };
-}
-
-// –––––––––– ログアウト ––––––––––
-function dbLogout() {
-  clearCurrentSalonId();
-  if (window.auth) window.auth.signOut();
-}
-
-// –––––––––– Firebase Authentication ––––––––––
-// サロン新規登録
-function dbAuthRegister(name, email, password, cb) {
-  window.auth.createUserWithEmailAndPassword(email, password)
-    .then(function(cred) {
-      var uid = cred.user.uid;
-      var salon = { id: uid, name: name, email: email };
-      var batch = window.db.batch();
-      batch.set(salonDoc(uid), salon);
-      batch.set(salonDoc(uid).collection('config').doc('settings'), DEFAULT_SETTINGS);
-      batch.set(salonDoc(uid).collection('config').doc('stampCard'), DEFAULT_STAMP_CARD);
-      batch.set(salonDoc(uid).collection('config').doc('cancelPolicy'), DEFAULT_CANCEL_POLICY);
-      DEFAULT_MENUS.forEach(function(m) {
-        batch.set(salonCol(uid, 'menus').doc(m.id), m);
-      });
-      return batch.commit().then(function() {
-        setCurrentSalonId(uid);
-        cred.user.sendEmailVerification();
-        if (cb) cb(null, salon);
-      });
-    })
-    .catch(function(e) {
-      var msg = 'エラーが発生しました';
-      if (e.code === 'auth/email-already-in-use') msg = 'このメールアドレスはすでに登録されています';
-      if (e.code === 'auth/invalid-email') msg = 'メールアドレスの形式が正しくありません';
-      if (e.code === 'auth/weak-password') msg = 'パスワードは6文字以上で入力してください';
-      if (cb) cb({ message: msg });
-    });
-}
-
-// サロンログイン
-function dbAuthLogin(email, password, cb) {
-  window.auth.signInWithEmailAndPassword(email, password)
-    .then(function(cred) {
-      var uid = cred.user.uid;
-      setCurrentSalonId(uid);
-      // Firestore 取得は 5秒でタイムアウトし、その場合は最小情報でログイン成功扱い
-      var done = false;
-      var timer = setTimeout(function() {
-        if (done) return;
-        done = true;
-        if (cb) cb(null, { id: uid, email: email, name: '' });
-      }, 5000);
-      salonDoc(uid).get().then(function(doc) {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        if (cb) cb(null, doc.exists ? doc.data() : { id: uid, email: email, name: '' });
-      }).catch(function() {
-        if (done) return;
-        done = true;
-        clearTimeout(timer);
-        if (cb) cb(null, { id: uid, email: email, name: '' });
-      });
-    })
-    .catch(function(e) {
-      if (cb) cb({ message: 'メールアドレスまたはパスワードが正しくありません' });
-    });
-}
-
-// パスワードリセットメール送信
-function dbAuthSendPasswordReset(email, cb) {
-  window.auth.sendPasswordResetEmail(email)
-    .then(function() { if (cb) cb(null); })
-    .catch(function(e) {
-      if (cb) cb({ message: 'メールアドレスが見つかりません' });
-    });
-}
-
-// 現在のユーザー
-function dbAuthGetCurrentUser() {
-  return window.auth ? window.auth.currentUser : null;
-}
-
-// 認証状態の変化を監視
-function dbAuthOnStateChanged(cb) {
-  if (window.auth) window.auth.onAuthStateChanged(cb);
-}
