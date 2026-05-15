@@ -2,12 +2,20 @@
 // TORITA Firestore Security Rules
 // 設計書 v6 (DESIGN.md セクション 3-3) 準拠
 // 作成: 2026/5/13 (Phase A-step1-1)
+// 修正: 2026/5/14 (Phase A-step2) isSalonStaff を owner固定方式に変更
 //
 // 設計方針:
 //   - Rules は「最低限の関所」
 //   - 認証チェック、フィールドホワイトリスト、型チェック、単純な値域チェックのみ
 //   - 複雑なロジック（営業時間、重複、価格計算）は Cloud Functions の責任
 //   - フィールドホワイトリストで顧客の不正書き込みを防ぐ
+//
+// 2026/5/14 変更点:
+//   - isSalonStaff() を exists() ベースから isSalonOwner() 代用に変更
+//   - 理由: staffs ドキュメントID を owner固定方式に統一したため、
+//     exists(.../staffs/{Auth UID}) は永遠に false になっていた
+//   - フェーズ1はスタッフ=オーナー1人なので isSalonStaff == isSalonOwner で正しい
+//   - フェーズ2で複数スタッフ対応時に exists() 版へ戻す（DESIGN_NOTES 段階移行方針）
 // ============================================================
 
 rules_version = '2';
@@ -30,12 +38,18 @@ service cloud.firestore {
     }
     
     // サロンに所属するスタッフか
-    // staffs/{request.auth.uid} ドキュメントが存在すれば所属スタッフ
-    // フェーズ1: staffs/owner だけ存在（オーナー本人）
-    // フェーズ2: staffs/{各スタッフのAuth UID} が増える
+    // ------------------------------------------------------------
+    // 【2026/5/14 修正】owner固定方式に統一
+    //   フェーズ1: staffs/owner の1ドキュメントだけ存在し、
+    //              そのオーナー = salonId 本人。
+    //              よって「スタッフか」は「オーナー本人か」と同値。
+    //   フェーズ2: 複数スタッフ対応時、ここを下記の exists() 版に戻す:
+    //     return isSignedIn() &&
+    //       exists(/databases/$(database)/documents/salons/$(salonId)/staffs/$(request.auth.uid));
+    //   （staffs/{各スタッフのAuth UID} ドキュメントが増える前提）
+    // ------------------------------------------------------------
     function isSalonStaff(salonId) {
-      return isSignedIn() && 
-             exists(/databases/$(database)/documents/salons/$(salonId)/staffs/$(request.auth.uid));
+      return isSalonOwner(salonId);
     }
     
     // ============================================================

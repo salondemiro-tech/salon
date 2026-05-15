@@ -11,7 +11,9 @@
  *   - functions/index.js onAppointmentCreate (Phase A-step1-3 で deploy 済み) と整合
  *
  * 主要な設計判断 (2026/5/14):
- *   - staffs ドキュメント ID は Auth UID (ルールの isSalonStaff() の exists() に従う)
+ *   - staffs ドキュメント ID は 'owner' 固定 (メモリ#22準拠)
+ *   - firestore.rules の isSalonStaff() は isSalonOwner() 代用に修正済み
+ *     (Auth UID == salonId 判定)。requireSalonStaff もこれに合わせた。
  *   - 予約の staffId フィールド値は 'owner' (Functions が確定するのでクライアントは送らない)
  *   - 顧客作成時 email 必須 (ルール 175-176 行)
  *   - 予約作成時 createdAt はクライアントから送らない (Functions に任せる)
@@ -40,7 +42,6 @@
   var _fbReady = false;
   var _readyCallbacks = [];
   var _urlSalonId = null;
-  var _staffCheckCache = {};
 
   // ============================================================
   // URL パラメータ ?salon=xxx 解析 (即時実行)
@@ -116,7 +117,6 @@
       return;
     }
     firebase.auth().onAuthStateChanged(function (user) {
-      _staffCheckCache = {};
       if (!_fbReady) {
         _fbReady = true;
         var cbs = _readyCallbacks;
@@ -204,7 +204,16 @@
   // ============================================================
 
   // ログイン中ユーザが現在の salonId のスタッフか
-  // 判定: salons/{salonId}/staffs/{Auth UID} が存在するか
+  // ------------------------------------------------------------
+  // 【2026/5/14 owner固定方式】判定: Auth UID == salonId
+  //   firestore.rules の isSalonStaff() が isSalonOwner() 代用に
+  //   修正されたため、クライアント側も同じロジックに揃える。
+  //   フェーズ1はスタッフ=オーナー1人なので UID==salonId で正しい。
+  //   旧実装は staffs/{Auth UID} を exists で見ていたが、staffs の
+  //   ドキュメントID が 'owner' 固定になったため永遠に false になる
+  //   バグがあった。exists() の Firestore 読み取り(1read課金)も削減。
+  //   フェーズ2で複数スタッフ対応時、staffs/{Auth UID} の get() に戻す。
+  // ------------------------------------------------------------
   function requireSalonStaff(cb) {
     onFbReady(function () {
       var uid = getCurrentUserUid();
@@ -213,22 +222,7 @@
         _safeCb(cb, false);
         return;
       }
-      var cacheKey = sid + '|' + uid;
-      if (_staffCheckCache.hasOwnProperty(cacheKey)) {
-        _safeCb(cb, _staffCheckCache[cacheKey]);
-        return;
-      }
-      _db().collection('salons').doc(sid)
-        .collection('staffs').doc(uid).get()
-        .then(function (snap) {
-          var ok = snap.exists;
-          _staffCheckCache[cacheKey] = ok;
-          _safeCb(cb, ok);
-        })
-        .catch(function (err) {
-          _logErr('requireSalonStaff', err);
-          _safeCb(cb, false);
-        });
+      _safeCb(cb, uid === sid);
     });
   }
   window.requireSalonStaff = requireSalonStaff;
@@ -702,9 +696,7 @@
 
   window._sharedDbDebug = {
     getUrlSalonId: function () { return _urlSalonId; },
-    getReadyState: function () { return _fbReady; },
-    getStaffCache: function () { return _staffCheckCache; },
-    clearStaffCache: function () { _staffCheckCache = {}; }
+    getReadyState: function () { return _fbReady; }
   };
 
   console.log('[shared_db] loaded. urlSalonId =', _urlSalonId);
