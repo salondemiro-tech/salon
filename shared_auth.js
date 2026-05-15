@@ -1,10 +1,16 @@
 /*
- * shared_auth.js  -  TORITA Phase A-step2 / A-5
+ * shared_auth.js  -  TORITA Phase A-step2 / A-5 + A-8
  * 作成: 2026/5/14
  *
  * 役割:
  *   認証層。サロンオーナーと顧客のログイン・新規登録・ログアウト・
  *   パスワードリセットを担当する。Firebase Auth (compat) のラッパー。
+ *
+ *   ※ A-8 (データ構造の初期化スクリプト) も本ファイルに統合済み。
+ *     authSalonRegister() が WriteBatch で6ドキュメントを一括作成する。
+ *     設計書 A-8 にファイル名指定がないこと、A-5 の続きとして読まれる
+ *     前提であること、ルール8のファイル分割リストに salon_init.js が
+ *     ないことから、案1 (組み込み) で実装。
  *
  * 設計準拠:
  *   - DESIGN.md v6 セクション 3 (認証の設計), A-5, A-8
@@ -13,7 +19,12 @@
  *
  * 主要な設計判断 (2026/5/14):
  *   - staffs ドキュメント ID は 'owner' 固定 (メモリ#22準拠)
- *   - オーナー登録時に salons/{uid}/staffs/owner を自動作成する
+ *   - オーナー登録時に WriteBatch で6ドキュメントを一括作成
+ *     (info, staffs/owner, resources/default, config/settings,
+ *      config/cancelPolicy, config/stampCard)
+ *   - 「全部成功か、全部失敗か」を Firestore のアトミック性で保証
+ *   - 初期値は旧画面 (business_hours_v6, cancel_policy_v3, stamp_settings)
+ *     と完全一致するフィールド構造
  *   - firestore.rules の isSalonStaff() は isSalonOwner() 代用なので、
  *     staffs/owner ドキュメントはルール判定には使われないが、
  *     フェーズ2への布石として最初から作っておく (設計書 A-5/A-8 準拠)
@@ -39,7 +50,7 @@
  *
  * 公開 window 関数:
  *   サロンオーナー:
- *     authSalonRegister(email, password, salonName, cb)
+ *     authSalonRegister(email, password, salonName, cb)  ← A-5+A-8 統合
  *     authSalonLogin(email, password, cb)
  *     authSalonResendVerification(cb)
  *
@@ -156,23 +167,123 @@
   }
 
   // ============================================================
-  // サロンオーナー: 新規登録
+  // サロンオーナー: 新規登録 + A-8 初期化スクリプト統合版
   //
   // フロー (設計書 3-1, A-5, A-8):
   //   1. Firebase Auth でメール+パスワードのアカウント作成
   //   2. createUserWithEmailAndPassword の結果、Auth UID が発行される
   //      この Auth UID = salonId
   //   3. sendEmailVerification で確認メール送信
-  //   4. salons/{uid} (info) ドキュメント作成
-  //   5. salons/{uid}/staffs/owner ドキュメント作成
-  //   注: この時点ではまだ emailVerified=false。
-  //       4-5 の書き込みは「ログイン直後の本人」として実行されるので
-  //       ルール上は isSalonOwner(salonId) を満たす (request.auth.uid == salonId)。
+  //   4. WriteBatch で 6 ドキュメントを一括書き込み:
+  //        salons/{uid}                          (サロン基本情報)
+  //        salons/{uid}/staffs/owner             (オーナーをスタッフとして)
+  //        salons/{uid}/resources/default        (デフォルト設備)
+  //        salons/{uid}/config/settings          (営業時間など、旧画面と同構造)
+  //        salons/{uid}/config/cancelPolicy      (キャンセル規定、旧画面と同構造)
+  //        salons/{uid}/config/stampCard         (スタンプカード、enabled:false)
+  //      WriteBatch なので「全部成功か、全部失敗か」が保証される。
   //
-  // 注意: config / resources などの残りの初期化は A-8 の初期化スクリプト
-  //       (別ファイル or salon_register 画面) が担当する。
-  //       このファイルでは「認証 + info + staffs/owner」までを責務とする。
+  //   注: この時点ではまだ emailVerified=false。書き込みは「ログイン直後の本人」
+  //       として実行されるので、ルール上は isSalonOwner(salonId) を満たす
+  //       (request.auth.uid == salonId)。
+  //
+  // 設計書との対応:
+  //   A-5 (868行) -> Firebase Auth 登録 + sendEmailVerification
+  //   A-8 (883行) -> 6 ドキュメント一括作成 (このファイルに統合)
+  //
+  // 初期値の方針 (2026/5/14 確定):
+  //   - 登録直後に予約画面を開いても最低限動くデフォルト値を入れる
+  //   - 営業時間 10:00-19:00、定休日なし、休憩なし
+  //   - 予約スロット 30 分、インターバル 30 分、閉店に含めない
+  //   - 直前予約 same1h、キャンセル前日24時まで、予約 8 週間先まで
+  //   - キャンセル規定文は空、料率 3 段階(前日50%/当日100%/無断100%)
+  //   - スタンプカード OFF (オーナーが設定画面で ON にする)
+  //
+  // フィールド構成は旧画面 (business_hours_v6 / cancel_policy_v3 /
+  // stamp_settings) と完全一致。新TORITAの設定画面 C-6/C-7/C-8 でも
+  // この構造をそのまま読み書きする。
   // ============================================================
+
+  // 初期化用のデフォルト値ビルダ (テスト容易性のため関数化)
+  function _buildInitialSalonDoc(salonName, email) {
+    return {
+      name: String(salonName),
+      email: String(email),
+      createdAt: _serverTimestamp(),
+      plan: 'phase1'
+    };
+  }
+
+  function _buildInitialStaffOwnerDoc(salonName, email) {
+    return {
+      name: String(salonName),
+      role: 'owner',
+      email: String(email),
+      active: true,
+      createdAt: _serverTimestamp()
+    };
+  }
+
+  function _buildInitialResourceDefaultDoc() {
+    // ルール: keys hasOnly [name,type,active,createdAt], hasAll [name,active]
+    // type は省略可だがフェーズ2への布石として 'default' を入れておく
+    return {
+      name: 'メイン施術スペース',
+      type: 'default',
+      active: true,
+      createdAt: _serverTimestamp()
+    };
+  }
+
+  // 営業時間設定 (旧画面 business_hours_v6 と完全一致)
+  function _buildInitialConfigSettings() {
+    return {
+      openTime: '10:00',         // 開店
+      closeTime: '19:00',        // 閉店
+      intervalMin: 30,           // 準備インターバル (分)
+      intervalInClose: false,    // インターバルを閉店時間に含めるか
+      slotMin: 30,               // 予約スロット間隔 (5/10/15/30)
+      lastMin: 'same1h',         // 直前予約期限 (当日1時間前)
+      deadline: '前日24時まで',   // キャンセル受付期限
+      closedDows: [],            // 定休日 (0=日,1=月,...,6=土) 初期は定休なし
+      weeklyClose: [],           // 毎週の定期クローズ [{dow,start,end}]
+      bookingWeeks: 8,           // 予約受付期間 (週)
+      createdAt: _serverTimestamp(),
+      updatedAt: _serverTimestamp()
+    };
+  }
+
+  // キャンセル規定 (旧画面 cancel_policy_v3 と完全一致)
+  function _buildInitialConfigCancelPolicy() {
+    return {
+      text: '',                  // 規定文 (オーナーが C-7 画面で記入)
+      showOnBook: true,          // 予約時に表示
+      showOnCancel: true,        // キャンセル時に表示
+      rates: [                   // 料率 3 段階
+        { label: '前日から', percent: 50 },
+        { label: '当日', percent: 100 },
+        { label: '無断キャンセル', percent: 100 }
+      ],
+      qrUrl: '',                 // 決済QR/URL (オーナーが入力)
+      qrMsg: '',                 // 自動送信メッセージ本文 (オーナーが入力)
+      createdAt: _serverTimestamp(),
+      updatedAt: _serverTimestamp()
+    };
+  }
+
+  // スタンプカード (旧画面 stamp_settings と完全一致)
+  function _buildInitialConfigStampCard() {
+    return {
+      enabled: false,            // 機能OFFで開始 (オーナーが C-8 画面でON)
+      goal: 10,                  // ゴール (何個で特典)
+      reward: '',                // ゴール特典 (オーナーが入力)
+      bonusStamps: [],           // 途中ボーナス [{at, reward}]
+      color: '#b5845a',          // スタンプ色 (デフォルト accent)
+      expiry: 'none',            // 有効期限 ('3m'/'6m'/'12m'/'none')
+      createdAt: _serverTimestamp(),
+      updatedAt: _serverTimestamp()
+    };
+  }
 
   function authSalonRegister(email, password, salonName, cb) {
     if (!_validEmail(email)) {
@@ -196,32 +307,51 @@
     _auth().createUserWithEmailAndPassword(email, password)
       .then(function (cred) {
         createdUid = cred.user.uid;
-        // 確認メール送信
+        // 確認メール送信 (失敗しても登録自体は続行したいので
+        // 結果の成否は気にしない: メール再送機能で救える)
         return cred.user.sendEmailVerification();
       })
       .then(function () {
-        // salons/{uid} info ドキュメント作成
-        // ルール: keys hasOnly [name,email,phone,address,createdAt,plan]
-        //         hasAll [name,email,createdAt]
-        return _db().collection('salons').doc(createdUid).set({
-          name: String(salonName),
-          email: String(email),
-          createdAt: _serverTimestamp(),
-          plan: 'phase1'
-        });
-      })
-      .then(function () {
-        // salons/{uid}/staffs/owner ドキュメント作成
-        // ルール: keys hasOnly [name,role,email,active,createdAt]
-        //         hasAll [name,role,active], role in ['owner','staff'], active is bool
-        return _db().collection('salons').doc(createdUid)
-          .collection('staffs').doc('owner').set({
-            name: String(salonName),
-            role: 'owner',
-            email: String(email),
-            active: true,
-            createdAt: _serverTimestamp()
-          });
+        // 6 ドキュメントを WriteBatch で一括書き込み
+        // 「全部成功か、全部失敗か」が Firestore で保証される
+        var db = _db();
+        var salonRef = db.collection('salons').doc(createdUid);
+        var batch = db.batch();
+
+        // 1. salons/{uid}
+        batch.set(salonRef, _buildInitialSalonDoc(salonName, email));
+
+        // 2. salons/{uid}/staffs/owner
+        batch.set(
+          salonRef.collection('staffs').doc('owner'),
+          _buildInitialStaffOwnerDoc(salonName, email)
+        );
+
+        // 3. salons/{uid}/resources/default
+        batch.set(
+          salonRef.collection('resources').doc('default'),
+          _buildInitialResourceDefaultDoc()
+        );
+
+        // 4. salons/{uid}/config/settings
+        batch.set(
+          salonRef.collection('config').doc('settings'),
+          _buildInitialConfigSettings()
+        );
+
+        // 5. salons/{uid}/config/cancelPolicy
+        batch.set(
+          salonRef.collection('config').doc('cancelPolicy'),
+          _buildInitialConfigCancelPolicy()
+        );
+
+        // 6. salons/{uid}/config/stampCard
+        batch.set(
+          salonRef.collection('config').doc('stampCard'),
+          _buildInitialConfigStampCard()
+        );
+
+        return batch.commit();
       })
       .then(function () {
         _safeCb(cb, _ok({
@@ -232,10 +362,22 @@
         }));
       })
       .catch(function (err) {
-        // 注: Auth アカウントだけ作られて Firestore 書き込みが失敗した場合、
-        //     中途半端な状態が残りうる。フェーズ1では「再登録時に
-        //     email-already-in-use になったらログインを案内」で吸収する。
-        //     本格的なロールバックは A-8 初期化スクリプト側で扱う。
+        // 想定される失敗:
+        //   - email-already-in-use (Auth 段階): batch 未実行なのでクリーン
+        //   - WriteBatch 失敗 (権限/通信): Auth アカウントは作成済みだが
+        //     Firestore は WriteBatch のアトミック性により「何も書かれていない」状態
+        //   - sendEmailVerification 失敗のみ: 上の .then で握りつぶしているので
+        //     ここには到達しない (確認メール再送機能で救える)
+        //
+        // 中途半端な状態:
+        //   Auth アカウントだけ存在し、Firestore に salons/{uid} がない状態が
+        //   残る可能性がある。この場合、同じメールで再登録しようとすると
+        //   email-already-in-use エラーになる。フェーズ1では:
+        //     - 画面側で「ログインを試してください、ダメなら再送メール」
+        //       で吸収する
+        //     - もしくは管理画面の運用で Auth アカウントを手動削除して再登録
+        //   フェーズ2 or 販売後に「Firestore に salons/{uid} がない Auth ユーザを
+        //   検出してログイン時に初期化リトライ」する仕組みを足す。
         _safeCb(cb, _errResult(err, 'authSalonRegister'));
       });
   }
