@@ -16,6 +16,11 @@
 //     exists(.../staffs/{Auth UID}) は永遠に false になっていた
 //   - フェーズ1はスタッフ=オーナー1人なので isSalonStaff == isSalonOwner で正しい
 //   - フェーズ2で複数スタッフ対応時に exists() 版へ戻す（DESIGN_NOTES 段階移行方針）
+//
+// 2026/5/15 変更点:
+//   - menus のホワイトリストに sortOrder を追加（int >= 0、省略可）
+//   - 理由: メニュー設定画面で上下ボタンによる並び替えを実装するため
+//   - shared_db_menu.js が sortOrder の付与と入れ替えを担当
 // ============================================================
 
 rules_version = '2';
@@ -148,7 +153,7 @@ service cloud.firestore {
                           'eligibleStaffIds', 'requiredResourceIds',
                           'intervalBefore', 'intervalAfter',
                           'description', 'contraindications',
-                          'photoUrl', 'createdAt'
+                          'photoUrl', 'sortOrder', 'createdAt'
                         ]) &&
                         request.resource.data.keys().hasAll([
                           'name', 'duration', 'price', 'type', 'public',
@@ -162,7 +167,10 @@ service cloud.firestore {
                         request.resource.data.type in ['main', 'option'] &&
                         request.resource.data.public is bool &&
                         request.resource.data.eligibleStaffIds is list &&
-                        request.resource.data.requiredResourceIds is list;
+                        request.resource.data.requiredResourceIds is list &&
+                        (!('sortOrder' in request.resource.data) ||
+                          (request.resource.data.sortOrder is int &&
+                           request.resource.data.sortOrder >= 0));
         
         allow update: if isSalonStaff(salonId);
         allow delete: if isSalonOwner(salonId);
