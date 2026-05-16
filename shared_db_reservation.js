@@ -783,15 +783,500 @@
   window.reservationUpdateBySalon = reservationUpdateBySalon;
 
   // ============================================================
+  // Phase B-5: 予約可能時間の3次元計算 (時間 × スタッフ × 設備)
+  //
+  // 設計準拠:
+  //   - DESIGN.md v6 セクション 0-2 (3次元予約モデル / 9つの設計ルール
+  //     特にルール4「予約可能時間の計算ロジックをスタッフ×設備の空きで書く」、
+  //     ルール5「インターバルを最初から考慮」), 7 Phase B (B-5)
+  //   - DESIGN_NOTES.md 項目 2 (これは UI 用の早期判定。最終確定は
+  //     Functions onAppointmentCreate。クライアント判定だけを信用しない)
+  //
+  // 設計書 B-5 のロジック (DESIGN.md 908行〜) を 1対1 で実装:
+  //   入力: メニューID, 日付, 既存予約一覧, スタッフ一覧, 設備一覧, シフト
+  //   出力: 予約可能な時間枠リスト
+  //   手順:
+  //     1. メニューの eligibleStaffIds から候補スタッフを抽出
+  //     2. メニューの requiredResourceIds から必要設備を抽出
+  //     3. 各時間枠について:
+  //        - 候補スタッフのうち、その時間に予約が無いスタッフがいるか
+  //        - 必要設備のうち、その時間に予約が無い設備が確保できるか
+  //        - スタッフのシフト内か (フェーズ1は営業時間=シフト)
+  //        - インターバル時間も加味
+  //     4. 両方OKな時間枠だけ返す
+  //
+  // フェーズ1の固定値 (設計書 0-2):
+  //   - 候補スタッフ = メニューの eligibleStaffIds (常に ['owner'])
+  //   - 必要設備     = メニューの requiredResourceIds (常に ['default'])
+  //   - シフト       = 営業時間 settings.openTime〜closeTime
+  //                    (calendarGetBusinessHours で休憩 weeklyClose も取得)
+  //   ただしロジックは配列を総当たりする3次元構造で書く。
+  //   フェーズ2でスタッフ/設備が増えても、この関数は一切変更不要。
+  //
+  // 責務境界 (DESIGN_NOTES 項目2):
+  //   ここでやるのは「UI に予約可能スロットを出すための事前計算」のみ。
+  //   実際に予約が成立するかは Functions onAppointmentCreate が再検証する。
+  // ============================================================
+
+  // 予約スロットの開始時刻刻み幅 (分)。
+  // フェーズ1は 15 分刻み。将来 settings.slotInterval で上書き可能にする
+  // 余地を残すが、現状は固定。
+  var RESERVATION_SLOT_STEP_MIN = 15;
+  window.RESERVATION_SLOT_STEP_MIN = RESERVATION_SLOT_STEP_MIN;
+
+  // ------------------------------------------------------------
+  // 内部: 配列ヘルパー (ES5、Array.indexOf は IE9+ で可だが念のため自前)
+  // ------------------------------------------------------------
+  function _arrIncludes(arr, val) {
+    if (!arr || !arr.length) { return false; }
+    var i;
+    for (i = 0; i < arr.length; i++) {
+      if (arr[i] === val) { return true; }
+    }
+    return false;
+  }
+
+  // ------------------------------------------------------------
+  // 内部: 予約 a が time区間 [qStart, qEnd) (分) と重なるか
+  //   キャンセル済み / no_show は対象外。
+  //   a は { start:"HH:MM", end:"HH:MM", status } または
+  //        { startAt, endAt, status }。
+  //   intervalBefore/After を考慮するため、予約の占有区間を
+  //   [aStart - aIntervalBefore, aEnd + aIntervalAfter) で見る…のは
+  //   本来 Functions の責務。ここでは保存済み end が既に
+  //   intervalAfter 込み (Functions が確定) という前提で素直に重なり判定する。
+  // ------------------------------------------------------------
+  function _apptOverlaps(a, qStart, qEnd) {
+    if (!a) { return false; }
+    if (a.status === 'cancelled' || a.status === 'no_show') {
+      return false;
+    }
+    var aStart = null, aEnd = null;
+    if (typeof a.start === 'string') {
+      aStart = reservationParseTime(a.start);
+    }
+    if (typeof a.end === 'string') {
+      aEnd = reservationParseTime(a.end);
+    }
+    if ((aStart === null || aEnd === null) && a.startAt && a.endAt) {
+      try {
+        var sd = (typeof a.startAt.toDate === 'function')
+                 ? a.startAt.toDate() : new Date(a.startAt);
+        var ed = (typeof a.endAt.toDate === 'function')
+                 ? a.endAt.toDate() : new Date(a.endAt);
+        aStart = sd.getHours() * 60 + sd.getMinutes();
+        aEnd = ed.getHours() * 60 + ed.getMinutes();
+      } catch (e) {
+        return false;
+      }
+    }
+    if (aStart === null || aEnd === null) { return false; }
+    // 区間 [qStart, qEnd) と [aStart, aEnd) の重なり
+    return (qStart < aEnd && aStart < qEnd);
+  }
+
+  // ------------------------------------------------------------
+  // 内部: 指定スタッフ staffId が区間 [qStart,qEnd) に空いているか
+  //   appts のうち staffId が一致する予約と重ならなければ true。
+  //   フェーズ1では予約の staffId は全て 'owner'。
+  // ------------------------------------------------------------
+  function _isStaffFree(staffId, qStart, qEnd, appts) {
+    if (!appts || !appts.length) { return true; }
+    var i;
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      if (!a) { continue; }
+      // a.staffId 未設定 (pendingCreate 前) は owner 扱いで安全側に倒す
+      var aStaff = a.staffId ? a.staffId : 'owner';
+      if (aStaff !== staffId) { continue; }
+      if (_apptOverlaps(a, qStart, qEnd)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------
+  // 内部: 指定設備 resourceId が区間 [qStart,qEnd) に空いているか
+  //   appts のうち resourceIds に resourceId を含む予約と
+  //   重ならなければ true。フェーズ1では resourceIds は ['default']。
+  // ------------------------------------------------------------
+  function _isResourceFree(resourceId, qStart, qEnd, appts) {
+    if (!appts || !appts.length) { return true; }
+    var i;
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      if (!a) { continue; }
+      var aRes = a.resourceIds;
+      // resourceIds 未設定 (pendingCreate 前) は ['default'] 扱い
+      if (!aRes || !aRes.length) { aRes = ['default']; }
+      if (!_arrIncludes(aRes, resourceId)) { continue; }
+      if (_apptOverlaps(a, qStart, qEnd)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------
+  // 内部: 区間 [qStart,qEnd) が営業時間内かつ休憩(weeklyClose)と
+  //   重ならないか。bh = calendarGetBusinessHours の戻り値
+  //   { openTime, closeTime, isOpen, weeklyCloses:[{start,end}] }
+  // ------------------------------------------------------------
+  function _isWithinShift(qStart, qEnd, bh) {
+    if (!bh || !bh.isOpen) { return false; }
+    var openMin = reservationParseTime(bh.openTime);
+    var closeMin = reservationParseTime(bh.closeTime);
+    if (openMin === null || closeMin === null) { return false; }
+    if (qStart < openMin || qEnd > closeMin) { return false; }
+    // 休憩時間帯と重ならないこと
+    if (bh.weeklyCloses && bh.weeklyCloses.length) {
+      var i;
+      for (i = 0; i < bh.weeklyCloses.length; i++) {
+        var wc = bh.weeklyCloses[i];
+        if (!wc) { continue; }
+        var ws = reservationParseTime(wc.start);
+        var we = reservationParseTime(wc.end);
+        if (ws === null || we === null) { continue; }
+        if (qStart < we && ws < qEnd) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  // ------------------------------------------------------------
+  // 内部: closeBlocks (臨時休業) と区間が重ならないか
+  //   closeBlocks の各要素は { date:"YYYY-MM-DD", start?, end?, allDay? }
+  //   想定 (旧v8互換)。allDay または start/end 無しは終日休業扱い。
+  //   dateKey 一致のものだけを渡す前提だが、念のため date も照合する。
+  // ------------------------------------------------------------
+  function _hitsCloseBlock(qStart, qEnd, dateKey, closeBlocks) {
+    if (!closeBlocks || !closeBlocks.length) { return false; }
+    var i;
+    for (i = 0; i < closeBlocks.length; i++) {
+      var cb2 = closeBlocks[i];
+      if (!cb2) { continue; }
+      if (cb2.date && cb2.date !== dateKey) { continue; }
+      // 終日休業
+      if (cb2.allDay === true ||
+          (typeof cb2.start !== 'string' && typeof cb2.end !== 'string')) {
+        return true;
+      }
+      var cs = (typeof cb2.start === 'string')
+               ? reservationParseTime(cb2.start) : null;
+      var ce = (typeof cb2.end === 'string')
+               ? reservationParseTime(cb2.end) : null;
+      if (cs === null || ce === null) {
+        // 時刻不正なら安全側 (終日休業扱い)
+        return true;
+      }
+      if (qStart < ce && cs < qEnd) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // ------------------------------------------------------------
+  // 内部: 1メニュー分の所要時間 (分) を計算
+  //   menu.duration + sum(optionMenus.duration) + intervalBefore +
+  //   intervalAfter。
+  //   ※ 表示用見込み。最終確定は Functions。
+  // ------------------------------------------------------------
+  function _calcServiceMinutes(menu, optionMenus) {
+    if (!menu || !_isPositiveInt(menu.duration) || menu.duration <= 0) {
+      return null;
+    }
+    var total = menu.duration;
+    var ivB = _isPositiveInt(menu.intervalBefore) ? menu.intervalBefore : 0;
+    var ivA = _isPositiveInt(menu.intervalAfter) ? menu.intervalAfter : 0;
+    total += ivB + ivA;
+    if (optionMenus && optionMenus.length) {
+      var i;
+      for (i = 0; i < optionMenus.length; i++) {
+        var om = optionMenus[i];
+        if (om && _isPositiveInt(om.duration) && om.duration > 0) {
+          total += om.duration;
+        }
+      }
+    }
+    return total;
+  }
+
+  // ------------------------------------------------------------
+  // reservationCalcAvailableSlotsSync(params)  ← 同期版 (本体)
+  //
+  // データを既に取得済みのとき (dbLoadCustomerBooking の戻り値など)
+  // この同期版を直接呼べる。UI の再描画で何度も呼ばれても DB を
+  // 叩かないので軽い。
+  //
+  // params = {
+  //   dateKey:      "2026-05-14",          (必須)
+  //   menu:         { duration, intervalBefore, intervalAfter,
+  //                   eligibleStaffIds, requiredResourceIds },  (必須)
+  //   optionMenus:  [ { duration }, ... ],  (任意)
+  //   appointments: [ 既存予約... ],         (任意、無ければ [])
+  //   staffs:       [ { _id, ... }, ... ],   (任意、無ければ menu.eligible から)
+  //   resources:    [ { _id, ... }, ... ],   (任意)
+  //   settings:     config/settings ドキュメント (営業時間),  (必須)
+  //   closeBlocks:  [ 臨時休業... ],          (任意)
+  //   slotStepMin:  15                       (任意、既定 15)
+  // }
+  //
+  // 戻り値: {
+  //   ok: true,
+  //   slots: [ { start:"10:00", end:"11:00",
+  //              staffId:"owner", resourceIds:["default"] }, ... ],
+  //   serviceMinutes: 90
+  // }
+  // または { ok:false, code, message }
+  // ------------------------------------------------------------
+  function reservationCalcAvailableSlotsSync(params) {
+    if (!params || typeof params !== 'object') {
+      return _errResult('bad_params', 'params is required');
+    }
+    if (!_isYYYYMMDD(params.dateKey)) {
+      return _errResult('bad_dateKey', 'dateKey must be YYYY-MM-DD');
+    }
+    var menu = params.menu;
+    if (!menu || !_isPositiveInt(menu.duration) || menu.duration <= 0) {
+      return _errResult('bad_menu', 'menu.duration is required (> 0)');
+    }
+
+    var serviceMin = _calcServiceMinutes(menu, params.optionMenus);
+    if (serviceMin === null || serviceMin <= 0) {
+      return _errResult('bad_duration', 'cannot compute service minutes');
+    }
+
+    // 1. 候補スタッフ抽出 (設計書 B-5 手順1)
+    //    メニューの eligibleStaffIds。未設定ならフェーズ1の ['owner']。
+    var eligibleStaffIds = (menu.eligibleStaffIds && menu.eligibleStaffIds.length)
+                            ? menu.eligibleStaffIds : ['owner'];
+
+    // 2. 必要設備抽出 (設計書 B-5 手順2)
+    //    メニューの requiredResourceIds。未設定なら ['default']。
+    var requiredResourceIds = (menu.requiredResourceIds && menu.requiredResourceIds.length)
+                               ? menu.requiredResourceIds : ['default'];
+
+    // 営業時間 (= フェーズ1のシフト)。calendar.js があれば委譲。
+    var bh;
+    if (typeof window.calendarGetBusinessHours === 'function') {
+      bh = window.calendarGetBusinessHours(params.dateKey, params.settings);
+    } else {
+      // フォールバック: settings から直接組む
+      var s = params.settings || {};
+      bh = {
+        openTime: s.openTime || '10:00',
+        closeTime: s.closeTime || '19:00',
+        isOpen: true,
+        weeklyCloses: []
+      };
+    }
+    if (!bh || !bh.isOpen) {
+      // 定休日 → 空スロット
+      return _ok({ slots: [], serviceMinutes: serviceMin });
+    }
+
+    var openMin = reservationParseTime(bh.openTime);
+    var closeMin = reservationParseTime(bh.closeTime);
+    if (openMin === null || closeMin === null || openMin >= closeMin) {
+      return _errResult('bad_hours', 'invalid business hours');
+    }
+
+    var step = _isPositiveInt(params.slotStepMin) && params.slotStepMin > 0
+               ? params.slotStepMin : RESERVATION_SLOT_STEP_MIN;
+
+    var appts = params.appointments || [];
+    var closeBlocks = params.closeBlocks || [];
+
+    var slots = [];
+    var t;
+    // 3. 各時間枠を総当たり (設計書 B-5 手順3)
+    for (t = openMin; t + serviceMin <= closeMin; t += step) {
+      var qStart = t;
+      var qEnd = t + serviceMin;
+
+      // シフト内か (営業時間 + 休憩 weeklyClose)
+      if (!_isWithinShift(qStart, qEnd, bh)) {
+        continue;
+      }
+      // 臨時休業と重ならないか
+      if (_hitsCloseBlock(qStart, qEnd, params.dateKey, closeBlocks)) {
+        continue;
+      }
+
+      // 候補スタッフのうち、その時間に空いている人を1人探す (3次元: スタッフ軸)
+      var chosenStaff = null;
+      var si;
+      for (si = 0; si < eligibleStaffIds.length; si++) {
+        var stf = eligibleStaffIds[si];
+        if (_isStaffFree(stf, qStart, qEnd, appts)) {
+          chosenStaff = stf;
+          break;
+        }
+      }
+      if (chosenStaff === null) {
+        continue; // どのスタッフも埋まっている
+      }
+
+      // 必要設備が全て確保できるか (3次元: 設備軸)
+      // フェーズ1では requiredResourceIds=['default'] 固定だが、
+      // 複数設備が必要なメニューでも全部空いていることを要求する。
+      var allResOk = true;
+      var ri;
+      for (ri = 0; ri < requiredResourceIds.length; ri++) {
+        var res = requiredResourceIds[ri];
+        if (!_isResourceFree(res, qStart, qEnd, appts)) {
+          allResOk = false;
+          break;
+        }
+      }
+      if (!allResOk) {
+        continue; // 必要な設備が埋まっている
+      }
+
+      // 4. スタッフも設備も両方OK → 予約可能スロット
+      var startLabel = reservationFormatTime(qStart);
+      var endLabel = reservationFormatTime(qEnd);
+      if (startLabel === null || endLabel === null) {
+        continue;
+      }
+      slots.push({
+        start: startLabel,
+        end: endLabel,
+        staffId: chosenStaff,
+        resourceIds: requiredResourceIds.slice(0)
+      });
+    }
+
+    return _ok({ slots: slots, serviceMinutes: serviceMin });
+  }
+  window.reservationCalcAvailableSlotsSync = reservationCalcAvailableSlotsSync;
+
+  // ------------------------------------------------------------
+  // reservationCalcAvailableSlots(params, cb)  ← 非同期版 (DB取得込み)
+  //
+  // 設計書 B-5 の「入力: メニューID, 日付, ...」をそのまま受け取り、
+  // 足りないデータ (既存予約 / settings / closeBlocks 等) を
+  // shared_db_calendar.js の calendarLoadDay 経由でまとめて取得してから
+  // 同期計算に渡す。
+  //
+  // params = {
+  //   dateKey:     "2026-05-14",   (必須)
+  //   menuId:      "m1",           (必須。menu を直接渡すなら menu でも可)
+  //   menu:        {...},          (任意。あれば menuId 取得をスキップ)
+  //   optionMenuIds: ["m4"],       (任意)
+  //   slotStepMin: 15              (任意)
+  // }
+  //
+  // cb(result):
+  //   成功: { ok:true, slots:[...], serviceMinutes:N }
+  //   失敗: { ok:false, code, message }
+  //
+  // 注 (DESIGN_NOTES 項目2): これは UI 表示用の事前計算。
+  //     予約の最終成立は Functions onAppointmentCreate が再検証する。
+  // ------------------------------------------------------------
+  function reservationCalcAvailableSlots(params, cb) {
+    if (!params || !_isYYYYMMDD(params.dateKey)) {
+      _safeCb(cb, _errResult('bad_dateKey', 'dateKey must be YYYY-MM-DD'));
+      return;
+    }
+    if (!params.menu && !params.menuId) {
+      _safeCb(cb, _errResult('bad_menu', 'menuId or menu is required'));
+      return;
+    }
+
+    var dateKey = params.dateKey;
+
+    // ステップ1: 日次データ (settings / appointments / closeBlocks) を取得
+    function _withDayData(dayBundle) {
+      var settings = dayBundle ? dayBundle.settings : null;
+      var appointments = dayBundle ? (dayBundle.appointments || []) : [];
+      var closeBlocks = dayBundle ? (dayBundle.closeBlocks || []) : [];
+
+      // ステップ2: メニュー本体を用意
+      function _withMenu(menuObj) {
+        if (!menuObj) {
+          _safeCb(cb, _errResult('menu_not_found', 'menu not found'));
+          return;
+        }
+        // オプションメニュー解決
+        function _withOptions(optionMenus) {
+          var sync = reservationCalcAvailableSlotsSync({
+            dateKey: dateKey,
+            menu: menuObj,
+            optionMenus: optionMenus || [],
+            appointments: appointments,
+            settings: settings,
+            closeBlocks: closeBlocks,
+            slotStepMin: params.slotStepMin
+          });
+          _safeCb(cb, sync);
+        }
+
+        if (params.optionMenuIds && params.optionMenuIds.length &&
+            typeof window.menuGet === 'function') {
+          var collected = [];
+          var pending = params.optionMenuIds.length;
+          var i;
+          for (i = 0; i < params.optionMenuIds.length; i++) {
+            window.menuGet(params.optionMenuIds[i], function (om) {
+              if (om) { collected.push(om); }
+              pending--;
+              if (pending <= 0) {
+                _withOptions(collected);
+              }
+            });
+          }
+        } else {
+          _withOptions([]);
+        }
+      }
+
+      if (params.menu) {
+        _withMenu(params.menu);
+      } else if (typeof window.menuGet === 'function') {
+        window.menuGet(params.menuId, function (m) {
+          _withMenu(m);
+        });
+      } else {
+        _safeCb(cb, _errResult('no_menu_api',
+          'menuGet unavailable; pass params.menu directly'));
+      }
+    }
+
+    if (typeof window.calendarLoadDay === 'function') {
+      window.calendarLoadDay(dateKey, function (bundle) {
+        if (!bundle) {
+          _safeCb(cb, _errResult('load_failed',
+            'failed to load day data'));
+          return;
+        }
+        _withDayData(bundle);
+      });
+    } else {
+      _safeCb(cb, _errResult('no_calendar',
+        'shared_db_calendar.js (calendarLoadDay) not loaded'));
+    }
+  }
+  window.reservationCalcAvailableSlots = reservationCalcAvailableSlots;
+
+  // ============================================================
   // デバッグ用
   // ============================================================
 
   window._reservationDebug = {
     parseTime: reservationParseTime,
     formatTime: reservationFormatTime,
-    statuses: RESERVATION_STATUSES
+    statuses: RESERVATION_STATUSES,
+    // Phase B-5: 3次元予約可能時間計算
+    slotStepMin: RESERVATION_SLOT_STEP_MIN,
+    calcSlotsSync: reservationCalcAvailableSlotsSync,
+    calcSlots: reservationCalcAvailableSlots
   };
 
-  console.log('[reservation] loaded.');
+  console.log('[reservation] loaded. (Phase B-5: 3D slot calc ready)');
 
 })();
