@@ -17,10 +17,18 @@
 //   - フェーズ1はスタッフ=オーナー1人なので isSalonStaff == isSalonOwner で正しい
 //   - フェーズ2で複数スタッフ対応時に exists() 版へ戻す（DESIGN_NOTES 段階移行方針）
 //
-// 2026/5/15 変更点:
+// 2026/5/15 変更点 (その1):
 //   - menus のホワイトリストに sortOrder を追加（int >= 0、省略可）
 //   - 理由: メニュー設定画面で上下ボタンによる並び替えを実装するため
 //   - shared_db_menu.js が sortOrder の付与と入れ替えを担当
+//
+// 2026/5/15 変更点 (その2):
+//   - appointments の作成ルールを 2 経路に拡張:
+//     (A) 顧客の pendingCreate=true 予約 (既存、source='online' 追加可)
+//     (B) サロンスタッフの手動登録 (新規、status='confirmed', source='manual')
+//   - 旧 TORITA の「＋登録」ボタン相当の手動登録を新TORITAでも可能に
+//   - update ルールに source 改ざん禁止を追加
+//   - intervalAfterOverride フィールドを許可 (予約ごとのインターバル個別調整)
 // ============================================================
 
 rules_version = '2';
@@ -231,39 +239,100 @@ service cloud.firestore {
         allow read: if isSalonStaff(salonId) || 
                       (isSignedIn() && request.auth.uid == resource.data.customerId);
         
-        // 作成: 顧客が pendingCreate=true で書き込む（未確定状態）
-        //       Functions が後で確定処理する
-        //       顧客が書き込めるフィールドを最小限に絞る
-        allow create: if isSignedIn() &&
-                        request.resource.data.customerId == request.auth.uid &&
-                        // ホワイトリスト: 顧客が書ける項目のみ
-                        request.resource.data.keys().hasOnly([
-                          'dateKey', 'start', 'customerId',
-                          'menuId', 'optionMenuIds', 'pendingCreate',
-                          'createdAt'
-                        ]) &&
-                        // 必須フィールド
-                        request.resource.data.keys().hasAll([
-                          'dateKey', 'start', 'customerId',
-                          'menuId', 'pendingCreate'
-                        ]) &&
-                        // pendingCreate は必ず true（未確定状態で作成）
-                        request.resource.data.pendingCreate == true &&
-                        // dateKey の形式: YYYY-MM-DD
-                        request.resource.data.dateKey is string &&
-                        request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
-                        // start の形式: HH:MM
-                        request.resource.data.start is string &&
-                        request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
-                        // menuId は string
-                        request.resource.data.menuId is string &&
-                        // optionMenuIds は省略可、あればリスト
-                        (!('optionMenuIds' in request.resource.data) || 
-                          request.resource.data.optionMenuIds is list);
+        // ============================================================
+        // 作成:
+        //   (A) 顧客の予約作成 (pendingCreate=true、Functions が確定処理)
+        //   (B) サロンスタッフの手動登録 (旧画面の「＋登録」、最初から確定)
+        // ============================================================
+        allow create: if (
+          // ────────────────────────────────────────
+          // (A) 顧客の予約作成 (pendingCreate=true)
+          // ────────────────────────────────────────
+          (isSignedIn() &&
+           request.resource.data.customerId == request.auth.uid &&
+           // ホワイトリスト: 顧客が書ける項目のみ
+           request.resource.data.keys().hasOnly([
+             'dateKey', 'start', 'customerId',
+             'menuId', 'optionMenuIds', 'pendingCreate',
+             'source', 'createdAt'
+           ]) &&
+           // 必須フィールド
+           request.resource.data.keys().hasAll([
+             'dateKey', 'start', 'customerId',
+             'menuId', 'pendingCreate'
+           ]) &&
+           // pendingCreate は必ず true（未確定状態で作成）
+           request.resource.data.pendingCreate == true &&
+           // source は省略可、あれば 'online' 固定
+           (!('source' in request.resource.data) ||
+             request.resource.data.source == 'online') &&
+           // dateKey の形式: YYYY-MM-DD
+           request.resource.data.dateKey is string &&
+           request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+           // start の形式: HH:MM
+           request.resource.data.start is string &&
+           request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
+           // menuId は string
+           request.resource.data.menuId is string &&
+           // optionMenuIds は省略可、あればリスト
+           (!('optionMenuIds' in request.resource.data) || 
+             request.resource.data.optionMenuIds is list))
+          ||
+          // ────────────────────────────────────────
+          // (B) サロンスタッフの手動登録 (最初から確定状態)
+          //     旧画面の「＋登録」ボタン相当。
+          //     顧客アプリ経由ではないので pendingCreate は無し、
+          //     status='confirmed' で書き込む。
+          //     end/startAt/endAt はサロン側 UI が計算して送る前提
+          //     (Phase B-5 で再考、フェーズ1は UI 計算に任せる)。
+          // ────────────────────────────────────────
+          (isSalonStaff(salonId) &&
+           // ホワイトリスト: サロン手動登録で書ける項目
+           request.resource.data.keys().hasOnly([
+             'dateKey', 'start', 'end',
+             'startAt', 'endAt',
+             'customerId', 'customerName',
+             'menuId', 'menuName', 'optionMenuIds',
+             'staffId', 'resourceIds',
+             'status', 'source',
+             'priceSnapshot', 'durationMin',
+             'intervalAfterOverride',
+             'memo', 'editingBy',
+             'createdAt', 'updatedAt'
+           ]) &&
+           // 必須フィールド
+           request.resource.data.keys().hasAll([
+             'dateKey', 'start',
+             'menuId', 'status', 'source'
+           ]) &&
+           // source は 'manual' 固定
+           request.resource.data.source == 'manual' &&
+           // status は confirmed で作成 (キャンセル等はその後 update で)
+           request.resource.data.status == 'confirmed' &&
+           // dateKey の形式: YYYY-MM-DD
+           request.resource.data.dateKey is string &&
+           request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+           // start の形式: HH:MM
+           request.resource.data.start is string &&
+           request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
+           // end の形式: HH:MM (省略可、あればチェック)
+           (!('end' in request.resource.data) ||
+             (request.resource.data.end is string &&
+              request.resource.data.end.matches('^[0-9]{2}:[0-9]{2}$'))) &&
+           // menuId は string
+           request.resource.data.menuId is string &&
+           // optionMenuIds は省略可、あればリスト
+           (!('optionMenuIds' in request.resource.data) || 
+             request.resource.data.optionMenuIds is list) &&
+           // intervalAfterOverride は省略可、あれば int >= 0
+           (!('intervalAfterOverride' in request.resource.data) ||
+             (request.resource.data.intervalAfterOverride is int &&
+              request.resource.data.intervalAfterOverride >= 0)))
+        );
         
         // 更新:
         //  - 顧客は自分の予約を confirmed → cancelled にのみ変更可能
-        //  - サロンスタッフは customerId 改ざん以外は何でも可能
+        //  - サロンスタッフは customerId/source 改ざん以外は何でも可能
         //  - 詳細な status 遷移ルールは Cloud Functions の責任
         allow update: if (
           // 顧客本人: status を confirmed → cancelled に変えるのみ
@@ -273,9 +342,10 @@ service cloud.firestore {
            request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['status', 'updatedAt']))
           ||
-          // サロンスタッフ: customerId 改ざんは禁止、他は OK
+          // サロンスタッフ: customerId / source 改ざんは禁止、他は OK
           (isSalonStaff(salonId) &&
-           request.resource.data.customerId == resource.data.customerId)
+           request.resource.data.customerId == resource.data.customerId &&
+           request.resource.data.source == resource.data.source)
         );
         
         // 削除: オーナーのみ（通常は status=cancelled でソフト削除）

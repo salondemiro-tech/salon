@@ -44,6 +44,7 @@
  * 関数ラインナップ:
  *   ── 予約 CRUD ラッパー ──
  *     reservationCreate(data, cb)              顧客の予約作成 (Phase D で使用)
+ *     reservationCreateBySalon(data, cb)       サロンの手動登録 (旧画面の＋登録)
  *     reservationCancelByCustomer(apptId, cb)  顧客のキャンセル
  *     reservationCancelBySalon(apptId, reason, cb)  サロンのキャンセル
  *     reservationUpdateBySalon(apptId, patch, cb)   サロンの予約変更
@@ -536,6 +537,159 @@
     });
   }
   window.reservationCancelByCustomer = reservationCancelByCustomer;
+
+  // ----------------------------------------------------------
+  // サロンの手動登録 (旧画面の「＋登録」ボタン相当)
+  //
+  // 顧客アプリ経由ではなく、サロンスタッフがカレンダー画面から
+  // 直接予約を登録する経路。pendingCreate は使わず、最初から
+  // status='confirmed', source='manual' で書き込む。
+  //
+  // クライアント側で end / startAt / endAt / priceSnapshot を
+  // 計算して送る (フェーズ1の運用、Phase B-5 で再考)。
+  //
+  // 引数:
+  //   data: {
+  //     dateKey: "YYYY-MM-DD" (必須)
+  //     start: "HH:MM" (必須)
+  //     end: "HH:MM" (省略可、UI で計算して送る)
+  //     menuId: string (必須)
+  //     menuName: string (任意、後でメニュー削除されても予約に名前残す用)
+  //     optionMenuIds: array<string> (省略可)
+  //     customerId: string (任意、Auth UID を持つ顧客なら指定)
+  //     customerName: string (任意、Auth UID なし顧客の場合に名前だけ保存)
+  //     durationMin: int (任意、UI で計算して送る)
+  //     intervalAfterOverride: int >= 0 (省略可、メニューの intervalAfter を上書き)
+  //     priceSnapshot: int >= 0 (任意、UI で計算して送る)
+  //     memo: string (省略可)
+  //   }
+  //
+  // 戻り値: { ok: true, appointmentId } または { ok: false, code, message }
+  // ----------------------------------------------------------
+  function reservationCreateBySalon(data, cb) {
+    if (!data || typeof data !== 'object') {
+      _safeCb(cb, _errResult('invalid-data', '予約データが不正です。'));
+      return;
+    }
+    if (!_isYYYYMMDD(data.dateKey)) {
+      _safeCb(cb, _errResult('invalid-dateKey', '日付の形式が正しくありません。'));
+      return;
+    }
+    if (!_isHHMM(data.start)) {
+      _safeCb(cb, _errResult('invalid-start', '時刻の形式が正しくありません。'));
+      return;
+    }
+    if (data.end && !_isHHMM(data.end)) {
+      _safeCb(cb, _errResult('invalid-end', '終了時刻の形式が正しくありません。'));
+      return;
+    }
+    if (!data.menuId || typeof data.menuId !== 'string') {
+      _safeCb(cb, _errResult('invalid-menuId', 'メニューを選択してください。'));
+      return;
+    }
+    if (data.optionMenuIds && !(data.optionMenuIds instanceof Array)) {
+      _safeCb(cb, _errResult('invalid-optionMenuIds', 'オプション指定が不正です。'));
+      return;
+    }
+    if (data.hasOwnProperty('intervalAfterOverride')) {
+      var iv = data.intervalAfterOverride;
+      if (typeof iv !== 'number' || iv < 0 || Math.floor(iv) !== iv) {
+        _safeCb(cb, _errResult('invalid-interval', 'インターバルを正しく入力してください。'));
+        return;
+      }
+    }
+    if (typeof window.dbAddDoc !== 'function' ||
+        typeof window.getCurrentSalonId !== 'function') {
+      _safeCb(cb, _errResult('not-loaded', 'システムエラーが発生しました。'));
+      return;
+    }
+
+    var sid = window.getCurrentSalonId();
+    if (!sid) {
+      _safeCb(cb, _errResult('not-authenticated', 'ログインが必要です。'));
+      return;
+    }
+
+    // ルールのホワイトリスト + 必須に沿った形でドキュメント組み立て
+    // 必須: dateKey, start, menuId, status, source
+    // 全許可: dateKey, start, end, startAt, endAt, customerId, customerName,
+    //         menuId, menuName, optionMenuIds, staffId, resourceIds,
+    //         status, source, priceSnapshot, durationMin,
+    //         intervalAfterOverride, memo, editingBy, createdAt, updatedAt
+    var doc = {
+      dateKey: String(data.dateKey),
+      start: String(data.start),
+      menuId: String(data.menuId),
+      status: 'confirmed',
+      source: 'manual',
+      staffId: 'owner',                  // フェーズ1固定
+      resourceIds: ['default'],          // フェーズ1固定
+      editingBy: null,                   // DESIGN_NOTES 項目6: 箱だけ用意
+      createdAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+    if (data.end) { doc.end = String(data.end); }
+    if (data.customerId) { doc.customerId = String(data.customerId); }
+    if (data.customerName) { doc.customerName = String(data.customerName); }
+    if (data.menuName) { doc.menuName = String(data.menuName); }
+    if (data.optionMenuIds && data.optionMenuIds.length > 0) {
+      var opts = [];
+      var i;
+      for (i = 0; i < data.optionMenuIds.length; i++) {
+        opts.push(String(data.optionMenuIds[i]));
+      }
+      doc.optionMenuIds = opts;
+    }
+    if (typeof data.durationMin === 'number') { doc.durationMin = data.durationMin; }
+    if (typeof data.priceSnapshot === 'number') { doc.priceSnapshot = data.priceSnapshot; }
+    if (data.hasOwnProperty('intervalAfterOverride')) {
+      doc.intervalAfterOverride = data.intervalAfterOverride;
+    }
+    if (data.memo) { doc.memo = String(data.memo); }
+
+    // startAt / endAt の Timestamp 化 (dateKey + start/end から合成)
+    // DESIGN_NOTES 項目5: dateKey + startAt/endAt 併用設計
+    try {
+      var dParts = String(data.dateKey).split('-');
+      var sParts = String(data.start).split(':');
+      var startDate = new Date(
+        parseInt(dParts[0], 10),
+        parseInt(dParts[1], 10) - 1,
+        parseInt(dParts[2], 10),
+        parseInt(sParts[0], 10),
+        parseInt(sParts[1], 10),
+        0, 0
+      );
+      doc.startAt = firebase.firestore.Timestamp.fromDate(startDate);
+      if (data.end) {
+        var eParts = String(data.end).split(':');
+        var endDate = new Date(
+          parseInt(dParts[0], 10),
+          parseInt(dParts[1], 10) - 1,
+          parseInt(dParts[2], 10),
+          parseInt(eParts[0], 10),
+          parseInt(eParts[1], 10),
+          0, 0
+        );
+        doc.endAt = firebase.firestore.Timestamp.fromDate(endDate);
+      }
+    } catch (e) {
+      console.warn('[reservation] startAt/endAt 合成失敗', e);
+      // startAt/endAt は省略可なので、合成失敗しても続行
+    }
+
+    // 書き込み
+    window.dbAddDoc('salons/' + sid + '/appointments', doc, function (result) {
+      if (!result) {
+        _safeCb(cb, _errResult('create-failed', '予約の登録に失敗しました。'));
+        return;
+      }
+      _safeCb(cb, _ok({
+        appointmentId: result._id,
+        message: '予約を登録しました。'
+      }));
+    });
+  }
+  window.reservationCreateBySalon = reservationCreateBySalon;
 
   // ----------------------------------------------------------
   // サロンのキャンセル
