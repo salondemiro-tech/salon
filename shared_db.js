@@ -691,14 +691,387 @@
   window.dbCustomerCancelMyAppointment = dbCustomerCancelMyAppointment;
 
   // ============================================================
+  // Phase B-1: 画面別並列取得 API (dbLoad*)
+  //
+  // 設計準拠:
+  //   - DESIGN.md v6 セクション 4 (速度設計 3秒以内), 5-3 (データ取得API統一),
+  //     7 Phase B (B-1〜B-8)
+  //   - DESIGN_NOTES.md 項目 7 (アーカイブ 18ヶ月/半年バッチ)
+  //
+  // 設計指針:
+  //   B-2: 各 API は内部で並列取得し、全部揃ったら一度だけ cb を呼ぶ
+  //        (Promise.all 相当を ES5 の pending カウンタで実現)
+  //   B-3: 各画面に必要な最小限のデータだけ取得 (無駄なコレクションを引かない)
+  //   B-4: ログイン直後は最小限 (dbLoadSalonDashboard は info + settings のみ)、
+  //        重いデータは画面遷移時に各 dbLoad* で取得
+  //   B-6: appointments は必ず dateKey 範囲 or == で絞る。全件 get() しない。
+  //        顧客履歴は customerId == uid + limit。
+  //   B-8: 顧客履歴のみ appointments(current) + appointments_archive 両方読む。
+  //        ※ 古い予約を archive へ移す Cloud Functions バッチは後回し
+  //          (DESIGN_NOTES 項目7。今は読む側だけ箱を用意)。
+  //
+  // 層分離 (設計書 5-3):
+  //   shared_db.js の dbLoad* は「DB 抽象化層の窓口」。
+  //   カレンダー固有の月/日バンドル取得は既に shared_db_calendar.js が
+  //   並列実装済み (calendarLoadMonth / calendarLoadDay) なので、
+  //   dbLoadSalonCalendar / dbLoadCustomerBooking はそれを薄くラップする。
+  //   二重実装しない (設計書 進め方の鉄則2: 棚卸ししてから実装)。
+  //
+  // コールバック規約:
+  //   - 成功時: result = バンドルオブジェクト
+  //   - 失敗時でも、取得できたものは入れて返す (画面側で null チェック可能)
+  //   - 致命的失敗 (salonId 取れない等) のみ result = null
+  // ============================================================
+
+  // 内部: 並列取得の合成ヘルパー
+  // tasks = [ { key: 'menus', run: function(done){ ... done(value) } }, ... ]
+  // 全 task 完了後、bundle = { menus: ..., ... } を cb に渡す
+  function _parallelLoad(tasks, cb) {
+    var bundle = {};
+    var pending = tasks.length;
+    if (pending <= 0) {
+      _safeCb(cb, bundle);
+      return;
+    }
+    var i;
+    function _makeDone(key) {
+      return function (value) {
+        bundle[key] = value;
+        pending--;
+        if (pending <= 0) {
+          _safeCb(cb, bundle);
+        }
+      };
+    }
+    for (i = 0; i < tasks.length; i++) {
+      var t = tasks[i];
+      try {
+        t.run(_makeDone(t.key));
+      } catch (e) {
+        _logErr('_parallelLoad task(' + t.key + ')', e);
+        // 例外でも pending を進める (固まらないように)
+        _makeDone(t.key)(null);
+      }
+    }
+  }
+
+  // ------------------------------------------------------------
+  // dbLoadSalonDashboard(cb)
+  //   サロンのトップ (ダッシュボード) 画面用。
+  //   B-4: ログイン直後なので最小限。info + settings のみ。
+  //        予約一覧やカレンダーは各画面遷移時に別途取得する。
+  //   戻り値: { info, settings }
+  // ------------------------------------------------------------
+  function dbLoadSalonDashboard(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    _parallelLoad([
+      {
+        key: 'info',
+        run: function (done) {
+          dbSalonGetInfo(function (v) { done(v || null); });
+        }
+      },
+      {
+        key: 'settings',
+        run: function (done) {
+          dbSalonGetConfig('settings', function (v) { done(v || null); });
+        }
+      }
+    ], cb);
+  }
+  window.dbLoadSalonDashboard = dbLoadSalonDashboard;
+
+  // ------------------------------------------------------------
+  // dbLoadSalonCalendar(monthStr, cb)
+  //   サロンのカレンダー画面用。
+  //   B-6: 指定月の appointments のみ (dateKey 範囲クエリ)。
+  //   実体は shared_db_calendar.js の calendarLoadMonth に委譲。
+  //   calendarLoadMonth は内部で settings/menus/appointments/closeBlocks を
+  //   並列取得して { settings, menus, appointments, closeBlocks,
+  //   monthStr, dateFrom, dateTo } を返す。
+  //   monthStr: "2026-05" 形式。
+  // ------------------------------------------------------------
+  function dbLoadSalonCalendar(monthStr, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    if (typeof window.calendarLoadMonth !== 'function') {
+      _logErr('dbLoadSalonCalendar', 'shared_db_calendar.js not loaded');
+      _safeCb(cb, null);
+      return;
+    }
+    window.calendarLoadMonth(monthStr, cb);
+  }
+  window.dbLoadSalonCalendar = dbLoadSalonCalendar;
+
+  // ------------------------------------------------------------
+  // dbLoadSalonCustomers(cb)
+  //   サロンの顧客管理画面用。顧客一覧。
+  //   戻り値: { customers }
+  //   注: 顧客数が将来数千件規模になったら limit + ページングを検討
+  //       (Phase 2 以降。フェーズ1の小規模サロンでは全件で問題なし)。
+  // ------------------------------------------------------------
+  function dbLoadSalonCustomers(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    _parallelLoad([
+      {
+        key: 'customers',
+        run: function (done) {
+          dbSalonListCustomers(function (v) { done(v || []); });
+        }
+      }
+    ], cb);
+  }
+  window.dbLoadSalonCustomers = dbLoadSalonCustomers;
+
+  // ------------------------------------------------------------
+  // dbLoadSalonMenus(cb)
+  //   メニュー設定画面用。
+  //   設計書 B-1: menus + staffs + resources。
+  //   フェーズ1では staffs は owner 1件、resources は default 1件だが、
+  //   3次元予約モデル (設計書 0-2) のため最初から3点セットで取得する。
+  //   戻り値: { menus, staffs, resources }
+  // ------------------------------------------------------------
+  function dbLoadSalonMenus(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    var base = 'salons/' + sid;
+    _parallelLoad([
+      {
+        key: 'menus',
+        run: function (done) {
+          if (typeof window.menuList === 'function') {
+            window.menuList(null, function (v) { done(v || []); });
+          } else {
+            dbReadCollection(base + '/menus', null, function (v) { done(v || []); });
+          }
+        }
+      },
+      {
+        key: 'staffs',
+        run: function (done) {
+          dbReadCollection(base + '/staffs', null, function (v) { done(v || []); });
+        }
+      },
+      {
+        key: 'resources',
+        run: function (done) {
+          dbReadCollection(base + '/resources', null, function (v) { done(v || []); });
+        }
+      }
+    ], cb);
+  }
+  window.dbLoadSalonMenus = dbLoadSalonMenus;
+
+  // ------------------------------------------------------------
+  // dbLoadSalonSettings(cb)
+  //   営業時間・キャンセル規定・スタンプ設定の編集画面用。
+  //   config 3 ドキュメントを並列取得。
+  //   戻り値: { settings, cancelPolicy, stampCard }
+  // ------------------------------------------------------------
+  function dbLoadSalonSettings(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    _parallelLoad([
+      {
+        key: 'settings',
+        run: function (done) {
+          dbSalonGetConfig('settings', function (v) { done(v || null); });
+        }
+      },
+      {
+        key: 'cancelPolicy',
+        run: function (done) {
+          dbSalonGetConfig('cancelPolicy', function (v) { done(v || null); });
+        }
+      },
+      {
+        key: 'stampCard',
+        run: function (done) {
+          dbSalonGetConfig('stampCard', function (v) { done(v || null); });
+        }
+      }
+    ], cb);
+  }
+  window.dbLoadSalonSettings = dbLoadSalonSettings;
+
+  // ------------------------------------------------------------
+  // dbLoadCustomerHome(cb)
+  //   顧客アプリの初期表示用。
+  //   設計書 4-2: 起動時は settings + menus(公開のみ) + cancelPolicy。
+  //   サロン名表示のため info も含める (軽量)。
+  //   B-6: メニューは公開のみ (menuListPublic)。
+  //   戻り値: { info, settings, menus, cancelPolicy }
+  // ------------------------------------------------------------
+  function dbLoadCustomerHome(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    _parallelLoad([
+      {
+        key: 'info',
+        run: function (done) {
+          dbCustomerGetSalonInfo(function (v) { done(v || null); });
+        }
+      },
+      {
+        key: 'settings',
+        run: function (done) {
+          dbSalonGetConfig('settings', function (v) { done(v || null); });
+        }
+      },
+      {
+        key: 'menus',
+        run: function (done) {
+          if (typeof window.menuListPublic === 'function') {
+            window.menuListPublic(function (v) { done(v || []); });
+          } else {
+            dbCustomerGetPublicMenus(function (v) { done(v || []); });
+          }
+        }
+      },
+      {
+        key: 'cancelPolicy',
+        run: function (done) {
+          dbSalonGetConfig('cancelPolicy', function (v) { done(v || null); });
+        }
+      }
+    ], cb);
+  }
+  window.dbLoadCustomerHome = dbLoadCustomerHome;
+
+  // ------------------------------------------------------------
+  // dbLoadCustomerBooking(dateStr, cb)
+  //   顧客アプリの予約日時選択用。
+  //   B-6: 指定日の appointments のみ (dateKey == dateStr)。
+  //   実体は shared_db_calendar.js の calendarLoadDay に委譲。
+  //   calendarLoadDay は内部で settings/appointments/closeBlocks を
+  //   並列取得して { settings, appointments, closeBlocks, dateKey } を返す。
+  //   dateStr: "2026-05-14" 形式。
+  // ------------------------------------------------------------
+  function dbLoadCustomerBooking(dateStr, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    if (typeof window.calendarLoadDay !== 'function') {
+      _logErr('dbLoadCustomerBooking', 'shared_db_calendar.js not loaded');
+      _safeCb(cb, null);
+      return;
+    }
+    window.calendarLoadDay(dateStr, cb);
+  }
+  window.dbLoadCustomerBooking = dbLoadCustomerBooking;
+
+  // ------------------------------------------------------------
+  // dbLoadCustomerHistory(cb)
+  //   顧客の予約履歴画面用。
+  //   設計書 B-1 / B-8: current (appointments) + archive
+  //   (appointments_archive) の両方を読む。
+  //   B-6: 自分の予約のみ (customerId == 自分の Auth UID)。
+  //        さらに最近分に絞るため dateKey 降順 + limit。
+  //
+  //   ★ B-8 補足 (DESIGN_NOTES 項目7):
+  //     古い予約を appointments → appointments_archive へ移す
+  //     Cloud Functions バッチは「読む側」より後回し。
+  //     今はバッチがまだ無いので appointments_archive は通常空。
+  //     それでも最初から両方読む実装にしておくことで、将来バッチを
+  //     足したときに顧客履歴のコードを一切変えずに済む (設計書0-2の指針)。
+  //
+  //   戻り値: { current: [...], archive: [...], merged: [...] }
+  //     merged は両方を dateKey 降順で統合済み (画面はこれを使えばよい)。
+  //
+  //   注: appointments_archive の firestore.rules は Phase A-step1 で
+  //       current と同じ読み取り権限で設定済み (allow read: 本人 or staff)。
+  // ------------------------------------------------------------
+  function dbLoadCustomerHistory(cb) {
+    var sid = getCurrentSalonId();
+    var uid = getCurrentUserUid();
+    if (!sid || !uid) { _safeCb(cb, null); return; }
+
+    var HISTORY_LIMIT = 50; // current/archive 各 50 件まで
+
+    function _queryMine(col) {
+      // customerId == 自分 / dateKey 降順 / limit
+      return col.where('customerId', '==', uid)
+                .orderBy('dateKey', 'desc')
+                .limit(HISTORY_LIMIT);
+    }
+
+    _parallelLoad([
+      {
+        key: 'current',
+        run: function (done) {
+          dbReadCollection(
+            'salons/' + sid + '/appointments',
+            _queryMine,
+            function (v) { done(v || []); }
+          );
+        }
+      },
+      {
+        key: 'archive',
+        run: function (done) {
+          dbReadCollection(
+            'salons/' + sid + '/appointments_archive',
+            _queryMine,
+            function (v) {
+              // archive がまだ存在しない / 空でも [] を返す。
+              // ルール上 read は許可済みだが、万一拒否されても
+              // _logErr 済みで null が来るので [] に正規化。
+              done(v || []);
+            }
+          );
+        }
+      }
+    ], function (bundle) {
+      var cur = bundle.current || [];
+      var arc = bundle.archive || [];
+      // merged: current + archive を dateKey 降順で統合
+      var merged = [];
+      var i;
+      for (i = 0; i < cur.length; i++) { merged.push(cur[i]); }
+      for (i = 0; i < arc.length; i++) { merged.push(arc[i]); }
+      merged.sort(function (a, b) {
+        var ak = a.dateKey || '';
+        var bk = b.dateKey || '';
+        if (ak === bk) {
+          // 同日内は start 降順 (新しい時刻が上)
+          var as = a.start || '';
+          var bs = b.start || '';
+          if (as === bs) { return 0; }
+          return (as < bs) ? 1 : -1;
+        }
+        return (ak < bk) ? 1 : -1;
+      });
+      _safeCb(cb, {
+        current: cur,
+        archive: arc,
+        merged: merged
+      });
+    });
+  }
+  window.dbLoadCustomerHistory = dbLoadCustomerHistory;
+
+  // ============================================================
   // デバッグ用 (本番では呼ばれない想定)
   // ============================================================
 
   window._sharedDbDebug = {
     getUrlSalonId: function () { return _urlSalonId; },
-    getReadyState: function () { return _fbReady; }
+    getReadyState: function () { return _fbReady; },
+    // Phase B-1: 画面別並列取得 API の一覧 (動作確認用)
+    loadApis: [
+      'dbLoadSalonDashboard',
+      'dbLoadSalonCalendar',
+      'dbLoadSalonCustomers',
+      'dbLoadSalonMenus',
+      'dbLoadSalonSettings',
+      'dbLoadCustomerHome',
+      'dbLoadCustomerBooking',
+      'dbLoadCustomerHistory'
+    ]
   };
 
-  console.log('[shared_db] loaded. urlSalonId =', _urlSalonId);
+  console.log('[shared_db] loaded. urlSalonId =', _urlSalonId,
+              '(Phase B-1: 8 dbLoad* APIs ready)');
 
 })();
