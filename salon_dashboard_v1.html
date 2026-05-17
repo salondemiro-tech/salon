@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TORITA - ダッシュボード</title>
+<!--
+  salon_dashboard_v1.html  -  TORITA Phase C / C-2
+  作成: 2026/5/17
+
+  設計準拠:
+    - DESIGN.md v6 セクション C-2, B-1 (dbLoadSalonDashboard), 4-1 (ログイン時は最小限)
+    - 9-3 販売開始時の最小機能 (オーナー側) のハブ画面
+    - 9つの設計ルール #8 (HTML内JS最小限) / #9 (顧客と管理を完全分離)
+
+  役割:
+    ログイン後の起点。各管理画面 (C-3〜C-8) へのナビゲーションハブ。
+    まだ作っていない画面のリンクは「準備中」とし、404 を防ぐ。
+    C-3以降を作るたびに、該当カードの ready を true にしていく。
+
+  ロード順序 (shared_auth.js ヘッダ契約):
+    firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js → shared_ui.js
+
+  未ログイン時: requireSalonStaff が false → salon_auth_v2_new.html へ戻す
+
+  ES5 互換: var / function のみ
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --gn:#7b9e87; --gl:#eef3ef;
+    --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2);
+    color:var(--tx);
+    -webkit-text-size-adjust:100%;
+    min-height:100vh;
+  }
+
+  /* ===== ヘッダー ===== */
+  .topbar{
+    background:#fff; border-bottom:1px solid var(--bd);
+    padding:16px 20px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:10;
+  }
+  .brand{display:flex; flex-direction:column;}
+  .brand-mark{
+    font-size:20px; color:var(--ac); font-weight:600;
+    letter-spacing:.05em; line-height:1.2;
+  }
+  .brand-sub{font-size:10px; color:var(--mu); letter-spacing:.04em;}
+  .logout-btn{
+    background:none; border:1.5px solid var(--bd);
+    border-radius:9px; padding:8px 14px;
+    font-size:12.5px; color:var(--mu); cursor:pointer;
+    font-family:inherit;
+  }
+  .logout-btn:hover{border-color:var(--ac); color:var(--ac);}
+
+  /* ===== コンテナ ===== */
+  .wrap{max-width:760px; margin:0 auto; padding:22px 18px 40px;}
+
+  /* ===== サロン情報カード ===== */
+  .salon-card{
+    background:#fff; border-radius:16px;
+    box-shadow:0 6px 24px rgba(0,0,0,.09);
+    padding:24px 22px; margin-bottom:22px;
+  }
+  .salon-name{
+    font-size:22px; font-weight:600; color:var(--ad);
+    margin-bottom:6px; word-break:break-word;
+  }
+  .salon-meta{
+    font-size:13px; color:var(--mu); line-height:1.9;
+  }
+  .salon-meta .label{
+    display:inline-block; min-width:78px; color:var(--ac);
+    font-weight:600;
+  }
+  .skeleton{
+    color:transparent; background:var(--s2);
+    border-radius:6px; display:inline-block; min-width:120px;
+  }
+
+  /* ===== セクション見出し ===== */
+  .sec-title{
+    font-size:13px; color:var(--mu); font-weight:600;
+    letter-spacing:.05em; margin:4px 4px 12px;
+  }
+
+  /* ===== ナビグリッド ===== */
+  .nav-grid{
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+    gap:13px;
+  }
+  @media (min-width:560px){
+    .nav-grid{grid-template-columns:repeat(3, 1fr);}
+  }
+  .nav-card{
+    background:#fff; border:1px solid var(--bd);
+    border-radius:14px; padding:20px 16px;
+    text-align:center; cursor:pointer;
+    transition:transform .12s, box-shadow .12s, border-color .12s;
+    text-decoration:none; color:var(--tx);
+    display:flex; flex-direction:column; align-items:center;
+    min-height:118px; justify-content:center;
+  }
+  .nav-card:hover{
+    transform:translateY(-2px);
+    box-shadow:0 8px 22px rgba(0,0,0,.10);
+    border-color:var(--ac);
+  }
+  .nav-card.disabled{
+    cursor:default; opacity:.55;
+  }
+  .nav-card.disabled:hover{
+    transform:none; box-shadow:none; border-color:var(--bd);
+  }
+  .nav-ico{
+    font-size:26px; margin-bottom:9px; line-height:1;
+  }
+  .nav-label{
+    font-size:14px; font-weight:600; color:var(--ad);
+    margin-bottom:3px;
+  }
+  .nav-desc{font-size:11px; color:var(--mu); line-height:1.5;}
+  .nav-badge{
+    display:inline-block; margin-top:7px;
+    font-size:10px; color:var(--mu);
+    background:var(--s2); border-radius:10px;
+    padding:2px 9px;
+  }
+
+  footer{
+    text-align:center; font-size:10.5px; color:var(--mu);
+    margin-top:26px; letter-spacing:.03em;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <span class="brand-mark">TORITA</span>
+    <span class="brand-sub">SALON MANAGER</span>
+  </div>
+  <button class="logout-btn" onclick="doLogout()">ログアウト</button>
+</div>
+
+<div class="wrap">
+
+  <!-- サロン情報 -->
+  <div class="salon-card">
+    <div class="salon-name" id="salonName">
+      <span class="skeleton">読み込み中</span>
+    </div>
+    <div class="salon-meta">
+      <div>
+        <span class="label">営業時間</span>
+        <span id="salonHours"><span class="skeleton">--:-- 〜 --:--</span></span>
+      </div>
+      <div>
+        <span class="label">メール</span>
+        <span id="salonEmail"><span class="skeleton">loading</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 機能ナビ -->
+  <div class="sec-title">予約・顧客</div>
+  <div class="nav-grid" id="navGrid1"></div>
+
+  <div class="sec-title" style="margin-top:22px;">店舗設定</div>
+  <div class="nav-grid" id="navGrid2"></div>
+
+  <footer>&copy; TORITA</footer>
+</div>
+
+<!-- ===== Firebase SDK (compat) ===== -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<!-- ===== TORITA 共通ファイル (ロード順序を厳守) ===== -->
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_ui.js"></script>
+
+<!-- ===== 画面固有スクリプト (最小限) ===== -->
+<script>
+(function () {
+
+  // ----- ナビ定義 -----
+  // ready: false の画面はまだ未作成。C-3以降を作るたびに true にする。
+  var NAV1 = [
+    { ico: '\uD83D\uDCC5', label: 'カレンダー', desc: '予約の確認・登録',
+      href: 'salon_calendar_v8.html', ready: false },
+    { ico: '\uD83D\uDC65', label: '顧客管理', desc: '顧客一覧・詳細',
+      href: 'salon_customers_v1.html', ready: false }
+  ];
+  var NAV2 = [
+    { ico: '\u2702\uFE0F', label: 'メニュー設定', desc: 'メニュー・料金',
+      href: 'salon_menus_v1.html', ready: false },
+    { ico: '\uD83D\uDD52', label: '営業時間', desc: '開店・定休日',
+      href: 'salon_hours_v1.html', ready: false },
+    { ico: '\uD83D\uDCDD', label: 'キャンセル規定', desc: 'キャンセル受付',
+      href: 'salon_cancel_v1.html', ready: false },
+    { ico: '\u2B50', label: 'スタンプ設定', desc: 'スタンプカード',
+      href: 'salon_stamp_v1.html', ready: false }
+  ];
+
+  function buildCard(item) {
+    var card = document.createElement(item.ready ? 'a' : 'div');
+    card.className = 'nav-card' + (item.ready ? '' : ' disabled');
+    if (item.ready) {
+      card.setAttribute('href', item.href);
+    }
+
+    var ico = document.createElement('div');
+    ico.className = 'nav-ico';
+    ico.textContent = item.ico;
+    card.appendChild(ico);
+
+    var lbl = document.createElement('div');
+    lbl.className = 'nav-label';
+    lbl.textContent = item.label;
+    card.appendChild(lbl);
+
+    var desc = document.createElement('div');
+    desc.className = 'nav-desc';
+    desc.textContent = item.desc;
+    card.appendChild(desc);
+
+    if (!item.ready) {
+      var badge = document.createElement('span');
+      badge.className = 'nav-badge';
+      badge.textContent = '準備中';
+      card.appendChild(badge);
+    }
+    return card;
+  }
+
+  function renderNav() {
+    var g1 = document.getElementById('navGrid1');
+    var g2 = document.getElementById('navGrid2');
+    var i;
+    for (i = 0; i < NAV1.length; i++) {
+      g1.appendChild(buildCard(NAV1[i]));
+    }
+    for (i = 0; i < NAV2.length; i++) {
+      g2.appendChild(buildCard(NAV2[i]));
+    }
+  }
+
+  function setText(id, text) {
+    var el = document.getElementById(id);
+    if (el) { el.textContent = (text == null) ? '' : String(text); }
+  }
+
+  // ----- サロン情報の表示 -----
+  function renderSalon(data) {
+    // data = { info, settings } (dbLoadSalonDashboard の戻り)
+    var info = (data && data.info) ? data.info : null;
+    var settings = (data && data.settings) ? data.settings : null;
+
+    if (info && info.name) {
+      setText('salonName', info.name);
+      document.title = 'TORITA - ' + info.name;
+    } else {
+      setText('salonName', '(サロン名未設定)');
+    }
+    setText('salonEmail', (info && info.email) ? info.email : '-');
+
+    if (settings && settings.openTime && settings.closeTime) {
+      setText('salonHours',
+        settings.openTime + ' 〜 ' + settings.closeTime);
+    } else {
+      setText('salonHours', '-');
+    }
+  }
+
+  // ----- ログアウト -----
+  function doLogout() {
+    uiConfirm('ログアウトしますか?', function () {
+      authLogout(function () {
+        window.location.href = 'salon_auth_v2_new.html';
+      });
+    });
+  }
+  window.doLogout = doLogout;
+
+  // ----- 起動 -----
+  renderNav();
+
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (!isStaff) {
+        // 未ログイン or サロン本人でない → ログイン画面へ
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+      // ログイン済み → ダッシュボードのデータ取得
+      uiShowLoading('読み込み中...');
+      dbLoadSalonDashboard(function (data) {
+        uiHideLoading();
+        if (!data) {
+          uiToast('サロン情報の取得に失敗しました');
+          renderSalon(null);
+          return;
+        }
+        renderSalon(data);
+      });
+    });
+  });
+
+})();
+</script>
+</body>
+</html>
