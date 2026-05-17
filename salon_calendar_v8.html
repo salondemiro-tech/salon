@@ -1,0 +1,499 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TORITA - カレンダー</title>
+<!--
+  salon_calendar_v8.html  -  TORITA Phase C / C-3
+  作成: 2026/5/17
+
+  設計準拠:
+    - DESIGN.md v6 セクション C-3, B-1 (dbLoadSalonCalendar), B-6 (月単位クエリ絞り込み)
+    - 4-1 速度設計 (月切替のたびにその月だけ取得)
+    - 9-3 販売開始時の最小機能「予約一覧（カレンダー）」
+    - 9つの設計ルール #3 (DBアクセスは shared 経由) / #8 / #9
+
+  dbLoadSalonCalendar('YYYY-MM', cb) の戻り bundle:
+    { settings, menus[], appointments[], closeBlocks[], monthStr, dateFrom, dateTo }
+    appointments は pendingCreate / cancelled / no_show 除外済・start昇順ソート済。
+    各 appointment: { dateKey, start, end, status, customerId, menuId,
+                      menuNameSnapshot, priceSnapshot, ... }
+
+  顧客名はスナップショット無し → 日詳細を開いた時だけ dbSalonGetCustomer で取得
+  (月グリッドは件数のみ表示。設計書 B-6 必要最小限取得・速度設計を両立)
+
+  ロード順序 (shared_auth.js ヘッダ契約):
+    firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js
+      → shared_db_calendar.js → shared_db_menu.js → shared_ui.js
+
+  ES5 互換: var / function のみ
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --gn:#7b9e87; --gl:#eef3ef;
+    --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
+    --sun:#c47b7b; --sat:#6f8db0;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2); color:var(--tx);
+    -webkit-text-size-adjust:100%; min-height:100vh;
+  }
+
+  .topbar{
+    background:#fff; border-bottom:1px solid var(--bd);
+    padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:10;
+  }
+  .back-link{
+    background:none; border:none; cursor:pointer;
+    font-family:inherit; font-size:13px; color:var(--mu);
+    display:flex; align-items:center; gap:5px;
+  }
+  .back-link:hover{color:var(--ac);}
+  .topbar-title{
+    font-size:15px; font-weight:600; color:var(--ad);
+    letter-spacing:.03em;
+  }
+  .topbar-spacer{width:60px;}
+
+  .wrap{max-width:680px; margin:0 auto; padding:18px 14px 40px;}
+
+  /* ===== 月ナビ ===== */
+  .month-nav{
+    display:flex; align-items:center; justify-content:space-between;
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    padding:13px 16px; margin-bottom:14px;
+  }
+  .month-nav button{
+    background:var(--al); border:none; color:var(--ad);
+    width:38px; height:38px; border-radius:10px;
+    font-size:17px; cursor:pointer; font-family:inherit;
+  }
+  .month-nav button:hover{background:var(--ac); color:#fff;}
+  .month-nav button:disabled{opacity:.4; cursor:default;}
+  .month-label{
+    font-size:18px; font-weight:600; color:var(--ad);
+  }
+
+  /* ===== カレンダーグリッド ===== */
+  .cal-card{
+    background:#fff; border-radius:14px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    padding:14px 12px; margin-bottom:18px;
+  }
+  .cal-dow{
+    display:grid; grid-template-columns:repeat(7,1fr);
+    margin-bottom:6px;
+  }
+  .cal-dow div{
+    text-align:center; font-size:11px; color:var(--mu);
+    font-weight:600; padding:4px 0;
+  }
+  .cal-dow div.sun{color:var(--sun);}
+  .cal-dow div.sat{color:var(--sat);}
+  .cal-grid{
+    display:grid; grid-template-columns:repeat(7,1fr);
+    gap:4px;
+  }
+  .cal-cell{
+    aspect-ratio:1/1; border-radius:9px;
+    border:1px solid transparent;
+    display:flex; flex-direction:column;
+    align-items:center; justify-content:flex-start;
+    padding:5px 2px 2px; cursor:pointer;
+    background:var(--sf); position:relative;
+    transition:border-color .12s, background .12s;
+    min-height:44px;
+  }
+  .cal-cell:hover{border-color:var(--ac);}
+  .cal-cell.empty{
+    background:transparent; cursor:default;
+  }
+  .cal-cell.empty:hover{border-color:transparent;}
+  .cal-cell.closed{
+    background:var(--s2); opacity:.6; cursor:default;
+  }
+  .cal-cell.closed:hover{border-color:transparent;}
+  .cal-cell.today{
+    border-color:var(--ac); background:var(--al);
+  }
+  .cal-cell.selected{
+    border-color:var(--ac); background:var(--al);
+    box-shadow:0 0 0 2px var(--ac) inset;
+  }
+  .cell-num{
+    font-size:13px; color:var(--tx); font-weight:600;
+    line-height:1.1;
+  }
+  .cell-num.sun{color:var(--sun);}
+  .cell-num.sat{color:var(--sat);}
+  .cell-cnt{
+    margin-top:auto; font-size:10px; color:#fff;
+    background:var(--ac); border-radius:9px;
+    padding:1px 6px; min-width:18px; text-align:center;
+    line-height:1.5;
+  }
+  .cell-closed-txt{
+    margin-top:auto; font-size:9px; color:var(--mu);
+  }
+
+  /* ===== 日詳細 ===== */
+  .day-detail{
+    background:#fff; border-radius:14px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    padding:18px 16px;
+  }
+  .day-detail-head{
+    font-size:15px; font-weight:600; color:var(--ad);
+    margin-bottom:4px;
+  }
+  .day-detail-sub{
+    font-size:12px; color:var(--mu); margin-bottom:14px;
+  }
+  .appt{
+    border:1px solid var(--bd); border-radius:11px;
+    padding:13px 14px; margin-bottom:10px;
+    display:flex; align-items:flex-start; gap:13px;
+  }
+  .appt:last-child{margin-bottom:0;}
+  .appt-time{
+    font-size:14px; font-weight:600; color:var(--ad);
+    white-space:nowrap; min-width:92px;
+  }
+  .appt-body{flex:1; min-width:0;}
+  .appt-cust{
+    font-size:14px; color:var(--tx); font-weight:600;
+    margin-bottom:3px; word-break:break-word;
+  }
+  .appt-menu{
+    font-size:12px; color:var(--mu); line-height:1.5;
+    word-break:break-word;
+  }
+  .appt-price{
+    font-size:12px; color:var(--ac); margin-top:3px;
+  }
+  .empty-msg{
+    text-align:center; color:var(--mu); font-size:13px;
+    padding:24px 0; line-height:1.8;
+  }
+  .placeholder-msg{
+    text-align:center; color:var(--mu); font-size:13px;
+    padding:30px 0;
+  }
+  footer{
+    text-align:center; font-size:10.5px; color:var(--mu);
+    margin-top:24px; letter-spacing:.03em;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back-link" onclick="goDashboard()">&#8592; ダッシュボード</button>
+  <span class="topbar-title">カレンダー</span>
+  <span class="topbar-spacer"></span>
+</div>
+
+<div class="wrap">
+
+  <div class="month-nav">
+    <button id="prevBtn" onclick="changeMonth(-1)">&#8249;</button>
+    <span class="month-label" id="monthLabel">----年--月</span>
+    <button id="nextBtn" onclick="changeMonth(1)">&#8250;</button>
+  </div>
+
+  <div class="cal-card">
+    <div class="cal-dow">
+      <div class="sun">日</div><div>月</div><div>火</div>
+      <div>水</div><div>木</div><div>金</div><div class="sat">土</div>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+  </div>
+
+  <div class="day-detail" id="dayDetail">
+    <div class="placeholder-msg">日付をタップすると、その日の予約が表示されます</div>
+  </div>
+
+  <footer>&copy; TORITA</footer>
+</div>
+
+<!-- ===== Firebase SDK (compat) ===== -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<!-- ===== TORITA 共通ファイル (ロード順序を厳守) ===== -->
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_db_calendar.js"></script>
+<script src="shared_db_menu.js"></script>
+<script src="shared_ui.js"></script>
+
+<!-- ===== 画面固有スクリプト (最小限) ===== -->
+<script>
+(function () {
+
+  var _curYear = 0;
+  var _curMonth = 0;       // 1-12
+  var _bundle = null;      // dbLoadSalonCalendar の戻り
+  var _apptByDate = {};    // { 'YYYY-MM-DD': [appt, ...] }
+  var _selectedKey = null;
+
+  function pad2(n) {
+    n = String(n);
+    return (n.length < 2) ? ('0' + n) : n;
+  }
+  function monthStr() {
+    return _curYear + '-' + pad2(_curMonth);
+  }
+  function todayKey() {
+    var d = new Date();
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1)
+         + '-' + pad2(d.getDate());
+  }
+
+  function goDashboard() {
+    window.location.href = 'salon_dashboard_v1.html';
+  }
+  window.goDashboard = goDashboard;
+
+  // ----- 月切替 -----
+  function changeMonth(delta) {
+    _curMonth += delta;
+    if (_curMonth < 1) { _curMonth = 12; _curYear--; }
+    else if (_curMonth > 12) { _curMonth = 1; _curYear++; }
+    _selectedKey = null;
+    resetDayDetail();
+    loadMonth();
+  }
+  window.changeMonth = changeMonth;
+
+  function setNavDisabled(disabled) {
+    document.getElementById('prevBtn').disabled = disabled;
+    document.getElementById('nextBtn').disabled = disabled;
+  }
+
+  // ----- 月データ取得 (設計書 B-6: その月だけ) -----
+  function loadMonth() {
+    document.getElementById('monthLabel').textContent =
+      _curYear + '年' + _curMonth + '月';
+    setNavDisabled(true);
+    uiShowLoading('読み込み中...');
+
+    dbLoadSalonCalendar(monthStr(), function (bundle) {
+      uiHideLoading();
+      setNavDisabled(false);
+      if (!bundle) {
+        uiToast('カレンダーの取得に失敗しました');
+        _bundle = null;
+        _apptByDate = {};
+        renderGrid();
+        return;
+      }
+      _bundle = bundle;
+      indexAppointments();
+      renderGrid();
+    });
+  }
+
+  // ----- 予約を日付ごとにまとめる -----
+  function indexAppointments() {
+    _apptByDate = {};
+    var arr = (_bundle && _bundle.appointments) ? _bundle.appointments : [];
+    var i;
+    for (i = 0; i < arr.length; i++) {
+      var a = arr[i];
+      var k = a.dateKey;
+      if (!k) { continue; }
+      if (!_apptByDate[k]) { _apptByDate[k] = []; }
+      _apptByDate[k].push(a);
+    }
+  }
+
+  // ----- カレンダーグリッド描画 -----
+  function renderGrid() {
+    var grid = document.getElementById('calGrid');
+    grid.innerHTML = '';
+
+    var settings = (_bundle && _bundle.settings) ? _bundle.settings : null;
+    var firstDow = new Date(_curYear, _curMonth - 1, 1).getDay(); // 0=日
+    var daysInMonth = new Date(_curYear, _curMonth, 0).getDate();
+    var tk = todayKey();
+    var i, cell;
+
+    // 月初までの空セル
+    for (i = 0; i < firstDow; i++) {
+      cell = document.createElement('div');
+      cell.className = 'cal-cell empty';
+      grid.appendChild(cell);
+    }
+
+    // 各日
+    for (i = 1; i <= daysInMonth; i++) {
+      var key = _curYear + '-' + pad2(_curMonth) + '-' + pad2(i);
+      var dow = new Date(_curYear, _curMonth - 1, i).getDay();
+      var isBiz = (typeof calendarIsBusinessDay === 'function')
+        ? calendarIsBusinessDay(key, settings) : true;
+      var appts = _apptByDate[key] || [];
+
+      cell = document.createElement('div');
+      cell.className = 'cal-cell';
+      if (!isBiz) { cell.className += ' closed'; }
+      if (key === tk) { cell.className += ' today'; }
+      if (key === _selectedKey) { cell.className += ' selected'; }
+
+      var num = document.createElement('div');
+      num.className = 'cell-num';
+      if (dow === 0) { num.className += ' sun'; }
+      else if (dow === 6) { num.className += ' sat'; }
+      num.textContent = i;
+      cell.appendChild(num);
+
+      if (!isBiz) {
+        var ct = document.createElement('div');
+        ct.className = 'cell-closed-txt';
+        ct.textContent = '休';
+        cell.appendChild(ct);
+      } else if (appts.length > 0) {
+        var cnt = document.createElement('div');
+        cnt.className = 'cell-cnt';
+        cnt.textContent = appts.length;
+        cell.appendChild(cnt);
+      }
+
+      // クリックで日詳細 (休業日でも予約が入っていれば見られるよう常に有効)
+      (function (k, dayNum, biz) {
+        cell.addEventListener('click', function () {
+          if (cell.className.indexOf('empty') !== -1) { return; }
+          selectDay(k, dayNum, biz);
+        });
+      })(key, i, isBiz);
+
+      grid.appendChild(cell);
+    }
+  }
+
+  function resetDayDetail() {
+    document.getElementById('dayDetail').innerHTML =
+      '<div class="placeholder-msg">日付をタップすると、その日の予約が表示されます</div>';
+  }
+
+  // ----- 日詳細表示 -----
+  function selectDay(key, dayNum, isBiz) {
+    _selectedKey = key;
+    renderGrid();
+
+    var appts = _apptByDate[key] || [];
+    var box = document.getElementById('dayDetail');
+    var dowNames = ['日', '月', '火', '水', '木', '金', '土'];
+    var d = new Date(_curYear, _curMonth - 1, dayNum);
+    var headTxt = _curMonth + '月' + dayNum + '日 ('
+                + dowNames[d.getDay()] + ')';
+
+    var html = '<div class="day-detail-head">' + headTxt + '</div>';
+
+    if (appts.length === 0) {
+      html += '<div class="day-detail-sub">'
+            + (isBiz ? '予約はありません' : '定休日') + '</div>';
+      html += '<div class="empty-msg">'
+            + (isBiz ? 'この日の予約はまだありません'
+                     : 'この日は定休日です') + '</div>';
+      box.innerHTML = html;
+      return;
+    }
+
+    html += '<div class="day-detail-sub">予約 ' + appts.length + ' 件</div>';
+    // 顧客名を取得しながら描画 (この日の分だけ・設計書 B-6 必要最小限)
+    box.innerHTML = html + '<div class="empty-msg">読み込み中...</div>';
+    renderAppts(box, html, appts);
+  }
+
+  // ----- 予約リスト描画 (顧客名を順次取得) -----
+  function renderAppts(box, headHtml, appts) {
+    var results = new Array(appts.length);
+    var pending = appts.length;
+    var i;
+
+    function buildOne(idx, custName) {
+      var a = appts[idx];
+      var timeTxt = (a.start || '--:--');
+      if (a.end) { timeTxt += ' 〜 ' + a.end; }
+      var menuName = a.menuNameSnapshot || '(メニュー情報なし)';
+      var priceTxt = '';
+      if (typeof a.priceSnapshot === 'number') {
+        priceTxt = '\u00A5' + a.priceSnapshot.toLocaleString();
+      }
+      var html = '<div class="appt">'
+        + '<div class="appt-time">' + esc(timeTxt) + '</div>'
+        + '<div class="appt-body">'
+        + '<div class="appt-cust">' + esc(custName) + '</div>'
+        + '<div class="appt-menu">' + esc(menuName) + '</div>'
+        + (priceTxt ? '<div class="appt-price">' + esc(priceTxt)
+                      + '</div>' : '')
+        + '</div></div>';
+      return html;
+    }
+
+    function finalize() {
+      var out = headHtml;
+      var j;
+      for (j = 0; j < results.length; j++) {
+        out += results[j];
+      }
+      box.innerHTML = out;
+    }
+
+    for (i = 0; i < appts.length; i++) {
+      (function (idx) {
+        var a = appts[idx];
+        if (!a.customerId) {
+          results[idx] = buildOne(idx, '(顧客情報なし)');
+          pending--;
+          if (pending <= 0) { finalize(); }
+          return;
+        }
+        dbSalonGetCustomer(a.customerId, function (cust) {
+          var nm = (cust && cust.name) ? cust.name : '(顧客名未取得)';
+          results[idx] = buildOne(idx, nm);
+          pending--;
+          if (pending <= 0) { finalize(); }
+        });
+      })(i);
+    }
+  }
+
+  function esc(s) {
+    s = (s == null) ? '' : String(s);
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ----- 起動 -----
+  var now = new Date();
+  _curYear = now.getFullYear();
+  _curMonth = now.getMonth() + 1;
+
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (!isStaff) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+      loadMonth();
+    });
+  });
+
+})();
+</script>
+</body>
+</html>
