@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TORITA - サロン管理 ログイン</title>
+<!--
+  salon_auth_v2_new.html  -  TORITA Phase C / C-1
+  作成: 2026/5/17
+
+  設計準拠:
+    - DESIGN.md v6 セクション 3-1 (サロンオーナー認証)
+    - 9つの設計ルール #8 (HTML内JSは最小限) / #9 (顧客と管理を完全分離)
+    - 認証ロジックは全て shared_auth.js 経由。この HTML には Firebase 直叩きを書かない。
+
+  ロード順序 (設計書 / shared_auth.js ヘッダ契約):
+    firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js → shared_ui.js
+
+  画面遷移:
+    ログイン成功 → salon_dashboard_v1.html (Phase C-2 で作成)
+
+  ES5 互換: var / function のみ
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --gn:#7b9e87; --gl:#eef3ef;
+    --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2);
+    display:flex; align-items:center; justify-content:center;
+    min-height:100vh; padding:20px; color:var(--tx);
+    -webkit-text-size-adjust:100%;
+  }
+  input{background:#fff !important; color:var(--tx) !important;}
+  .card{
+    width:100%; max-width:410px; background:#fff;
+    border-radius:18px; box-shadow:0 10px 38px rgba(0,0,0,.13);
+    padding:34px 30px;
+  }
+  .logo{text-align:center; margin-bottom:22px;}
+  .logo-mark{font-size:28px; color:var(--ac); font-weight:600; letter-spacing:.06em;}
+  .logo-sub{font-size:11px; color:var(--mu); margin-top:5px; letter-spacing:.04em;}
+  .badge{
+    display:inline-block; background:var(--al); color:var(--ad);
+    font-size:11px; font-weight:600; padding:3px 12px;
+    border-radius:20px; margin-bottom:8px;
+  }
+  h2{
+    font-size:16px; font-weight:600; color:var(--ad);
+    text-align:center; margin-bottom:20px;
+  }
+  .fg{margin-bottom:15px;}
+  .fg label{
+    font-size:12px; color:var(--mu); font-weight:600;
+    display:block; margin-bottom:6px;
+  }
+  .fg input{
+    width:100%; padding:12px 13px;
+    border:1.5px solid var(--bd); border-radius:10px;
+    font-size:15px; font-family:inherit;
+  }
+  .fg input:focus{outline:none; border-color:var(--ac);}
+  .pw-wrap{position:relative;}
+  .pw-eye{
+    position:absolute; right:10px; top:50%;
+    transform:translateY(-50%); background:none; border:none;
+    cursor:pointer; font-size:14px; color:var(--mu); padding:6px;
+    font-family:inherit;
+  }
+  .hint{font-size:11px; color:var(--mu); margin-top:5px; line-height:1.6;}
+  .msg{
+    font-size:12.5px; border-radius:9px; padding:10px 12px;
+    margin:6px 0 12px; display:none; line-height:1.6;
+  }
+  .msg.err{color:var(--rt); background:var(--rl);}
+  .msg.ok{color:#33543f; background:var(--gl);}
+  .msg.show{display:block;}
+  .btn{
+    width:100%; padding:14px; background:var(--ac); color:#fff;
+    border:none; border-radius:11px; font-size:15px; font-weight:600;
+    cursor:pointer; font-family:inherit; margin-top:6px;
+    transition:background .15s;
+  }
+  .btn:hover{background:var(--ad);}
+  .btn:disabled{background:#dcdcdc; color:#a5a5a5; cursor:not-allowed;}
+  .btn.sub{
+    background:none; color:var(--mu);
+    border:1.5px solid var(--bd); margin-top:11px;
+  }
+  .btn.sub:hover{border-color:var(--ac); color:var(--ac); background:none;}
+  .text-link{
+    background:none; border:none; font-size:12.5px; color:var(--ac);
+    cursor:pointer; font-family:inherit; text-decoration:underline;
+    display:block; text-align:center; margin-top:14px; width:100%;
+  }
+  .divider{
+    display:flex; align-items:center; gap:12px;
+    margin:18px 0 14px;
+  }
+  .divider::before,.divider::after{
+    content:''; flex:1; height:1px; background:var(--bd);
+  }
+  .divider span{font-size:11px; color:var(--mu); letter-spacing:.04em;}
+  .hidden{display:none;}
+  .resend-box{
+    background:var(--sf); border:1px solid var(--bd);
+    border-radius:10px; padding:13px; margin-top:12px;
+    font-size:12.5px; color:var(--mu); line-height:1.7;
+    display:none;
+  }
+  .resend-box.show{display:block;}
+  .resend-box button{
+    background:none; border:none; color:var(--ac);
+    text-decoration:underline; cursor:pointer;
+    font-family:inherit; font-size:12.5px; padding:0;
+  }
+  footer{
+    text-align:center; font-size:10.5px; color:var(--mu);
+    margin-top:18px; letter-spacing:.03em;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+
+  <div class="logo">
+    <div class="logo-mark">TORITA</div>
+    <div class="logo-sub">SALON RESERVATION SYSTEM</div>
+  </div>
+
+  <!-- ===== ログインビュー ===== -->
+  <div id="viewLogin">
+    <div style="text-align:center;"><span class="badge">サロン管理</span></div>
+    <h2>ログイン</h2>
+
+    <div class="fg">
+      <label for="loginEmail">メールアドレス</label>
+      <input id="loginEmail" type="email" autocomplete="username"
+             inputmode="email" placeholder="salon@example.com">
+    </div>
+
+    <div class="fg">
+      <label for="loginPw">パスワード</label>
+      <div class="pw-wrap">
+        <input id="loginPw" type="password" autocomplete="current-password"
+               placeholder="パスワード">
+        <button type="button" class="pw-eye"
+                onclick="togglePw('loginPw', this)">表示</button>
+      </div>
+    </div>
+
+    <div id="loginMsg" class="msg"></div>
+
+    <div id="loginResend" class="resend-box">
+      メール確認が完了していません。届いたメール内のリンクをタップしてから、
+      もう一度ログインしてください。<br>
+      メールが見当たらない場合は
+      <button type="button" onclick="doResend()">確認メールを再送</button>
+      してください。
+    </div>
+
+    <button id="loginBtn" class="btn" onclick="doLogin()">ログイン</button>
+    <button class="btn sub" onclick="showView('Register')">
+      新しくサロンを登録する
+    </button>
+    <button class="text-link" onclick="showView('Reset')">
+      パスワードをお忘れですか?
+    </button>
+  </div>
+
+  <!-- ===== 新規登録ビュー ===== -->
+  <div id="viewRegister" class="hidden">
+    <div style="text-align:center;"><span class="badge">新規サロン登録</span></div>
+    <h2>サロンを登録</h2>
+
+    <div class="fg">
+      <label for="regSalon">サロン名</label>
+      <input id="regSalon" type="text" autocomplete="organization"
+             placeholder="例: Salon de Miro">
+    </div>
+
+    <div class="fg">
+      <label for="regEmail">メールアドレス</label>
+      <input id="regEmail" type="email" autocomplete="username"
+             inputmode="email" placeholder="salon@example.com">
+    </div>
+
+    <div class="fg">
+      <label for="regPw">パスワード</label>
+      <div class="pw-wrap">
+        <input id="regPw" type="password" autocomplete="new-password"
+               placeholder="6文字以上">
+        <button type="button" class="pw-eye"
+                onclick="togglePw('regPw', this)">表示</button>
+      </div>
+      <div class="hint">6文字以上で設定してください。</div>
+    </div>
+
+    <div id="regMsg" class="msg"></div>
+
+    <button id="regBtn" class="btn" onclick="doRegister()">
+      登録して確認メールを受け取る
+    </button>
+    <button class="btn sub" onclick="showView('Login')">
+      ログイン画面に戻る
+    </button>
+  </div>
+
+  <!-- ===== 登録完了ビュー ===== -->
+  <div id="viewDone" class="hidden">
+    <div style="text-align:center;"><span class="badge">登録完了</span></div>
+    <h2>確認メールを送信しました</h2>
+    <div class="msg ok show" id="doneMsg">
+      ご登録ありがとうございます。<br>
+      入力されたメールアドレス宛に確認メールをお送りしました。
+      メール内のリンクをタップして確認を完了してから、ログインしてください。
+    </div>
+    <button class="btn" onclick="showView('Login')">
+      ログイン画面へ
+    </button>
+  </div>
+
+  <!-- ===== パスワードリセットビュー ===== -->
+  <div id="viewReset" class="hidden">
+    <div style="text-align:center;"><span class="badge">パスワード再設定</span></div>
+    <h2>パスワードをリセット</h2>
+
+    <div class="fg">
+      <label for="resetEmail">登録メールアドレス</label>
+      <input id="resetEmail" type="email" autocomplete="username"
+             inputmode="email" placeholder="salon@example.com">
+      <div class="hint">
+        このアドレス宛に、パスワード再設定用のメールを送信します。
+      </div>
+    </div>
+
+    <div id="resetMsg" class="msg"></div>
+
+    <button id="resetBtn" class="btn" onclick="doReset()">
+      再設定メールを送信
+    </button>
+    <button class="btn sub" onclick="showView('Login')">
+      ログイン画面に戻る
+    </button>
+  </div>
+
+  <footer>&copy; TORITA</footer>
+</div>
+
+<!-- ===== Firebase SDK (compat) ===== -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<!-- ===== TORITA 共通ファイル (設計書のロード順序を厳守) ===== -->
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_ui.js"></script>
+
+<!-- ===== 画面固有スクリプト (最小限: イベントハンドラのみ) ===== -->
+<script>
+(function () {
+
+  // ----- ビュー切替 -----
+  var VIEWS = ['Login', 'Register', 'Done', 'Reset'];
+
+  function showView(name) {
+    var i;
+    for (i = 0; i < VIEWS.length; i++) {
+      var el = document.getElementById('view' + VIEWS[i]);
+      if (el) {
+        if (VIEWS[i] === name) {
+          el.classList.remove('hidden');
+        } else {
+          el.classList.add('hidden');
+        }
+      }
+    }
+    // ビュー切替時にメッセージをクリア
+    hideMsg('loginMsg'); hideMsg('regMsg'); hideMsg('resetMsg');
+    var rb = document.getElementById('loginResend');
+    if (rb) { rb.classList.remove('show'); }
+  }
+  window.showView = showView;
+
+  // ----- メッセージ表示 -----
+  function showMsg(id, text, isOk) {
+    var el = document.getElementById(id);
+    if (!el) { return; }
+    el.textContent = text;
+    el.className = 'msg ' + (isOk ? 'ok' : 'err') + ' show';
+  }
+  function hideMsg(id) {
+    var el = document.getElementById(id);
+    if (el) { el.className = 'msg'; }
+  }
+
+  // ----- パスワード表示切替 -----
+  function togglePw(inputId, btn) {
+    var inp = document.getElementById(inputId);
+    if (!inp) { return; }
+    if (inp.type === 'password') {
+      inp.type = 'text';
+      btn.textContent = '隠す';
+    } else {
+      inp.type = 'password';
+      btn.textContent = '表示';
+    }
+  }
+  window.togglePw = togglePw;
+
+  // ----- ボタンの活性制御 -----
+  function setBusy(btnId, busy, busyText, normalText) {
+    var b = document.getElementById(btnId);
+    if (!b) { return; }
+    b.disabled = busy;
+    b.textContent = busy ? busyText : normalText;
+  }
+
+  function val(id) {
+    var el = document.getElementById(id);
+    return el ? String(el.value || '').trim() : '';
+  }
+
+  // ===== ログイン =====
+  function doLogin() {
+    var email = val('loginEmail');
+    var pw = val('loginPw');
+    hideMsg('loginMsg');
+    document.getElementById('loginResend').classList.remove('show');
+
+    if (!email || !pw) {
+      showMsg('loginMsg', 'メールアドレスとパスワードを入力してください。', false);
+      return;
+    }
+    setBusy('loginBtn', true, 'ログイン中...', 'ログイン');
+
+    authSalonLogin(email, pw, function (res) {
+      if (res && res.ok) {
+        // 成功 → ダッシュボードへ
+        uiToast('ログインしました');
+        window.location.href = 'salon_dashboard_v1.html';
+        return;
+      }
+      setBusy('loginBtn', false, 'ログイン中...', 'ログイン');
+
+      if (res && res.needEmailVerification) {
+        document.getElementById('loginResend').classList.add('show');
+        showMsg('loginMsg',
+          (res && res.message) ? res.message
+            : 'メール確認が完了していません。', false);
+        return;
+      }
+      showMsg('loginMsg',
+        (res && res.message) ? res.message
+          : 'ログインに失敗しました。入力内容をご確認ください。', false);
+    });
+  }
+  window.doLogin = doLogin;
+
+  // ===== 確認メール再送 =====
+  function doResend() {
+    // authSalonResendVerification は「今 currentUser がいれば送る」実装。
+    // 直前のログイン試行で signIn 済みなら currentUser が残っている。
+    authSalonResendVerification(function (res) {
+      if (res && res.ok) {
+        uiToast('確認メールを再送しました');
+        showMsg('loginMsg',
+          '確認メールを再送しました。メールをご確認ください。', true);
+      } else {
+        // currentUser が無い場合 → もう一度ログインを促す
+        showMsg('loginMsg',
+          (res && res.message) ? res.message
+            : '再送に失敗しました。もう一度ログインからお試しください。', false);
+      }
+    });
+  }
+  window.doResend = doResend;
+
+  // ===== 新規登録 =====
+  function doRegister() {
+    var salon = val('regSalon');
+    var email = val('regEmail');
+    var pw = val('regPw');
+    hideMsg('regMsg');
+
+    if (!salon) {
+      showMsg('regMsg', 'サロン名を入力してください。', false);
+      return;
+    }
+    if (!email) {
+      showMsg('regMsg', 'メールアドレスを入力してください。', false);
+      return;
+    }
+    if (!pw || pw.length < 6) {
+      showMsg('regMsg', 'パスワードは6文字以上で設定してください。', false);
+      return;
+    }
+    setBusy('regBtn', true, '登録中...', '登録して確認メールを受け取る');
+
+    authSalonRegister(email, pw, salon, function (res) {
+      setBusy('regBtn', false, '登録中...', '登録して確認メールを受け取る');
+      if (res && res.ok) {
+        var dm = document.getElementById('doneMsg');
+        if (dm && res.message) {
+          dm.textContent = res.message;
+        }
+        showView('Done');
+        return;
+      }
+      showMsg('regMsg',
+        (res && res.message) ? res.message
+          : '登録に失敗しました。時間をおいて再度お試しください。', false);
+    });
+  }
+  window.doRegister = doRegister;
+
+  // ===== パスワードリセット =====
+  function doReset() {
+    var email = val('resetEmail');
+    hideMsg('resetMsg');
+    if (!email) {
+      showMsg('resetMsg', 'メールアドレスを入力してください。', false);
+      return;
+    }
+    setBusy('resetBtn', true, '送信中...', '再設定メールを送信');
+
+    authSendPasswordReset(email, function (res) {
+      setBusy('resetBtn', false, '送信中...', '再設定メールを送信');
+      if (res && res.ok) {
+        showMsg('resetMsg',
+          (res && res.message) ? res.message
+            : 'パスワード再設定メールを送信しました。', true);
+      } else {
+        showMsg('resetMsg',
+          (res && res.message) ? res.message
+            : '送信に失敗しました。メールアドレスをご確認ください。', false);
+      }
+    });
+  }
+  window.doReset = doReset;
+
+  // ===== 起動時: 既にログイン済みなら自動でダッシュボードへ =====
+  // requireSalonStaff は onFbReady 後に Auth UID==salonId を判定する。
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (isStaff) {
+        // 既にログイン済みのオーナー → 自動遷移
+        window.location.href = 'salon_dashboard_v1.html';
+      }
+    });
+  });
+
+  // Enter キーで送信 (ログイン欄)
+  var lpw = document.getElementById('loginPw');
+  if (lpw) {
+    lpw.addEventListener('keydown', function (e) {
+      // 古い iPad Safari 互換: e.key と keyCode の両方を見る
+      if (e.key === 'Enter' || e.keyCode === 13) { doLogin(); }
+    });
+  }
+
+})();
+</script>
+</body>
+</html>
