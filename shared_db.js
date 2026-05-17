@@ -441,6 +441,95 @@
   }
   window.dbSalonDeleteCustomer = dbSalonDeleteCustomer;
 
+  // ------------------------------------------------------------
+  // Phase B-8: サロン側 顧客詳細の来店履歴 (current + archive 統合)
+  //
+  // 設計準拠:
+  //   - DESIGN.md v6 セクション 7 Phase B B-8
+  //     「顧客履歴 / 顧客詳細画面は appointments(current) と
+  //       appointments_archive の両方を読みに行く」
+  //   - DESIGN_NOTES.md 項目7:
+  //       原設計の「6ヶ月 / 月次バッチ」は早すぎるため
+  //       「18ヶ月 / 半年に1回バッチ」に修正済み。
+  //       なお appointments → appointments_archive へ移す
+  //       Cloud Functions バッチ自体は後回し (今回方針)。
+  //       今は「読む側」だけ両対応にしておき、将来バッチを足しても
+  //       このAPIを一切変えずに済むようにする (設計書 0-2 の指針)。
+  //
+  //   dbLoadCustomerHistory (B-1) は「顧客本人が自分の履歴を見る」用。
+  //   こちらは「サロンスタッフが特定顧客の来店履歴を見る」用 (顧客詳細画面)。
+  //   firestore.rules: appointments / appointments_archive とも
+  //   read は isSalonStaff(salonId) で許可済み (A-step1, 360-365行)。
+  //
+  //   B-6: customerId == 指定顧客で絞り、dateKey 降順 + limit。
+  //        全件 get() しない。
+  //
+  //   戻り値: { current:[...], archive:[...], merged:[...] }
+  //     merged は dateKey 降順 (同日は start 降順) で統合済み。
+  // ------------------------------------------------------------
+  function dbSalonGetCustomerHistory(customerId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !customerId) { _safeCb(cb, null); return; }
+
+    var HISTORY_LIMIT = 100; // サロン側は本人画面より多めに見たい
+
+    function _queryCust(col) {
+      return col.where('customerId', '==', customerId)
+                .orderBy('dateKey', 'desc')
+                .limit(HISTORY_LIMIT);
+    }
+
+    _parallelLoad([
+      {
+        key: 'current',
+        run: function (done) {
+          dbReadCollection(
+            'salons/' + sid + '/appointments',
+            _queryCust,
+            function (v) { done(v || []); }
+          );
+        }
+      },
+      {
+        key: 'archive',
+        run: function (done) {
+          dbReadCollection(
+            'salons/' + sid + '/appointments_archive',
+            _queryCust,
+            function (v) {
+              // archive がまだ無い / 空でも [] に正規化
+              done(v || []);
+            }
+          );
+        }
+      }
+    ], function (bundle) {
+      var cur = bundle.current || [];
+      var arc = bundle.archive || [];
+      var merged = [];
+      var i;
+      for (i = 0; i < cur.length; i++) { merged.push(cur[i]); }
+      for (i = 0; i < arc.length; i++) { merged.push(arc[i]); }
+      merged.sort(function (a, b) {
+        var ak = a.dateKey || '';
+        var bk = b.dateKey || '';
+        if (ak === bk) {
+          var as = a.start || '';
+          var bs = b.start || '';
+          if (as === bs) { return 0; }
+          return (as < bs) ? 1 : -1;
+        }
+        return (ak < bk) ? 1 : -1;
+      });
+      _safeCb(cb, {
+        current: cur,
+        archive: arc,
+        merged: merged
+      });
+    });
+  }
+  window.dbSalonGetCustomerHistory = dbSalonGetCustomerHistory;
+
   // 予約一覧
   // filterObj: { dateKey: '2026-05-14' } のように指定可能 (任意)
   //            指定なしなら全件
@@ -1068,10 +1157,12 @@
       'dbLoadCustomerHome',
       'dbLoadCustomerBooking',
       'dbLoadCustomerHistory'
-    ]
+    ],
+    // Phase B-8: サロン側 顧客詳細の current+archive 統合履歴
+    salonCustomerHistoryApi: 'dbSalonGetCustomerHistory'
   };
 
   console.log('[shared_db] loaded. urlSalonId =', _urlSalonId,
-              '(Phase B-1: 8 dbLoad* APIs ready)');
+              '(Phase B complete: B-1 8 dbLoad* APIs + B-8 archive-merge ready)');
 
 })();
