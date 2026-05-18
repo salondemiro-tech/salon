@@ -132,49 +132,110 @@ salons/{salonId}/appointments/{appointmentId} {
 
 このルールは `shared_db_reservation.js` の専用関数 `customerCancelAppointment` / `salonMarkNoShow` / `salonMarkCompleted` 経由でのみ呼び出される。Firestoreルールでもこの遷移を強制する。
 
-#### 顧客ドキュメントの設計（最初からこの形）
+#### 顧客ドキュメントの設計（v8.1 顧客 identity モデル＝確定版）
+
+> **この節は 2026/5/17 の顧客 identity 設計改訂（v7→v8→v8.1、Claude/GPT/
+> いけさん 3者合意）で全面改訂された。詳細・背景・全リスク分析は
+> `DESIGN_v8_1_customer_identity.md` を参照。本節はその要点を本体に反映
+> したもの。両者が食い違う場合は v8.1 文書を正とする。**
+
+**改訂の理由**：旧 v6 は「`customerId` = 顧客の Auth UID」を背骨にして
+いたが、サロン側顧客登録（電話予約客をサロンが登録）を入れると、
+Auth 未登録の顧客が普通に存在するためこの前提が壊れる。
+→ **顧客ドキュメント ID（採番）と Auth UID を分離する。**
+
+**ID 命名の完全分離（最重要・事故防止）**
+
+| 用語 | 意味 |
+|---|---|
+| `customerDocId` | 顧客カルテのドキュメント ID（Firestore 自動採番）|
+| `authUid` | 顧客の Firebase Auth UID（アプリ登録時のみ存在）|
+| `salonId` | サロン ID（=オーナー Auth UID、不変）|
+
+**禁止**：新コードで `customerId` という曖昧名を使わない。
+v6 の `customerId` は全て `customerDocId` に改名する。
 
 ```
-salons/{salonId}/customers/{customerId} {
-  // === 顧客自身が編集できるフィールド ===
+salons/{salonId}/customers/{customerDocId} {
+  // customerDocId = Firestore 自動採番（Auth UID ではない）
   name: "山田 花子",
   phone: "090-1234-5678",
-  notifyChannels: {
-    email: true,                       // メール通知ON/OFF
-    line: false                        // LINE通知ON/OFF
-    // lineUserId はここに含まない（サーバ側のみ書き込み）
-  },
+  email: "hanako@example.com",       // 任意（サロン登録時は空可）
 
-  // === サロンスタッフのみ編集できるフィールド ===
-  memo: "敏感肌、ヘッドスパ希望多",     // スタッフ用メモ（顧客は読めない）
-  stampCount: 5,                       // スタンプカード残数
-  lastVisit: <Timestamp>,              // 最終来店日
-  totalSpent: 84000,                   // 累計使用金額
+  authUid: null,                     // キャッシュ。正規参照は authIndex
+  createdSource: "salon",            // salon|self|import|line|admin|...
+  notifyChannels: { email: true, line: false },
 
-  // === サーバ側 (Functions) のみ書き込めるフィールド ===
-  lineUserId: null,                    // LINE 友だち追加時に Webhook が設定
+  memo: "敏感肌",                    // スタッフのみ
+  stampCount: 5,                     // スタッフのみ（merge は再計算が正）
+  lastVisit: <Timestamp>,
+  totalSpent: 84000,                 // スタッフのみ（merge は再計算が正）
+
+  // merge 関連（soft delete）
+  isMerged: false,
+  mergedInto: null,
+  mergedAt: null,
+  mergedAliases: [],
+  lockedByJob: null,                 // merge 処理中の jobId（排他制御）。
+                                     // Function のみ書込・通常 null
+
+  lineUserId: null,                  // サーバ専用
   createdAt: <serverTimestamp>,
   updatedAt: <serverTimestamp>
 }
 ```
 
-**核心原則：顧客は自分のドキュメントを「自由には書けない」**
+**逆引きインデックス authIndex（速度対策・source of truth）**
 
-顧客がスタンプカード残数 `stampCount` を勝手に増やしたり、累計使用金額 `totalSpent` を改ざんしたりできないように、編集可能フィールドを厳密に分離する。
+```
+salons/{salonId}/authIndex/{authUid} {
+  customerDocId: "cus_a1b2c3"
+}
+```
+- 顧客アプリは自分の `authUid` → `authIndex/{authUid}` を1回 get →
+  `customerDocId` を得て `customers/{customerDocId}` を直 get
+  （query 不要・index 不要・速い・安い）
+- **`authIndex` が source of truth**。`customers.authUid` は
+  キャッシュ（写し）。両者の更新は Cloud Function のみ。
+  不一致時は authIndex を正とする
+
+**予約ドキュメントへの影響**：`appointments` の `customerId` を
+`customerDocId` に改名。`authUid`（予約者の Auth UID、あれば）と
+`customerSnapshot: {name, phone}`（予約時点の顧客情報・不変）を持つ。
+merge で customerDocId を付け替えても customerSnapshot は変えない。
+
+**核心原則：顧客は自分のドキュメントを「自由には書けない」**
 
 | カテゴリ | フィールド | 顧客本人 | サロンスタッフ | サーバ(Functions) |
 |---|---|---|---|---|
 | プロフィール | `name`, `phone` | ✅ | ✅ | ✅ |
-| 通知ON/OFF | `notifyChannels.email`, `notifyChannels.line` | ✅ | ✅ | ✅ |
+| 通知 | `notifyChannels.email/line` | ✅ | ✅ | ✅ |
 | サロン管理 | `memo`, `stampCount`, `lastVisit`, `totalSpent` | ❌ | ✅ | ✅ |
+| identity | `authUid`, `createdSource` | ❌ | ❌ | ✅(Function) |
+| merge | `isMerged`,`mergedInto`,`mergedAt`,`mergedAliases`,`lockedByJob` | ❌ | ❌ | ✅(Function) |
 | サーバ管理 | `lineUserId` | ❌ | ❌ | ✅ |
 | メタ | `createdAt`, `updatedAt` | ❌ | ❌ | ✅ |
 
-**読み取り権限**：
-- 顧客は自分のドキュメントを読める（ただし `memo` は将来的に分離検討）
-- サロンスタッフは全顧客を読み書きできる
+**サロン側顧客登録**：サロンが電話予約客等を登録（`authUid:null`,
+`createdSource:"salon"`）。Auth アカウントは作らない。
 
-Firestoreルールでは `diff().affectedKeys().hasOnly([顧客許可リスト])` で顧客の書き込みフィールドを制限する。
+**claim（顧客アプリ登録時に既存カルテへ紐付け）条件 B**：
+顧客アプリ登録で `emailVerified==true` かつ 同一サロンに email 完全一致
+する未 claim（authUid==null・isMerged==false）カルテがちょうど1件ある
+時のみ、Function がそのカルテに authUid を付与＋authIndex を作成。
+不成立なら新カルテ＋サロンに統合候補提示（人間が判断）。
+電話番号 claim は本人証明できないため不採用。
+
+**顧客統合（merge）**：callable Function のみ（クライアント batch 禁止）。
+予約の customerDocId を付替（current+archive 両方）、stampCount/
+totalSpent は履歴から再計算（単純合算は暫定）、統合元は物理削除せず
+soft delete（isMerged/mergedInto/mergedAt）、mergedAliases に旧 ID。
+排他制御：開始時トランザクションで src/dst を lockedByJob ロック、
+mergeJobs でジョブ状態管理（pending/processing/completed/failed）。
+詳細は v8.1 文書 3 章。
+
+Firestoreルールでは `diff().affectedKeys().hasOnly([顧客許可リスト])` で
+顧客の書き込みフィールドを制限する（詳細は 3-3）。
 
 
 
@@ -410,7 +471,17 @@ exit $FOUND
   7. Firebase Auth が `emailVerified=true` を確認してログイン許可
 - フロー（再ログイン）: メール+パスワード入力のみ
 - 顧客にも Firebase Auth UID が発行される
-- 顧客ドキュメント ID = 顧客の Auth UID（最初からこの設計で作る）
+- ★ v8.1 改訂：顧客ドキュメント ID は **Firestore 採番
+  （`customerDocId`）**。Auth UID（`authUid`）とは分離。
+  顧客アプリは `authIndex/{authUid}` 経由で自分のカルテを解決する
+- ★ claim（既存カルテへの紐付け）条件 B：
+  顧客アプリ登録で `emailVerified==true` かつ、同一サロンに
+  email 完全一致の未 claim（`authUid==null`・`isMerged==false`）
+  カルテがちょうど1件ある時のみ、Function がそのカルテに
+  `authUid` を付与し `authIndex` を作成（既存カルテに紐付く）。
+  不成立なら新カルテ作成（`createdSource:"self"`）＋サロンに
+  統合候補を提示（人間が判断）。電話番号 claim は本人証明
+  できないため不採用。詳細は `DESIGN_v8_1_customer_identity.md` 2 章
 - パスワード忘れた時：Firebase 標準の `sendPasswordResetEmail` を使う
 
 ### 3-3. Firestore セキュリティルール（最小限の関所）
@@ -463,83 +534,122 @@ match /salons/{salonId} {
     allow write: if isSalonStaff(salonId);
   }
   
-  match /customers/{customerId} {
-    // 読み取り：サロンスタッフは全員、顧客は自分自身のみ
-    allow read: if isSalonStaff(salonId) || request.auth.uid == customerId;
-    
-    // 作成：本人だけが自分のドキュメントを作成可能（フィールドホワイトリスト）
-    allow create: if request.auth.uid == customerId &&
-                    request.resource.data.keys().hasOnly([
-                      'name', 'phone', 'notifyChannels', 'createdAt'
-                    ]) &&
-                    request.resource.data.notifyChannels.keys().hasOnly(['email', 'line']);
-    
-    // 更新：
-    //  - 顧客本人は name, phone, notifyChannels.email, notifyChannels.line のみ
-    //  - サロンスタッフは memo, stampCount, lastVisit, totalSpent も含めて全部
-    //  - lineUserId はサーバー(Functions)のみ書き込み可能 → Rules では誰も書き込めない
-    allow update: if (
-      // 顧客本人
-      (request.auth.uid == customerId &&
-       request.resource.data.diff(resource.data).affectedKeys()
-         .hasOnly(['name', 'phone', 'notifyChannels', 'updatedAt']))
+  match /customers/{customerDocId} {
+    // ★ v8.1 改訂：customerDocId は Firestore 採番。本人判定は
+    //   resource.data.authUid == request.auth.uid（uid 直比較ではない）
+
+    // 読み取り：サロンスタッフ全員 / 本人（authUid 一致）
+    allow read: if isSalonStaff(salonId)
+                || (isSignedIn() &&
+                    resource.data.authUid == request.auth.uid);
+
+    // 作成：(a) サロンが仮登録（authUid=null 必須） /
+    //       (b) 顧客本人がアプリ登録（authUid==自分の uid 必須）
+    allow create: if
+      ( isSalonStaff(salonId) &&
+        request.resource.data.authUid == null &&
+        request.resource.data.createdSource == 'salon' &&
+        request.resource.data.keys().hasOnly([
+          'name','phone','email','authUid','createdSource',
+          'notifyChannels','isMerged','mergedInto','mergedAt',
+          'mergedAliases','createdAt'
+        ]) )
       ||
-      // サロンスタッフ（lineUserId 変更だけは禁止 = サーバ専用フィールド）
-      (isSalonStaff(salonId) &&
-       !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lineUserId']))
-    );
-    
+      ( isSignedIn() &&
+        request.resource.data.authUid == request.auth.uid &&
+        request.resource.data.createdSource == 'self' &&
+        request.resource.data.keys().hasOnly([
+          'name','phone','email','authUid','createdSource',
+          'notifyChannels','isMerged','mergedInto','mergedAt',
+          'mergedAliases','createdAt'
+        ]) );
+
+    // 更新：顧客本人は name/phone/notifyChannels のみ。
+    //   サロンは memo/stampCount 等可。ただし authUid/merge系/
+    //   createdSource/lockedByJob/lineUserId はクライアント不可
+    //   （Function=admin のみ。source of truth と merge 排他制御の要）
+    allow update: if
+      ( isSignedIn() &&
+        resource.data.authUid == request.auth.uid &&
+        request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['name','phone','notifyChannels','updatedAt']) )
+      ||
+      ( isSalonStaff(salonId) &&
+        !request.resource.data.diff(resource.data).affectedKeys()
+          .hasAny(['lineUserId','authUid','isMerged','mergedInto',
+                   'mergedAt','mergedAliases','createdSource',
+                   'lockedByJob']) );
+
+    // 削除：物理削除はオーナーのみ（通常運用は soft delete）
     allow delete: if isSalonOwner(salonId);
+  }
+
+  // ★ v8.1 新規：逆引きインデックス（source of truth）
+  match /authIndex/{authUid} {
+    allow read:  if (isSignedIn() && authUid == request.auth.uid)
+                 || isSalonStaff(salonId);
+    // 作成・更新・削除はクライアント不可。claim/merge は
+    // Function(admin) が行う＝source of truth を一元管理
+    allow write: if false;
+  }
+
+  // ★ v8.1 新規：merge ジョブ（排他制御・進捗管理）
+  match /mergeJobs/{jobId} {
+    allow read:  if isSalonStaff(salonId);   // UIが進捗表示に使う
+    allow write: if false;                   // Function(admin)のみ
   }
   
   match /appointments/{appointmentId} {
-    // 読み取り：サロンのスタッフ or 予約本人
-    allow read: if isSalonStaff(salonId) 
-                || request.auth.uid == resource.data.customerId;
+    // ★ v8.1 改訂：customerId→customerDocId 改名。
+    //   予約本人判定は resource.data.authUid == request.auth.uid
 
-    // 作成：顧客が直接書き込めるフィールドを最小限に絞る（end/staffId/resourceIds/priceSnapshot/createdAt/status はサーバ確定）
+    // 読み取り：サロンのスタッフ or 予約本人（authUid 一致）
+    allow read: if isSalonStaff(salonId)
+                || (isSignedIn() &&
+                    resource.data.authUid == request.auth.uid);
+
+    // 作成：顧客が直接書ける項目を最小限に（end/staffId/
+    //   priceSnapshot/customerSnapshot/createdAt/status はサーバ確定）
     allow create: if isSignedIn() &&
-                    request.resource.data.customerId == request.auth.uid &&
-                    // ★ 顧客が書き込めるフィールドはこの6つだけ
+                    request.resource.data.authUid == request.auth.uid &&
+                    // ★ 顧客が書けるフィールドのみ
                     request.resource.data.keys().hasOnly([
-                      'dateKey', 'start', 'customerId',
+                      'dateKey', 'start', 'customerDocId', 'authUid',
                       'menuId', 'optionMenuIds',
-                      'pendingCreate'  // 作成中マーカー（Functions が処理後に削除）
+                      'pendingCreate'  // Functions が処理後に削除
                     ]) &&
-                    // 必須フィールド
                     request.resource.data.keys().hasAll([
-                      'dateKey', 'start', 'customerId', 'menuId'
+                      'dateKey', 'start', 'customerDocId',
+                      'authUid', 'menuId'
                     ]) &&
-                    // 日付・時刻の形式チェック
                     request.resource.data.dateKey is string &&
                     request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
                     request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
                     request.resource.data.menuId is string;
 
-    // 更新：顧客は status を cancelled に変えるだけ。それ以外はサロンスタッフのみ
-    //       複雑な状態遷移マシンは Functions 側で検証する（Rules に詰め込みすぎない）
+    // 更新：顧客は status を cancelled に変えるだけ。
+    //   サロンスタッフは customerDocId 付替を禁止（merge は
+    //   Function=admin のみ）。複雑な状態遷移は Functions が検証
     allow update: if (
-      // 顧客は cancelled 限定
-      (request.auth.uid == resource.data.customerId &&
+      (isSignedIn() &&
+       resource.data.authUid == request.auth.uid &&
        resource.data.status == 'confirmed' &&
        request.resource.data.status == 'cancelled' &&
        request.resource.data.diff(resource.data).affectedKeys()
          .hasOnly(['status', 'updatedAt']))
       ||
-      // サロンスタッフは customerId 改ざんだけ禁止、他は OK
       (isSalonStaff(salonId) &&
-       request.resource.data.customerId == resource.data.customerId)
+       request.resource.data.customerDocId == resource.data.customerDocId)
     );
 
-    // 削除：サロンオーナーのみ
     allow delete: if isSalonOwner(salonId);
   }
 
-  // appointments_archive も appointments と同じ権限（ただし作成は Functions のみ）
+  // appointments_archive（作成・更新・削除は Functions のみ）
   match /appointments_archive/{appointmentId} {
-    allow read: if isSalonStaff(salonId) 
-                || request.auth.uid == resource.data.customerId;
-    // 作成・更新・削除は Functions のみ → クライアントからは触れない
+    allow read: if isSalonStaff(salonId)
+                || (isSignedIn() &&
+                    resource.data.authUid == request.auth.uid);
     allow write: if false;
   }
 }
@@ -838,6 +948,19 @@ sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
   - 顧客が `price`, `priceSnapshot`, `status` を改ざんできないこと（Firestoreコンソールから直接書き込みテスト）
   - 顧客が `customerAuthUid` を偽装できないこと
   - 顧客が `status` を `cancelled` 以外に変えられないこと
+  - ★ v8.1 identity 関連（`DESIGN_v8_1_customer_identity.md` 6章）：
+    - サロンAがサロンBの customers/authIndex/mergeJobs に読み書き → 拒否
+    - サロンが作成カルテに `authUid` を入れて作成 → 拒否
+      （createdSource:'salon' は authUid=null 必須）
+    - 顧客本人が他人の authUid でカルテ作成 → 拒否
+    - クライアントから customers の `authUid`/`isMerged`/`mergedInto`/
+      `mergedAliases`/`createdSource`/`lockedByJob` を直接書換 → 拒否
+    - クライアントから authIndex を作成・更新・削除 → 全て拒否
+    - クライアントから予約の `customerDocId` を付替 → 拒否
+    - emailVerified=false の顧客が claim 発動を試みる → claim されない
+    - 同一メール未claimカルテ2件時、自動claimされず要統合フラグ
+    - 同一カルテを src/dst に含む merge を2件同時実行 → 2件目は
+      ロック取得失敗で弾かれDB破壊しない
 - A-step1-5. このルール＋関数を先に本番反映してから、JSの実装に入る
 - これにより「動いてるけどルール緩い」状態を防ぐ
 
@@ -1070,7 +1193,8 @@ sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
 - メニュー登録
 - 営業時間設定
 - 予約一覧（カレンダー）
-- 顧客管理（一覧・詳細）
+- 顧客管理（一覧・詳細・★ v8.1 サロン側顧客登録）
+  ※ 顧客統合（merge）はフェーズ1後半。UI の箱だけ先に置く
 
 **顧客側**
 - 店舗URLアクセス
