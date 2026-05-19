@@ -403,41 +403,113 @@
   window.dbSalonSetConfig = dbSalonSetConfig;
 
   // 顧客一覧
+  // 顧客一覧。★ v8.1: 統合済み（isMerged==true）カルテは
+  //   soft delete されているので一覧から除外する（v8.1 3-4）。
+  //   取得後にクライアント側でフィルタ（Firestore の != クエリは
+  //   インデックス制約が厳しいため、取得後フィルタが安全）
   function dbSalonListCustomers(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
-    dbReadCollection('salons/' + sid + '/customers', null, cb);
+    dbReadCollection('salons/' + sid + '/customers', null, function (list) {
+      if (!list) { _safeCb(cb, null); return; }
+      var out = [];
+      var i;
+      for (i = 0; i < list.length; i++) {
+        if (list[i] && list[i].isMerged === true) { continue; }
+        out.push(list[i]);
+      }
+      _safeCb(cb, out);
+    });
   }
   window.dbSalonListCustomers = dbSalonListCustomers;
 
   // 顧客 1 件取得
-  function dbSalonGetCustomer(customerId, cb) {
+  // ★ v8.1 新規: サロン側顧客登録（電話・店頭予約客をサロンが登録）
+  //   DESIGN.md 3-3 customers 作成(a)サロン分岐と1対1:
+  //     authUid=null 必須 / createdSource='salon' 必須
+  //     ホワイトリスト: name,phone,email,authUid,createdSource,
+  //       notifyChannels,isMerged,mergedInto,mergedAt,
+  //       mergedAliases,createdAt
+  //   customerDocId は Firestore 自動採番（add）。
+  //   後でこの顧客がアプリ登録した時、claim Function が
+  //   email 一致で authUid を後付けする（v8.1 2-3/2-4）。
+  function dbSalonCreateCustomer(data, cb) {
     var sid = getCurrentSalonId();
-    if (!sid || !customerId) { _safeCb(cb, null); return; }
-    dbReadDoc('salons/' + sid + '/customers/' + customerId, cb);
+    if (!sid) { _safeCb(cb, null); return; }
+    if (!data || !data.name) {
+      console.error('[shared_db] dbSalonCreateCustomer: name is required');
+      _safeCb(cb, null);
+      return;
+    }
+
+    var notifyChannels;
+    if (data.notifyChannels && typeof data.notifyChannels === 'object') {
+      notifyChannels = {
+        email: (data.notifyChannels.email === true),
+        line: (data.notifyChannels.line === true)
+      };
+    } else {
+      notifyChannels = { email: false, line: false };
+    }
+
+    // ホワイトリストに厳密準拠したドキュメント（ルールと1対1）
+    var doc = {
+      name: String(data.name),
+      phone: data.phone ? String(data.phone) : '',
+      email: data.email ? String(data.email) : '',
+      authUid: null,                 // サロン登録は必ず null
+      createdSource: 'salon',        // 必ず 'salon'
+      notifyChannels: notifyChannels,
+      isMerged: false,
+      mergedInto: null,
+      mergedAt: null,
+      mergedAliases: [],
+      createdAt: _serverTimestamp()
+    };
+
+    // 自動採番 ID で作成（add）。customerDocId は Firestore が採番
+    dbAddDoc('salons/' + sid + '/customers', doc, cb);
+  }
+  window.dbSalonCreateCustomer = dbSalonCreateCustomer;
+
+  function dbSalonGetCustomer(customerDocId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !customerDocId) { _safeCb(cb, null); return; }
+    dbReadDoc('salons/' + sid + '/customers/' + customerDocId, cb);
   }
   window.dbSalonGetCustomer = dbSalonGetCustomer;
 
-  // 顧客更新 (memo / stampCount / lastVisit / totalSpent などスタッフ専用フィールド含む)
-  // lineUserId はルールで誰も書けないので、誤って送らないよう除外
-  function dbSalonUpdateCustomer(customerId, patch, cb) {
+  // 顧客更新 (memo / stampCount / lastVisit / totalSpent などスタッフ専用)
+  // ★ v8.1: Firestoreルール 3-3 customers と1対1。クライアントから
+  //   書けないフィールド（Function=admin 専用）を patch から除外する:
+  //   lineUserId / authUid / isMerged / mergedInto / mergedAt /
+  //   mergedAliases / createdSource / lockedByJob
+  function dbSalonUpdateCustomer(customerDocId, patch, cb) {
     var sid = getCurrentSalonId();
-    if (!sid || !customerId) { _safeCb(cb, null); return; }
-    if (patch && patch.hasOwnProperty('lineUserId')) {
-      delete patch.lineUserId;
-    }
+    if (!sid || !customerDocId) { _safeCb(cb, null); return; }
     if (patch) {
+      var _protected = [
+        'lineUserId', 'authUid', 'isMerged', 'mergedInto',
+        'mergedAt', 'mergedAliases', 'createdSource', 'lockedByJob'
+      ];
+      var i;
+      for (i = 0; i < _protected.length; i++) {
+        if (patch.hasOwnProperty(_protected[i])) {
+          delete patch[_protected[i]];
+        }
+      }
       patch.updatedAt = _serverTimestamp();
     }
-    dbUpdateDoc('salons/' + sid + '/customers/' + customerId, patch, cb);
+    dbUpdateDoc('salons/' + sid + '/customers/' + customerDocId, patch, cb);
   }
   window.dbSalonUpdateCustomer = dbSalonUpdateCustomer;
 
-  // 顧客削除 (オーナーのみ: ルール 199 行)
-  function dbSalonDeleteCustomer(customerId, cb) {
+  // 顧客削除 (オーナーのみ。通常運用は soft delete を推奨だが、
+  //  物理削除 API はルール上オーナーに許可されているため残す)
+  function dbSalonDeleteCustomer(customerDocId, cb) {
     var sid = getCurrentSalonId();
-    if (!sid || !customerId) { _safeCb(cb, null); return; }
-    dbDeleteDoc('salons/' + sid + '/customers/' + customerId, cb);
+    if (!sid || !customerDocId) { _safeCb(cb, null); return; }
+    dbDeleteDoc('salons/' + sid + '/customers/' + customerDocId, cb);
   }
   window.dbSalonDeleteCustomer = dbSalonDeleteCustomer;
 
@@ -467,14 +539,15 @@
   //   戻り値: { current:[...], archive:[...], merged:[...] }
   //     merged は dateKey 降順 (同日は start 降順) で統合済み。
   // ------------------------------------------------------------
-  function dbSalonGetCustomerHistory(customerId, cb) {
+  function dbSalonGetCustomerHistory(customerDocId, cb) {
     var sid = getCurrentSalonId();
-    if (!sid || !customerId) { _safeCb(cb, null); return; }
+    if (!sid || !customerDocId) { _safeCb(cb, null); return; }
 
     var HISTORY_LIMIT = 100; // サロン側は本人画面より多めに見たい
 
     function _queryCust(col) {
-      return col.where('customerId', '==', customerId)
+      // ★ v8.1: 予約は customerDocId を持つ（旧 customerId 廃止）
+      return col.where('customerDocId', '==', customerDocId)
                 .orderBy('dateKey', 'desc')
                 .limit(HISTORY_LIMIT);
     }
@@ -613,6 +686,43 @@
     }, cb);
   }
   window.dbCustomerGetPublicMenus = dbCustomerGetPublicMenus;
+
+  // ★ v8.1 新規: 顧客が「自分のカルテ」を解決するヘルパー
+  //   DESIGN.md 0-2 / v8.1 1-3: authIndex が source of truth。
+  //   流れ: 自分の Auth UID → authIndex/{uid} を1回 get →
+  //         customerDocId を得て customers/{customerDocId} を直 get
+  //   （query を使わず2回の直 get。速い・安い・index 不要）
+  //   戻り値 cb(result):
+  //     成功      → { customerDocId: 'cus_xxx', customer: {...} }
+  //     未claim   → { customerDocId: null, customer: null }
+  //                 （authIndex が無い＝まだ claim されていない。
+  //                   claim 判定は Phase D で claim Function が担当）
+  //     エラー    → null
+  function dbCustomerResolveMyCard(cb) {
+    var sid = getCurrentSalonId();
+    var uid = getCurrentUserUid();
+    if (!sid || !uid) { _safeCb(cb, null); return; }
+
+    dbReadDoc('salons/' + sid + '/authIndex/' + uid, function (idx) {
+      if (!idx || !idx.customerDocId) {
+        // authIndex 未作成 = まだ claim されていない（正常な状態）
+        _safeCb(cb, { customerDocId: null, customer: null });
+        return;
+      }
+      var docId = idx.customerDocId;
+      dbReadDoc('salons/' + sid + '/customers/' + docId, function (cust) {
+        if (!cust) {
+          // authIndex はあるがカルテが無い（merge 等の途中・異常）
+          _logErr('dbCustomerResolveMyCard',
+                   'authIndex points to missing customer ' + docId);
+          _safeCb(cb, { customerDocId: docId, customer: null });
+          return;
+        }
+        _safeCb(cb, { customerDocId: docId, customer: cust });
+      });
+    });
+  }
+  window.dbCustomerResolveMyCard = dbCustomerResolveMyCard;
 
   // 自分の顧客プロフィール (customers/{Auth UID})
   function dbCustomerGetMyProfile(cb) {
