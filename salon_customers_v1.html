@@ -278,6 +278,19 @@
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+  // 検索用の正規化: 全角/半角スペースを除去し、英数字の
+  // 全角→半角を揃える。これで「テスト　テスト子」と
+  // 「テスト テスト子」「テストテスト子」が同じ扱いになる。
+  function _norm(s) {
+    s = (s == null) ? '' : String(s);
+    // 全角英数字 → 半角
+    s = s.replace(/[\uFF01-\uFF5E]/g, function (ch) {
+      return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+    });
+    // 全角スペース・半角スペース・タブ等を全て除去
+    s = s.replace(/[\s\u3000]+/g, '');
+    return s.toLowerCase();
+  }
   function _v(id) {
     var el = document.getElementById(id);
     return el ? String(el.value || '').trim() : '';
@@ -313,7 +326,7 @@
   function applyFilter() {
     var q = '';
     var sb = document.getElementById('searchBox');
-    if (sb) { q = String(sb.value || '').trim().toLowerCase(); }
+    if (sb) { q = _norm(sb.value); }
     if (!q) {
       _filtered = _all.slice();
     } else {
@@ -321,7 +334,7 @@
       var i, c, hay;
       for (i = 0; i < _all.length; i++) {
         c = _all[i];
-        hay = ((c.name || '') + ' ' + (c.phone || '')).toLowerCase();
+        hay = _norm((c.name || '') + (c.phone || ''));
         if (hay.indexOf(q) >= 0) { _filtered.push(c); }
       }
     }
@@ -613,8 +626,26 @@
         return;
       }
       uiToast('保存しました');
+      // 保存は完了済み。一覧は全件再取得せず該当1件を更新
+      var i;
+      for (i = 0; i < _all.length; i++) {
+        if (_all[i] && _all[i]._id === _curDocId) {
+          _all[i].name = patch.name;
+          _all[i].phone = patch.phone;
+          _all[i].email = patch.email;
+          _all[i].memo = patch.memo;
+          _all[i].stampCount = patch.stampCount;
+          break;
+        }
+      }
+      _all.sort(function (a, b) {
+        var an = (a && a.name) ? String(a.name) : '';
+        var bn = (b && b.name) ? String(b.name) : '';
+        if (an === bn) { return 0; }
+        return (an < bn) ? -1 : 1;
+      });
       openDetail(_curDocId);
-      loadList();
+      applyFilter();
     });
   }
 
@@ -630,8 +661,16 @@
             return;
           }
           uiToast('削除しました');
+          // 削除は完了済み。一覧は再取得せず該当1件を除去
+          var i;
+          for (i = 0; i < _all.length; i++) {
+            if (_all[i] && _all[i]._id === _curDocId) {
+              _all.splice(i, 1);
+              break;
+            }
+          }
           closePanel();
-          loadList();
+          applyFilter();
         });
       },
       null
@@ -692,26 +731,49 @@
     var memo = _v('fMemo');
 
     uiShowLoading('登録中...');
+    // 顧客カルテ本体（名前・電話・メール）は保存完了を必ず待つ。
+    // 「登録したのに消えていた」を防ぐため確実性を優先（設計書 9-1）。
     dbSalonCreateCustomer(data, function (res) {
       if (res == null || !res._id) {
         uiHideLoading();
         uiToast('登録に失敗しました');
         return;
       }
-      // メモがあれば続けて更新（作成ホワイトリストに memo は無いため）
+      // ★ 本体は保存済み。一覧は全件再取得せず、作った1件を
+      //   ローカル配列に足すだけにして体感を速くする
+      //   （サーバには確実に保存済みなので表示と実体はズレない）
+      var newC = {
+        _id: res._id,
+        name: data.name,
+        phone: data.phone || '',
+        email: data.email || '',
+        authUid: null,
+        createdSource: 'salon',
+        isMerged: false,
+        stampCount: 0
+      };
+      if (memo) { newC.memo = memo; }
+      _all.push(newC);
+      _all.sort(function (a, b) {
+        var an = (a && a.name) ? String(a.name) : '';
+        var bn = (b && b.name) ? String(b.name) : '';
+        if (an === bn) { return 0; }
+        return (an < bn) ? -1 : 1;
+      });
+
+      uiHideLoading();
+      uiToast('登録しました');
+      closePanel();
+      applyFilter();   // 再取得せずローカルで即反映
+
+      // メモは補足情報。本体保存後に裏で更新する。
+      // 万一メモ更新だけ失敗しても本体カルテは無事（安全側）。
       if (memo) {
-        dbSalonUpdateCustomer(res._id, { memo: memo },
-          function () {
-            uiHideLoading();
-            uiToast('登録しました');
-            closePanel();
-            loadList();
-          });
-      } else {
-        uiHideLoading();
-        uiToast('登録しました');
-        closePanel();
-        loadList();
+        dbSalonUpdateCustomer(res._id, { memo: memo }, function (ok) {
+          if (!ok) {
+            uiToast('メモの保存に失敗しました。編集画面で再入力してください');
+          }
+        });
       }
     });
   }
