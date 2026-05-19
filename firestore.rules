@@ -189,44 +189,77 @@ service cloud.firestore {
       // customerId == 顧客の Auth UID（設計書通り、二重管理は廃止）
       // ============================================================
       
-      match /customers/{customerId} {
-        // 読み取り: サロンスタッフは全員、顧客は自分自身のみ
-        allow read: if isSalonStaff(salonId) || 
-                      (isSignedIn() && request.auth.uid == customerId);
-        
-        // 作成: 本人だけが自分のドキュメントを作成可能
-        //       フィールドホワイトリスト（顧客が書ける項目のみ）
-        allow create: if isSignedIn() &&
-                        request.auth.uid == customerId &&
-                        request.resource.data.keys().hasOnly([
-                          'name', 'phone', 'email',
-                          'notifyChannels', 'createdAt'
-                        ]) &&
-                        request.resource.data.keys().hasAll([
-                          'name', 'email', 'notifyChannels'
-                        ]) &&
-                        request.resource.data.name is string &&
-                        request.resource.data.email is string &&
-                        request.resource.data.notifyChannels.keys().hasOnly(['email', 'line']) &&
-                        request.resource.data.notifyChannels.email is bool;
-        
-        // 更新:
-        //  - 顧客本人: name, phone, notifyChannels.email/line のみ（差分制限）
-        //  - サロンスタッフ: memo, stampCount, lastVisit, totalSpent も含めて全部
-        //  - lineUserId は Functions のみ（Rules では誰も書けない）
-        allow update: if (
-          // 顧客本人
-          (isSignedIn() && request.auth.uid == customerId &&
-           request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['name', 'phone', 'notifyChannels', 'updatedAt']))
+      // ============================================================
+      // /salons/{salonId}/customers/{customerDocId}
+      // ★ v8.1 改訂（DESIGN.md 3-3 / DESIGN_v8_1 4-1 と1対1照合）
+      //   customerDocId = Firestore 採番。本人判定は
+      //   resource.data.authUid == request.auth.uid（uid 直比較でない）
+      // ============================================================
+      match /customers/{customerDocId} {
+        // 読み取り: サロンスタッフ全員 / 本人（authUid 一致）
+        allow read: if isSalonStaff(salonId)
+                    || (isSignedIn() &&
+                        resource.data.authUid == request.auth.uid);
+
+        // 作成: (a) サロンが仮登録（authUid=null 必須）/
+        //       (b) 顧客本人がアプリ登録（authUid==自分の uid 必須）
+        allow create: if
+          ( isSalonStaff(salonId) &&
+            request.resource.data.authUid == null &&
+            request.resource.data.createdSource == 'salon' &&
+            request.resource.data.keys().hasOnly([
+              'name','phone','email','authUid','createdSource',
+              'notifyChannels','isMerged','mergedInto','mergedAt',
+              'mergedAliases','createdAt'
+            ]) )
           ||
-          // サロンスタッフ（lineUserId 変更だけは禁止）
-          (isSalonStaff(salonId) &&
-           !request.resource.data.diff(resource.data).affectedKeys().hasAny(['lineUserId']))
-        );
-        
-        // 削除: オーナーのみ
+          ( isSignedIn() &&
+            request.resource.data.authUid == request.auth.uid &&
+            request.resource.data.createdSource == 'self' &&
+            request.resource.data.keys().hasOnly([
+              'name','phone','email','authUid','createdSource',
+              'notifyChannels','isMerged','mergedInto','mergedAt',
+              'mergedAliases','createdAt'
+            ]) );
+
+        // 更新: 顧客本人は name/phone/notifyChannels のみ。
+        //   サロンは memo/stampCount 等可。ただし authUid/merge系/
+        //   createdSource/lockedByJob/lineUserId はクライアント不可
+        //   （Function=admin のみ。source of truth と排他制御の要）
+        allow update: if
+          ( isSignedIn() &&
+            resource.data.authUid == request.auth.uid &&
+            request.resource.data.diff(resource.data).affectedKeys()
+              .hasOnly(['name','phone','notifyChannels','updatedAt']) )
+          ||
+          ( isSalonStaff(salonId) &&
+            !request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['lineUserId','authUid','isMerged','mergedInto',
+                       'mergedAt','mergedAliases','createdSource',
+                       'lockedByJob']) );
+
+        // 削除: 物理削除はオーナーのみ（通常運用は soft delete）
         allow delete: if isSalonOwner(salonId);
+      }
+
+      // ============================================================
+      // /salons/{salonId}/authIndex/{authUid}
+      // ★ v8.1 新規：逆引きインデックス（source of truth）
+      //   claim/merge は Function(admin) が書く＝一元管理
+      // ============================================================
+      match /authIndex/{authUid} {
+        allow read:  if (isSignedIn() && authUid == request.auth.uid)
+                     || isSalonStaff(salonId);
+        allow write: if false;  // Function(admin) のみ
+      }
+
+      // ============================================================
+      // /salons/{salonId}/mergeJobs/{jobId}
+      // ★ v8.1 新規：merge ジョブ（排他制御・進捗管理）
+      // ============================================================
+      match /mergeJobs/{jobId} {
+        allow read:  if isSalonStaff(salonId);  // UIが進捗表示に使う
+        allow write: if false;                  // Function(admin) のみ
       }
       
       // ============================================================
@@ -234,64 +267,53 @@ service cloud.firestore {
       // 設計書 v6 セクション 3-4 の pendingCreate 方式
       // ============================================================
       
+      // ============================================================
+      // /salons/{salonId}/appointments/{appointmentId}
+      // ★ v8.1 改訂（DESIGN.md 3-3 と1対1照合）
+      //   customerId→customerDocId 改名。本人判定は
+      //   resource.data.authUid == request.auth.uid
+      //   作成は (A)顧客アプリ予約 / (B)サロン手動登録 の2経路
+      // ============================================================
       match /appointments/{appointmentId} {
-        // 読み取り: サロンスタッフ or 予約本人
-        allow read: if isSalonStaff(salonId) || 
-                      (isSignedIn() && request.auth.uid == resource.data.customerId);
-        
-        // ============================================================
-        // 作成:
-        //   (A) 顧客の予約作成 (pendingCreate=true、Functions が確定処理)
-        //   (B) サロンスタッフの手動登録 (旧画面の「＋登録」、最初から確定)
-        // ============================================================
+        // 読み取り: サロンスタッフ or 予約本人（authUid 一致）
+        allow read: if isSalonStaff(salonId) ||
+                      (isSignedIn() &&
+                       resource.data.authUid == request.auth.uid);
+
         allow create: if (
-          // ────────────────────────────────────────
-          // (A) 顧客の予約作成 (pendingCreate=true)
-          // ────────────────────────────────────────
+          // ── (A) 顧客アプリ予約（pendingCreate=true）──
           (isSignedIn() &&
-           request.resource.data.customerId == request.auth.uid &&
-           // ホワイトリスト: 顧客が書ける項目のみ
+           request.resource.data.authUid == request.auth.uid &&
            request.resource.data.keys().hasOnly([
-             'dateKey', 'start', 'customerId',
+             'dateKey', 'start', 'customerDocId', 'authUid',
              'menuId', 'optionMenuIds', 'pendingCreate',
              'source', 'createdAt'
            ]) &&
-           // 必須フィールド
            request.resource.data.keys().hasAll([
-             'dateKey', 'start', 'customerId',
-             'menuId', 'pendingCreate'
+             'dateKey', 'start', 'customerDocId',
+             'authUid', 'menuId', 'pendingCreate'
            ]) &&
-           // pendingCreate は必ず true（未確定状態で作成）
            request.resource.data.pendingCreate == true &&
-           // source は省略可、あれば 'online' 固定
            (!('source' in request.resource.data) ||
              request.resource.data.source == 'online') &&
-           // dateKey の形式: YYYY-MM-DD
            request.resource.data.dateKey is string &&
            request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
-           // start の形式: HH:MM
            request.resource.data.start is string &&
            request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
-           // menuId は string
            request.resource.data.menuId is string &&
-           // optionMenuIds は省略可、あればリスト
-           (!('optionMenuIds' in request.resource.data) || 
+           (!('optionMenuIds' in request.resource.data) ||
              request.resource.data.optionMenuIds is list))
           ||
-          // ────────────────────────────────────────
-          // (B) サロンスタッフの手動登録 (最初から確定状態)
-          //     旧画面の「＋登録」ボタン相当。
-          //     顧客アプリ経由ではないので pendingCreate は無し、
-          //     status='confirmed' で書き込む。
-          //     end/startAt/endAt はサロン側 UI が計算して送る前提
-          //     (Phase B-5 で再考、フェーズ1は UI 計算に任せる)。
-          // ────────────────────────────────────────
+          // ── (B) サロン手動登録（電話・店頭予約、最初から確定）──
+          //   対象がサロン仮登録カルテなら authUid=null。後でその
+          //   顧客がアプリ登録(claim)した時、claim Function が
+          //   この予約の authUid を後埋めする（DESIGN_v8_1 2-4）
           (isSalonStaff(salonId) &&
-           // ホワイトリスト: サロン手動登録で書ける項目
+           request.resource.data.customerDocId is string &&
            request.resource.data.keys().hasOnly([
              'dateKey', 'start', 'end',
              'startAt', 'endAt',
-             'customerId', 'customerName',
+             'customerDocId', 'authUid', 'customerSnapshot',
              'menuId', 'menuName', 'optionMenuIds',
              'staffId', 'resourceIds',
              'status', 'source',
@@ -300,66 +322,58 @@ service cloud.firestore {
              'memo', 'editingBy',
              'createdAt', 'updatedAt'
            ]) &&
-           // 必須フィールド
            request.resource.data.keys().hasAll([
              'dateKey', 'start',
-             'menuId', 'status', 'source'
+             'customerDocId', 'menuId', 'status', 'source'
            ]) &&
-           // source は 'manual' 固定
            request.resource.data.source == 'manual' &&
-           // status は confirmed で作成 (キャンセル等はその後 update で)
            request.resource.data.status == 'confirmed' &&
-           // dateKey の形式: YYYY-MM-DD
            request.resource.data.dateKey is string &&
            request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
-           // start の形式: HH:MM
            request.resource.data.start is string &&
            request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
-           // end の形式: HH:MM (省略可、あればチェック)
            (!('end' in request.resource.data) ||
              (request.resource.data.end is string &&
               request.resource.data.end.matches('^[0-9]{2}:[0-9]{2}$'))) &&
-           // menuId は string
            request.resource.data.menuId is string &&
-           // optionMenuIds は省略可、あればリスト
-           (!('optionMenuIds' in request.resource.data) || 
+           (!('optionMenuIds' in request.resource.data) ||
              request.resource.data.optionMenuIds is list) &&
-           // intervalAfterOverride は省略可、あれば int >= 0
            (!('intervalAfterOverride' in request.resource.data) ||
              (request.resource.data.intervalAfterOverride is int &&
               request.resource.data.intervalAfterOverride >= 0)))
         );
-        
+
         // 更新:
-        //  - 顧客は自分の予約を confirmed → cancelled にのみ変更可能
-        //  - サロンスタッフは customerId/source 改ざん以外は何でも可能
-        //  - 詳細な status 遷移ルールは Cloud Functions の責任
+        //  - 顧客は自分の予約を confirmed → cancelled にのみ
+        //  - サロンは customerDocId/source 改ざん以外は可能
+        //  - 詳細な status 遷移は Cloud Functions の責任
+        //  - merge による customerDocId 付替は Function=admin のみ
         allow update: if (
-          // 顧客本人: status を confirmed → cancelled に変えるのみ
-          (isSignedIn() && request.auth.uid == resource.data.customerId &&
+          (isSignedIn() &&
+           resource.data.authUid == request.auth.uid &&
            resource.data.status == 'confirmed' &&
            request.resource.data.status == 'cancelled' &&
            request.resource.data.diff(resource.data).affectedKeys()
              .hasOnly(['status', 'updatedAt']))
           ||
-          // サロンスタッフ: customerId / source 改ざんは禁止、他は OK
           (isSalonStaff(salonId) &&
-           request.resource.data.customerId == resource.data.customerId &&
+           request.resource.data.customerDocId == resource.data.customerDocId &&
            request.resource.data.source == resource.data.source)
         );
-        
+
         // 削除: オーナーのみ（通常は status=cancelled でソフト削除）
         allow delete: if isSalonOwner(salonId);
       }
-      
       // ============================================================
       // /salons/{salonId}/appointments_archive/{appointmentId}
       // 18ヶ月以上前の予約。クライアントからは読み取り専用
       // ============================================================
       
       match /appointments_archive/{appointmentId} {
-        allow read: if isSalonStaff(salonId) || 
-                      (isSignedIn() && request.auth.uid == resource.data.customerId);
+        // ★ v8.1：本人判定は authUid 一致
+        allow read: if isSalonStaff(salonId) ||
+                      (isSignedIn() &&
+                       resource.data.authUid == request.auth.uid);
         // 作成・更新・削除は Cloud Functions のみ
         allow write: if false;
       }

@@ -608,28 +608,50 @@ match /salons/{salonId} {
                 || (isSignedIn() &&
                     resource.data.authUid == request.auth.uid);
 
-    // 作成：顧客が直接書ける項目を最小限に（end/staffId/
-    //   priceSnapshot/customerSnapshot/createdAt/status はサーバ確定）
-    allow create: if isSignedIn() &&
-                    request.resource.data.authUid == request.auth.uid &&
-                    // ★ 顧客が書けるフィールドのみ
-                    request.resource.data.keys().hasOnly([
-                      'dateKey', 'start', 'customerDocId', 'authUid',
-                      'menuId', 'optionMenuIds',
-                      'pendingCreate'  // Functions が処理後に削除
-                    ]) &&
-                    request.resource.data.keys().hasAll([
-                      'dateKey', 'start', 'customerDocId',
-                      'authUid', 'menuId'
-                    ]) &&
-                    request.resource.data.dateKey is string &&
-                    request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
-                    request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
-                    request.resource.data.menuId is string;
+    // 作成：(A) 顧客アプリ予約 / (B) サロン手動登録 の2経路
+    //   ★ v8.1：customerDocId 必須。authUid は
+    //     (A) 顧客アプリ予約 = 予約者の Auth UID
+    //     (B) サロン手動登録 = 対象がサロン仮登録カルテなら null 可
+    //   end/staffId/priceSnapshot/customerSnapshot/createdAt/status
+    //   はサーバ確定（顧客経路）
+    allow create: if
+      // ── (A) 顧客アプリ予約（pendingCreate=true）──
+      ( isSignedIn() &&
+        request.resource.data.authUid == request.auth.uid &&
+        request.resource.data.keys().hasOnly([
+          'dateKey', 'start', 'customerDocId', 'authUid',
+          'menuId', 'optionMenuIds', 'pendingCreate', 'source',
+          'createdAt'
+        ]) &&
+        request.resource.data.keys().hasAll([
+          'dateKey', 'start', 'customerDocId',
+          'authUid', 'menuId', 'pendingCreate'
+        ]) &&
+        request.resource.data.pendingCreate == true &&
+        request.resource.data.dateKey is string &&
+        request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
+        request.resource.data.menuId is string )
+      ||
+      // ── (B) サロン手動登録（電話・店頭予約。最初から confirmed）──
+      //   対象顧客がサロン仮登録カルテ（authUid=null）の場合、
+      //   この予約の authUid も null。後でその顧客がアプリ登録
+      //   （claim）した時、claim Function が「その customerDocId を
+      //   参照する過去予約の authUid を後埋めする」責務を負う
+      //   （DESIGN_v8_1 2章 claim Function に明記）。
+      ( isSalonStaff(salonId) &&
+        request.resource.data.customerDocId is string &&
+        request.resource.data.source == 'manual' &&
+        request.resource.data.status == 'confirmed' &&
+        request.resource.data.dateKey is string &&
+        request.resource.data.dateKey.matches('^[0-9]{4}-[0-9]{2}-[0-9]{2}$') &&
+        request.resource.data.start is string &&
+        request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
+        request.resource.data.menuId is string );
 
     // 更新：顧客は status を cancelled に変えるだけ。
-    //   サロンスタッフは customerDocId 付替を禁止（merge は
-    //   Function=admin のみ）。複雑な状態遷移は Functions が検証
+    //   サロンスタッフは customerDocId / source 付替を禁止
+    //   （merge は Function=admin のみ）。状態遷移は Functions が検証
     allow update: if (
       (isSignedIn() &&
        resource.data.authUid == request.auth.uid &&
@@ -639,7 +661,8 @@ match /salons/{salonId} {
          .hasOnly(['status', 'updatedAt']))
       ||
       (isSalonStaff(salonId) &&
-       request.resource.data.customerDocId == resource.data.customerDocId)
+       request.resource.data.customerDocId == resource.data.customerDocId &&
+       request.resource.data.source == resource.data.source)
     );
 
     allow delete: if isSalonOwner(salonId);

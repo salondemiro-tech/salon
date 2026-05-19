@@ -160,6 +160,20 @@ claim 判定・authUid 付与・authIndex 作成は admin 権限の
 callable / トリガー Function で行う（クライアントに claim 権限を
 与えない＝なりすまし防止）。関数名案：`resolveOrClaimCustomer`。
 
+**★ claim Function の追加責務（過去予約の authUid 後埋め）**：
+サロン手動登録（DESIGN.md 3-3 appointments 作成(B)）で作られた予約は、
+対象がサロン仮登録カルテ（`authUid:null`）の場合、予約の `authUid`
+も `null` で作られている。その顧客が後でアプリ登録して claim が
+成立した時、claim Function は以下も実行する：
+- claim 対象 `customerDocId` を参照する `appointments` および
+  `appointments_archive` のうち `authUid==null` のものに、
+  確定した顧客の `authUid` を後埋めする
+- これをやらないと、claim 後に顧客がアプリで「自分の過去予約」を
+  見られない（読み取りルールが `resource.data.authUid ==
+  request.auth.uid` のため）
+- 大量予約に備え、merge と同様に分割バッチ・進捗管理で行う
+  （件数が多い顧客でも安全に。失敗時リトライ可能にする）
+
 ### 2-5. claim 失敗時の運用フロー方針（GPT v8レビュー指摘⑤）
 
 claim が不成立になるケースは実運用で**普通に起きる**：
