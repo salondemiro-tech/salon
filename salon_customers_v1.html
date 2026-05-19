@@ -1,0 +1,776 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>TORITA - 顧客管理</title>
+<!--
+  C-4 顧客管理画面 v1（DESIGN.md 3-3 / DESIGN_v8_1 準拠）
+  機能:
+    - 顧客一覧（dbSalonListCustomers・isMerged 除外済み）
+    - 顧客詳細パネル（画面内・dbSalonGetCustomer + 履歴）
+    - サロン側新規登録（dbSalonCreateCustomer）
+    - メモ / スタンプ編集（dbSalonUpdateCustomer）
+    - 「統合(merge)」は UI の箱だけ。merge Function 実装後に有効化
+  ロード順序 (shared_auth.js ヘッダ契約):
+    firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js
+      → shared_ui.js
+  ES5 互換: var / function のみ（const/let/アロー/async/await 禁止）
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --gn:#7b9e87; --gl:#eef3ef;
+    --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2); color:var(--tx);
+    -webkit-text-size-adjust:100%; min-height:100vh;
+  }
+
+  .topbar{
+    background:#fff; border-bottom:1px solid var(--bd);
+    padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:10;
+  }
+  .back-link{
+    background:none; border:none; cursor:pointer;
+    font-family:inherit; font-size:13px; color:var(--mu);
+    display:flex; align-items:center; gap:5px;
+  }
+  .back-link:hover{color:var(--ac);}
+  .topbar-title{
+    font-size:15px; font-weight:600; color:var(--ad);
+    letter-spacing:.03em;
+  }
+  .topbar-spacer{width:60px;}
+
+  .wrap{max-width:680px; margin:0 auto; padding:18px 14px 40px;}
+
+  /* ===== ツールバー（検索 + 新規登録） ===== */
+  .toolbar{
+    display:flex; gap:9px; margin-bottom:14px;
+  }
+  .search-box{
+    flex:1; background:#fff; border:1px solid var(--bd);
+    border-radius:11px; padding:11px 14px;
+    font-family:inherit; font-size:14px; color:var(--tx);
+  }
+  .search-box:focus{outline:none; border-color:var(--ac);}
+  .btn-add{
+    background:var(--ac); color:#fff; border:none;
+    border-radius:11px; padding:0 18px; cursor:pointer;
+    font-family:inherit; font-size:14px; font-weight:600;
+    white-space:nowrap;
+  }
+  .btn-add:hover{background:var(--ad);}
+
+  /* ===== 顧客一覧 ===== */
+  .cust-list{
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    overflow:hidden;
+  }
+  .cust-row{
+    display:flex; align-items:center; gap:12px;
+    padding:14px 16px; cursor:pointer;
+    border-bottom:1px solid var(--bd);
+  }
+  .cust-row:last-child{border-bottom:none;}
+  .cust-row:hover{background:var(--al);}
+  .cust-avatar{
+    width:38px; height:38px; border-radius:50%;
+    background:var(--al); color:var(--ad);
+    display:flex; align-items:center; justify-content:center;
+    font-size:15px; font-weight:600; flex-shrink:0;
+  }
+  .cust-main{flex:1; min-width:0;}
+  .cust-name{font-size:15px; font-weight:600; color:var(--tx);}
+  .cust-sub{font-size:12px; color:var(--mu); margin-top:2px;}
+  .cust-badge{
+    font-size:11px; color:var(--ac);
+    background:var(--al); border-radius:7px;
+    padding:3px 8px; flex-shrink:0;
+  }
+  .cust-badge.self{color:var(--gn); background:var(--gl);}
+
+  .empty{
+    text-align:center; color:var(--mu);
+    padding:48px 20px; font-size:14px;
+  }
+
+  /* ===== 詳細パネル（画面内・uiModal は textContent のみのため独自） ===== */
+  .panel-ov{
+    display:none; position:fixed; inset:0;
+    background:rgba(0,0,0,.42); z-index:50;
+    overflow-y:auto; padding:24px 12px;
+  }
+  .panel-ov.show{display:block;}
+  .panel{
+    max-width:560px; margin:0 auto;
+    background:#fff; border-radius:15px;
+    box-shadow:0 12px 40px rgba(0,0,0,.22);
+    overflow:hidden;
+  }
+  .panel-head{
+    background:var(--al); padding:18px 20px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .panel-head h2{
+    font-size:17px; color:var(--ad); font-weight:600;
+  }
+  .panel-close{
+    background:none; border:none; cursor:pointer;
+    font-size:22px; color:var(--mu); line-height:1;
+  }
+  .panel-body{padding:20px;}
+
+  .field{margin-bottom:16px;}
+  .field label{
+    display:block; font-size:12px; color:var(--mu);
+    margin-bottom:5px; letter-spacing:.02em;
+  }
+  .field input, .field textarea{
+    width:100%; background:var(--sf);
+    border:1px solid var(--bd); border-radius:9px;
+    padding:10px 12px; font-family:inherit;
+    font-size:14px; color:var(--tx);
+  }
+  .field input:focus, .field textarea:focus{
+    outline:none; border-color:var(--ac); background:#fff;
+  }
+  .field textarea{resize:vertical; min-height:70px;}
+
+  .stamp-row{
+    display:flex; align-items:center; gap:12px;
+  }
+  .stamp-btn{
+    width:34px; height:34px; border-radius:50%;
+    border:1px solid var(--bd); background:var(--sf);
+    cursor:pointer; font-size:18px; color:var(--ad);
+    font-family:inherit; line-height:1;
+  }
+  .stamp-btn:hover{background:var(--al); border-color:var(--ac);}
+  .stamp-val{
+    font-size:20px; font-weight:600; color:var(--ad);
+    min-width:42px; text-align:center;
+  }
+
+  .row-2{display:flex; gap:10px;}
+  .row-2 .field{flex:1;}
+
+  .panel-actions{
+    display:flex; gap:10px; padding:16px 20px;
+    border-top:1px solid var(--bd); background:var(--sf);
+  }
+  .btn{
+    flex:1; border:none; border-radius:10px;
+    padding:12px; cursor:pointer;
+    font-family:inherit; font-size:14px; font-weight:600;
+  }
+  .btn-primary{background:var(--ac); color:#fff;}
+  .btn-primary:hover{background:var(--ad);}
+  .btn-ghost{background:var(--s2); color:var(--mu);}
+  .btn-ghost:hover{background:var(--bd);}
+  .btn-danger{
+    background:var(--rl); color:var(--rt);
+    flex:0 0 auto; padding:12px 16px;
+  }
+  .btn-danger:hover{background:#f3d9d9;}
+  .btn:disabled{opacity:.45; cursor:not-allowed;}
+
+  /* ===== 履歴 ===== */
+  .hist-sec{margin-top:20px;}
+  .hist-sec h3{
+    font-size:13px; color:var(--ad);
+    margin-bottom:9px; letter-spacing:.03em;
+  }
+  .hist-item{
+    background:var(--sf); border-radius:9px;
+    padding:10px 13px; margin-bottom:7px;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .hist-date{font-size:13px; color:var(--tx);}
+  .hist-menu{font-size:12px; color:var(--mu); margin-top:2px;}
+  .hist-stat{
+    font-size:11px; padding:3px 8px; border-radius:6px;
+    background:var(--gl); color:var(--gn);
+  }
+  .hist-stat.cancel{background:var(--rl); color:var(--rt);}
+  .hist-empty{font-size:13px; color:var(--mu); padding:8px 0;}
+
+  /* merge 箱（無効・将来有効化） */
+  .merge-box{
+    margin-top:20px; padding:14px;
+    border:1px dashed var(--bd); border-radius:10px;
+    text-align:center;
+  }
+  .merge-box p{font-size:12px; color:var(--mu); margin-bottom:8px;}
+  .merge-box button{
+    background:var(--s2); color:var(--mu); border:none;
+    border-radius:8px; padding:9px 16px;
+    font-family:inherit; font-size:13px; cursor:not-allowed;
+  }
+
+  .form-note{
+    font-size:12px; color:var(--mu);
+    background:var(--sf); border-radius:8px;
+    padding:10px 12px; margin-bottom:16px; line-height:1.6;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back-link" onclick="goDashboard()">&#8592; 戻る</button>
+  <div class="topbar-title">顧客管理</div>
+  <div class="topbar-spacer"></div>
+</div>
+
+<div class="wrap">
+  <div class="toolbar">
+    <input type="text" class="search-box" id="searchBox"
+           placeholder="名前・電話で検索" oninput="onSearch()">
+    <button class="btn-add" onclick="openCreate()">＋ 新規</button>
+  </div>
+  <div class="cust-list" id="custList">
+    <div class="empty">読み込み中...</div>
+  </div>
+</div>
+
+<!-- 詳細 / 編集パネル -->
+<div class="panel-ov" id="panelOv">
+  <div class="panel">
+    <div class="panel-head">
+      <h2 id="panelTitle">顧客詳細</h2>
+      <button class="panel-close" onclick="closePanel()">&#215;</button>
+    </div>
+    <div class="panel-body" id="panelBody"></div>
+    <div class="panel-actions" id="panelActions"></div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_ui.js"></script>
+
+<script>
+(function () {
+
+  var _all = [];           // 全顧客（isMerged 除外済み）
+  var _filtered = [];      // 検索フィルタ後
+  var _mode = '';          // 'view' | 'edit' | 'create'
+  var _curDocId = null;    // 表示中の customerDocId
+
+  function esc(s) {
+    s = (s == null) ? '' : String(s);
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function _v(id) {
+    var el = document.getElementById(id);
+    return el ? String(el.value || '').trim() : '';
+  }
+
+  function goDashboard() {
+    window.location.href = 'salon_dashboard_v1.html';
+  }
+  window.goDashboard = goDashboard;
+
+  // ----- 一覧読み込み -----
+  function loadList() {
+    uiShowLoading('読み込み中...');
+    dbSalonListCustomers(function (list) {
+      uiHideLoading();
+      if (list == null) {
+        uiToast('顧客一覧の取得に失敗しました');
+        renderList([]);
+        return;
+      }
+      // 名前で安定ソート
+      list.sort(function (a, b) {
+        var an = (a && a.name) ? String(a.name) : '';
+        var bn = (b && b.name) ? String(b.name) : '';
+        if (an === bn) { return 0; }
+        return (an < bn) ? -1 : 1;
+      });
+      _all = list;
+      applyFilter();
+    });
+  }
+
+  function applyFilter() {
+    var q = '';
+    var sb = document.getElementById('searchBox');
+    if (sb) { q = String(sb.value || '').trim().toLowerCase(); }
+    if (!q) {
+      _filtered = _all.slice();
+    } else {
+      _filtered = [];
+      var i, c, hay;
+      for (i = 0; i < _all.length; i++) {
+        c = _all[i];
+        hay = ((c.name || '') + ' ' + (c.phone || '')).toLowerCase();
+        if (hay.indexOf(q) >= 0) { _filtered.push(c); }
+      }
+    }
+    renderList(_filtered);
+  }
+  function onSearch() { applyFilter(); }
+  window.onSearch = onSearch;
+
+  function renderList(list) {
+    var box = document.getElementById('custList');
+    box.innerHTML = '';
+    if (!list || list.length === 0) {
+      var em = document.createElement('div');
+      em.className = 'empty';
+      em.textContent = (_all.length === 0)
+        ? 'まだ顧客が登録されていません'
+        : '該当する顧客がいません';
+      box.appendChild(em);
+      return;
+    }
+    var i;
+    for (i = 0; i < list.length; i++) {
+      box.appendChild(buildRow(list[i]));
+    }
+  }
+
+  function buildRow(c) {
+    var row = document.createElement('div');
+    row.className = 'cust-row';
+
+    var av = document.createElement('div');
+    av.className = 'cust-avatar';
+    av.textContent = (c.name ? String(c.name).charAt(0) : '?');
+    row.appendChild(av);
+
+    var main = document.createElement('div');
+    main.className = 'cust-main';
+    var nm = document.createElement('div');
+    nm.className = 'cust-name';
+    nm.textContent = c.name || '(名前なし)';
+    main.appendChild(nm);
+    var sub = document.createElement('div');
+    sub.className = 'cust-sub';
+    var bits = [];
+    if (c.phone) { bits.push(c.phone); }
+    if (typeof c.stampCount === 'number') {
+      bits.push('スタンプ ' + c.stampCount);
+    }
+    sub.textContent = bits.join('  ・  ');
+    main.appendChild(sub);
+    row.appendChild(main);
+
+    // createdSource バッジ（salon=サロン登録 / self=本人登録）
+    var bd = document.createElement('div');
+    if (c.createdSource === 'self' || c.authUid) {
+      bd.className = 'cust-badge self';
+      bd.textContent = 'アプリ';
+    } else {
+      bd.className = 'cust-badge';
+      bd.textContent = 'サロン';
+    }
+    row.appendChild(bd);
+
+    row.onclick = function () { openDetail(c._id); };
+    return row;
+  }
+
+  // ----- 詳細表示 -----
+  function openDetail(docId) {
+    _mode = 'view';
+    _curDocId = docId;
+    uiShowLoading('読み込み中...');
+    dbSalonGetCustomer(docId, function (c) {
+      if (c == null) {
+        uiHideLoading();
+        uiToast('顧客情報の取得に失敗しました');
+        return;
+      }
+      // 履歴も取得
+      dbSalonGetCustomerHistory(docId, function (hist) {
+        uiHideLoading();
+        renderDetail(c, hist);
+        showPanel();
+      });
+    });
+  }
+
+  function renderDetail(c, hist) {
+    document.getElementById('panelTitle').textContent =
+      c.name || '顧客詳細';
+    var body = document.getElementById('panelBody');
+    body.innerHTML = '';
+
+    body.appendChild(_roField('お名前', c.name || '-'));
+    body.appendChild(_roField('電話番号', c.phone || '-'));
+    body.appendChild(_roField('メール', c.email || '-'));
+    body.appendChild(_roField('登録区分',
+      (c.createdSource === 'self' || c.authUid)
+        ? '顧客アプリ登録' : 'サロン登録'));
+
+    // メモ
+    body.appendChild(_roField('メモ', c.memo || '(なし)'));
+
+    // スタンプ（読み取り表示）
+    var sc = (typeof c.stampCount === 'number') ? c.stampCount : 0;
+    body.appendChild(_roField('スタンプ', String(sc) + ' 個'));
+
+    // 来店履歴
+    var sec = document.createElement('div');
+    sec.className = 'hist-sec';
+    var h3 = document.createElement('h3');
+    h3.textContent = '来店履歴';
+    sec.appendChild(h3);
+
+    var arr = (hist && hist.merged) ? hist.merged : [];
+    if (!arr || arr.length === 0) {
+      var he = document.createElement('div');
+      he.className = 'hist-empty';
+      he.textContent = '履歴はまだありません';
+      sec.appendChild(he);
+    } else {
+      var i, a, item, dt, mn, st;
+      var lim = (arr.length > 30) ? 30 : arr.length;
+      for (i = 0; i < lim; i++) {
+        a = arr[i];
+        item = document.createElement('div');
+        item.className = 'hist-item';
+        var left = document.createElement('div');
+        dt = document.createElement('div');
+        dt.className = 'hist-date';
+        dt.textContent = (a.dateKey || '') +
+          (a.start ? ('  ' + a.start) : '');
+        left.appendChild(dt);
+        mn = document.createElement('div');
+        mn.className = 'hist-menu';
+        mn.textContent = a.menuNameSnapshot || a.menuName || '';
+        left.appendChild(mn);
+        item.appendChild(left);
+        st = document.createElement('div');
+        if (a.status === 'cancelled' || a.status === 'no_show') {
+          st.className = 'hist-stat cancel';
+          st.textContent = (a.status === 'no_show') ? '不来店' : 'キャンセル';
+        } else {
+          st.className = 'hist-stat';
+          st.textContent = '来店';
+        }
+        item.appendChild(st);
+        sec.appendChild(item);
+      }
+    }
+    body.appendChild(sec);
+
+    // 統合（merge）箱：Function 未実装のため無効表示
+    var mb = document.createElement('div');
+    mb.className = 'merge-box';
+    var mp = document.createElement('p');
+    mp.textContent =
+      '同一人物の重複カルテを統合する機能（準備中）';
+    mb.appendChild(mp);
+    var mbtn = document.createElement('button');
+    mbtn.textContent = '統合（近日対応）';
+    mbtn.disabled = true;
+    mb.appendChild(mbtn);
+    body.appendChild(mb);
+
+    // アクション
+    var act = document.getElementById('panelActions');
+    act.innerHTML = '';
+    var bEdit = document.createElement('button');
+    bEdit.className = 'btn btn-primary';
+    bEdit.textContent = '編集';
+    bEdit.onclick = function () { openEdit(c); };
+    act.appendChild(bEdit);
+    var bClose = document.createElement('button');
+    bClose.className = 'btn btn-ghost';
+    bClose.textContent = '閉じる';
+    bClose.onclick = closePanel;
+    act.appendChild(bClose);
+  }
+
+  function _roField(label, val) {
+    var f = document.createElement('div');
+    f.className = 'field';
+    var l = document.createElement('label');
+    l.textContent = label;
+    f.appendChild(l);
+    var d = document.createElement('div');
+    d.style.fontSize = '14px';
+    d.style.color = 'var(--tx)';
+    d.style.padding = '4px 0';
+    d.style.whiteSpace = 'pre-wrap';
+    d.textContent = val;
+    f.appendChild(d);
+    return f;
+  }
+
+  // ----- 編集 -----
+  function openEdit(c) {
+    _mode = 'edit';
+    _curDocId = c._id;
+    document.getElementById('panelTitle').textContent = '顧客を編集';
+    var body = document.getElementById('panelBody');
+    body.innerHTML = '';
+
+    body.appendChild(_inField('お名前', 'fName', c.name || '', 'text'));
+    body.appendChild(_inField('電話番号', 'fPhone', c.phone || '', 'text'));
+    body.appendChild(_inField('メール', 'fEmail', c.email || '', 'text'));
+    body.appendChild(_taField('メモ（顧客には見えません）',
+      'fMemo', c.memo || ''));
+
+    // スタンプ +/-（クライアントは stampCount を書ける＝サロン権限）
+    var sf = document.createElement('div');
+    sf.className = 'field';
+    var sl = document.createElement('label');
+    sl.textContent = 'スタンプ';
+    sf.appendChild(sl);
+    var sr = document.createElement('div');
+    sr.className = 'stamp-row';
+    var minus = document.createElement('button');
+    minus.className = 'stamp-btn';
+    minus.textContent = '\u2212';
+    minus.onclick = function () { bumpStamp(-1); };
+    var val = document.createElement('div');
+    val.className = 'stamp-val';
+    val.id = 'fStampVal';
+    val.textContent = String(
+      (typeof c.stampCount === 'number') ? c.stampCount : 0);
+    var plus = document.createElement('button');
+    plus.className = 'stamp-btn';
+    plus.textContent = '+';
+    plus.onclick = function () { bumpStamp(1); };
+    sr.appendChild(minus);
+    sr.appendChild(val);
+    sr.appendChild(plus);
+    sf.appendChild(sr);
+    body.appendChild(sf);
+
+    var act = document.getElementById('panelActions');
+    act.innerHTML = '';
+    var bSave = document.createElement('button');
+    bSave.className = 'btn btn-primary';
+    bSave.textContent = '保存';
+    bSave.onclick = saveEdit;
+    act.appendChild(bSave);
+    var bCancel = document.createElement('button');
+    bCancel.className = 'btn btn-ghost';
+    bCancel.textContent = 'キャンセル';
+    bCancel.onclick = function () { openDetail(_curDocId); };
+    act.appendChild(bCancel);
+    var bDel = document.createElement('button');
+    bDel.className = 'btn btn-danger';
+    bDel.textContent = '削除';
+    bDel.onclick = doDelete;
+    act.appendChild(bDel);
+  }
+
+  function bumpStamp(delta) {
+    var el = document.getElementById('fStampVal');
+    if (!el) { return; }
+    var n = parseInt(el.textContent, 10);
+    if (isNaN(n)) { n = 0; }
+    n += delta;
+    if (n < 0) { n = 0; }
+    el.textContent = String(n);
+  }
+
+  function saveEdit() {
+    var name = _v('fName');
+    if (!name) {
+      uiToast('お名前は必須です');
+      return;
+    }
+    var sv = document.getElementById('fStampVal');
+    var stamp = sv ? parseInt(sv.textContent, 10) : 0;
+    if (isNaN(stamp) || stamp < 0) { stamp = 0; }
+
+    var patch = {
+      name: name,
+      phone: _v('fPhone'),
+      email: _v('fEmail'),
+      memo: _v('fMemo'),
+      stampCount: stamp
+    };
+    uiShowLoading('保存中...');
+    dbSalonUpdateCustomer(_curDocId, patch, function (ok) {
+      uiHideLoading();
+      if (!ok) {
+        uiToast('保存に失敗しました');
+        return;
+      }
+      uiToast('保存しました');
+      openDetail(_curDocId);
+      loadList();
+    });
+  }
+
+  function doDelete() {
+    uiConfirmDelete(
+      'この顧客カルテを削除します。よろしいですか？（来店履歴は残ります）',
+      function () {
+        uiShowLoading('削除中...');
+        dbSalonDeleteCustomer(_curDocId, function (ok) {
+          uiHideLoading();
+          if (!ok) {
+            uiToast('削除に失敗しました');
+            return;
+          }
+          uiToast('削除しました');
+          closePanel();
+          loadList();
+        });
+      },
+      null
+    );
+  }
+
+  // ----- 新規登録（サロン側・dbSalonCreateCustomer） -----
+  function openCreate() {
+    _mode = 'create';
+    _curDocId = null;
+    document.getElementById('panelTitle').textContent = '新規顧客登録';
+    var body = document.getElementById('panelBody');
+    body.innerHTML = '';
+
+    var note = document.createElement('div');
+    note.className = 'form-note';
+    note.textContent =
+      'サロン側で顧客カルテを作成します。お客様があとで同じメール'
+      + 'アドレスでアプリ登録すると、このカルテに自動でつながります'
+      + '（メール確認が条件）。電話予約のお客様はメールなしでも'
+      + '登録できます。';
+    body.appendChild(note);
+
+    body.appendChild(_inField('お名前（必須）', 'fName', '', 'text'));
+    body.appendChild(_inField('電話番号', 'fPhone', '', 'text'));
+    body.appendChild(_inField('メール（任意）', 'fEmail', '', 'text'));
+    body.appendChild(_taField('メモ（顧客には見えません）',
+      'fMemo', ''));
+
+    var act = document.getElementById('panelActions');
+    act.innerHTML = '';
+    var bSave = document.createElement('button');
+    bSave.className = 'btn btn-primary';
+    bSave.textContent = '登録';
+    bSave.onclick = doCreate;
+    act.appendChild(bSave);
+    var bCancel = document.createElement('button');
+    bCancel.className = 'btn btn-ghost';
+    bCancel.textContent = 'キャンセル';
+    bCancel.onclick = closePanel;
+    act.appendChild(bCancel);
+
+    showPanel();
+  }
+  window.openCreate = openCreate;
+
+  function doCreate() {
+    var name = _v('fName');
+    if (!name) {
+      uiToast('お名前は必須です');
+      return;
+    }
+    var data = {
+      name: name,
+      phone: _v('fPhone'),
+      email: _v('fEmail')
+    };
+    var memo = _v('fMemo');
+
+    uiShowLoading('登録中...');
+    dbSalonCreateCustomer(data, function (res) {
+      if (res == null || !res._id) {
+        uiHideLoading();
+        uiToast('登録に失敗しました');
+        return;
+      }
+      // メモがあれば続けて更新（作成ホワイトリストに memo は無いため）
+      if (memo) {
+        dbSalonUpdateCustomer(res._id, { memo: memo },
+          function () {
+            uiHideLoading();
+            uiToast('登録しました');
+            closePanel();
+            loadList();
+          });
+      } else {
+        uiHideLoading();
+        uiToast('登録しました');
+        closePanel();
+        loadList();
+      }
+    });
+  }
+
+  // ----- フィールド生成ヘルパー -----
+  function _inField(label, id, val, type) {
+    var f = document.createElement('div');
+    f.className = 'field';
+    var l = document.createElement('label');
+    l.textContent = label;
+    f.appendChild(l);
+    var inp = document.createElement('input');
+    inp.type = type || 'text';
+    inp.id = id;
+    inp.value = val || '';
+    f.appendChild(inp);
+    return f;
+  }
+  function _taField(label, id, val) {
+    var f = document.createElement('div');
+    f.className = 'field';
+    var l = document.createElement('label');
+    l.textContent = label;
+    f.appendChild(l);
+    var ta = document.createElement('textarea');
+    ta.id = id;
+    ta.value = val || '';
+    f.appendChild(ta);
+    return f;
+  }
+
+  // ----- パネル開閉 -----
+  function showPanel() {
+    document.getElementById('panelOv').className = 'panel-ov show';
+  }
+  function closePanel() {
+    document.getElementById('panelOv').className = 'panel-ov';
+    _mode = '';
+    _curDocId = null;
+  }
+  window.closePanel = closePanel;
+
+  // 背景タップで閉じる
+  document.getElementById('panelOv').onclick = function (e) {
+    if (e.target === this) { closePanel(); }
+  };
+
+  // ----- 起動 -----
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (!isStaff) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+      loadList();
+    });
+  });
+
+})();
+</script>
+</body>
+</html>
