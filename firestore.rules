@@ -155,11 +155,12 @@ service cloud.firestore {
                       (resource.data.public == true || isSalonStaff(salonId));
         
         // 作成: スタッフのみ、フィールド検証
+        // ★ v8.1: intervalBefore/intervalAfter は廃止。
+        //   インターバルは settings.intervalMin（サロン共通設定）に1本化
         allow create: if isSalonStaff(salonId) &&
                         request.resource.data.keys().hasOnly([
                           'name', 'duration', 'price', 'type', 'public',
                           'eligibleStaffIds', 'requiredResourceIds',
-                          'intervalBefore', 'intervalAfter',
                           'description', 'contraindications',
                           'photoUrl', 'sortOrder', 'createdAt'
                         ]) &&

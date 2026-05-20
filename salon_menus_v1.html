@@ -476,8 +476,6 @@
       '¥' + (m.price || 0).toLocaleString()));
     body.appendChild(_roField('公開状態',
       (m.public === false) ? '非公開（顧客には見えません）' : '公開'));
-    body.appendChild(_roField('施術後の間隔',
-      (m.intervalAfter || 0) + ' 分'));
     if (m.description) {
       body.appendChild(_roField('説明', m.description));
     }
@@ -550,7 +548,6 @@
     var pr = _vint('fPrice', 0);
     var sel = document.getElementById('fType');
     var typ = (sel && sel.value === 'option') ? 'option' : 'main';
-    var iva = _vint('fIvAft', 0);
 
     var patch = {
       name: name,
@@ -558,7 +555,6 @@
       price: pr,
       type: typ,
       public: _formPublic,
-      intervalAfter: iva,
       description: _v('fDesc'),
       contraindications: _v('fContra')
     };
@@ -577,7 +573,6 @@
           _all[i].price = patch.price;
           _all[i].type = patch.type;
           _all[i].public = patch.public;
-          _all[i].intervalAfter = patch.intervalAfter;
           _all[i].description = patch.description;
           _all[i].contraindications = patch.contraindications;
           break;
@@ -644,7 +639,6 @@
     var pr = _vint('fPrice', 0);
     var sel = document.getElementById('fType');
     var typ = (sel && sel.value === 'option') ? 'option' : 'main';
-    var iva = _vint('fIvAft', 0);
     // 新規は同種別の末尾に配置（既存の最大 sortOrder + 1）
     var maxSo = -1;
     var i;
@@ -661,7 +655,6 @@
       price: pr,
       type: typ,
       public: _formPublic,
-      intervalAfter: iva,
       description: _v('fDesc'),
       contraindications: _v('fContra'),
       sortOrder: maxSo + 1
@@ -682,7 +675,6 @@
         price: data.price,
         type: data.type,
         public: data.public,
-        intervalAfter: data.intervalAfter,
         description: data.description,
         contraindications: data.contraindications,
         sortOrder: data.sortOrder,
@@ -743,9 +735,6 @@
     r2.appendChild(_inField('料金（円）',
       'fPrice', m ? String(m.price || '') : '', 'number'));
     body.appendChild(r2);
-
-    body.appendChild(_inField('施術後の間隔（分）',
-      'fIvAft', m ? String(m.intervalAfter || 0) : '0', 'number'));
 
     // 公開トグル
     var tr = document.createElement('div');

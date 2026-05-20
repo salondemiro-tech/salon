@@ -608,8 +608,11 @@
   // DESIGN.md 0-2 menus スキーマ / 3-3 menus ルールと1対1。
   // フィールドホワイトリスト:
   //   name,duration,price,type,public,eligibleStaffIds,
-  //   requiredResourceIds,intervalBefore,intervalAfter,
+  //   requiredResourceIds,
   //   description,contraindications,photoUrl,sortOrder,createdAt
+  // ★ v8.1: intervalBefore/intervalAfter は廃止。
+  //   インターバルはサロン共通設定 settings.intervalMin に1本化
+  //   （メニュー単位ではなく全予約に自動付与・後から変更可）
   // フェーズ1ではeligibleStaffIds=['owner'], requiredResourceIds=['default']固定
   // ============================================================
 
@@ -644,9 +647,9 @@
 
   // メニュー作成（DESIGN.md 3-3 menus 作成ホワイトリスト1対1）
   // data: { name, duration, price, type, public,
-  //         description?, contraindications?, intervalBefore?,
-  //         intervalAfter?, sortOrder? }
+  //         description?, contraindications?, sortOrder? }
   // eligibleStaffIds/requiredResourceIds はフェーズ1固定値を自動付与
+  // ★ v8.1: メニュー単位 interval は廃止（settings.intervalMin に1本化）
   function dbSalonCreateMenu(data, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -674,12 +677,6 @@
       public: pub,
       eligibleStaffIds: ['owner'],     // フェーズ1固定
       requiredResourceIds: ['default'], // フェーズ1固定
-      intervalBefore:
-        (typeof data.intervalBefore === 'number' && data.intervalBefore >= 0)
-          ? parseInt(data.intervalBefore, 10) : 0,
-      intervalAfter:
-        (typeof data.intervalAfter === 'number' && data.intervalAfter >= 0)
-          ? parseInt(data.intervalAfter, 10) : 0,
       createdAt: _serverTimestamp()
     };
     if (data.description) { doc.description = String(data.description); }
@@ -781,6 +778,104 @@
     }
   }
   window.dbSalonReorderMenus = dbSalonReorderMenus;
+
+  // ============================================================
+  // サロン共通設定 API（営業時間・インターバル等）
+  // パス: salons/{salonId}/config/settings
+  // DESIGN.md 0-2 サロン共通設定スキーマと1対1。
+  // ★ v8.1: intervalMin はここで管理（メニュー単位の interval は廃止）
+  // ============================================================
+
+  // 設定取得。未作成なら null ではなく既定値を返して画面側を簡単にする
+  function dbGetSettings(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, _defaultSettings()); return; }
+    dbReadDoc('salons/' + sid + '/config/settings', function (doc) {
+      if (!doc) {
+        // 未作成は既定値（初回起動時の挙動）
+        _safeCb(cb, _defaultSettings());
+        return;
+      }
+      // 既定値をベースに既存値で上書き（部分保存にも耐える）
+      var base = _defaultSettings();
+      var k;
+      for (k in doc) {
+        if (doc.hasOwnProperty(k)) { base[k] = doc[k]; }
+      }
+      _safeCb(cb, base);
+    });
+  }
+  window.dbGetSettings = dbGetSettings;
+
+  // 設定保存（set merge:true で部分更新可）
+  // settings: { openTime, closeTime, intervalMin, intervalInClose,
+  //             slotMin, closedDows, weeklyClose, bookingWeeks,
+  //             lastMin, deadline }
+  // 戻り値 cb(err): 成功時 null、失敗時 Error 相当の真値
+  function dbSaveSettings(settings, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, new Error('no salon')); return; }
+    if (!settings || typeof settings !== 'object') {
+      _safeCb(cb, new Error('invalid settings'));
+      return;
+    }
+    // 型の最低限の正規化
+    var doc = {};
+    if (typeof settings.openTime === 'string')  { doc.openTime  = settings.openTime; }
+    if (typeof settings.closeTime === 'string') { doc.closeTime = settings.closeTime; }
+    if (settings.intervalMin != null) {
+      var iv = parseInt(settings.intervalMin, 10);
+      if (!isNaN(iv) && iv >= 0) { doc.intervalMin = iv; }
+    }
+    if (typeof settings.intervalInClose === 'boolean') {
+      doc.intervalInClose = settings.intervalInClose;
+    }
+    if (settings.slotMin != null) {
+      var sm = parseInt(settings.slotMin, 10);
+      if (!isNaN(sm) && sm > 0) { doc.slotMin = sm; }
+    }
+    if (Array.isArray(settings.closedDows)) {
+      doc.closedDows = settings.closedDows.slice();
+    }
+    if (Array.isArray(settings.weeklyClose)) {
+      doc.weeklyClose = settings.weeklyClose.map(function (w) {
+        return {
+          dow: parseInt(w.dow, 10),
+          start: String(w.start || ''),
+          end: String(w.end || '')
+        };
+      });
+    }
+    if (settings.bookingWeeks != null) {
+      var bw = parseInt(settings.bookingWeeks, 10);
+      if (!isNaN(bw) && bw > 0) { doc.bookingWeeks = bw; }
+    }
+    if (typeof settings.lastMin === 'string')  { doc.lastMin = settings.lastMin; }
+    if (typeof settings.deadline === 'string') { doc.deadline = settings.deadline; }
+    doc.updatedAt = _serverTimestamp();
+
+    dbWriteDoc('salons/' + sid + '/config/settings', doc, true,
+      function (ok) {
+        _safeCb(cb, ok ? null : new Error('save failed'));
+      });
+  }
+  window.dbSaveSettings = dbSaveSettings;
+
+  // 既定設定（初回起動時の表示用）
+  function _defaultSettings() {
+    return {
+      openTime: '10:00',
+      closeTime: '19:00',
+      intervalMin: 30,
+      intervalInClose: false,
+      slotMin: 30,
+      closedDows: [],
+      weeklyClose: [],
+      bookingWeeks: 8,
+      lastMin: 'same1h',
+      deadline: '前日24時まで'
+    };
+  }
 
   // 予約一覧
   // filterObj: { dateKey: '2026-05-14' } のように指定可能 (任意)

@@ -106,7 +106,7 @@ salons/{salonId}/appointments/{appointmentId} {
 それ以外（`end`, `startAt`, `endAt`, `staffId`, `resourceIds`, `status`, `priceSnapshot`, `createdAt`）は **すべてサーバー側で確定**する。
 
 **なぜ`end` も顧客に書かせないか**：
-顧客が `start: "10:00", end: "10:05"` のように短く送って、本来90分のメニュー予約を5分で押さえる攻撃を防ぐため。サーバ側で `start + menu.duration + optionMenusのduration合計 + intervalAfter` から算出する。
+顧客が `start: "10:00", end: "10:05"` のように短く送って、本来90分のメニュー予約を5分で押さえる攻撃を防ぐため。サーバ側で `start + menu.duration + optionMenusのduration合計 + settings.intervalMin` から算出する（★ v8.1: インターバルはサロン共通設定 `settings.intervalMin` を使う。詳細は 0-2 メニュースキーマの注釈参照）。
 
 **なぜ`priceSnapshot` をサーバ確定にするか**：
 顧客が `priceSnapshot: 0` で送る改ざんを防ぐ。Cloud Functions が `menus/{menuId}.price + sum(optionMenuIds.price)` から計算してセット。過去予約は当時の価格が残る。
@@ -248,9 +248,34 @@ salons/{salonId}/menus/{menuId} {
   type: "main",                        // main / option
   public: true,                        // true: 顧客の予約画面に表示 / false: サロン内部用
   eligibleStaffIds: ["owner"],         // フェーズ1では常に ['owner']
-  requiredResourceIds: ["default"],    // フェーズ1では常に ['default']
-  intervalBefore: 0,                   // 前のインターバル（分）
-  intervalAfter: 15                    // 後のインターバル（分）
+  requiredResourceIds: ["default"]     // フェーズ1では常に ['default']
+}
+```
+
+> ★ 2026/5/20 改訂：旧 v6 のメニュー単位 `intervalBefore` / `intervalAfter`
+> は廃止。**インターバルはサロン共通設定 `settings.intervalMin` に1本化**
+> （いけさん運営判断：「インターバルはAというメニューのためでなく、
+> Aの後に続くメニューや予定のためにあるもの」「深夜・早朝・施術中など
+> サロン側が管理できないタイミングで予約がピタピタ入らないよう自動付与」）。
+> 予約 `end` 計算は `start + 全メニュー duration合計 + settings.intervalMin`。
+> 将来「特殊メニューのみ個別インターバル」が必要になったら、その時に
+> 上書きフィールドを追加する（YAGNI）。
+
+**サロン共通設定スキーマ（営業時間・インターバル等）**：
+
+```
+salons/{salonId}/config/settings {
+  openTime: "10:00",          // 開店時刻 HH:MM
+  closeTime: "19:00",         // 閉店時刻 HH:MM
+  intervalMin: 30,            // 全予約共通の施術後インターバル（分）
+                              //   ★ メニュー単位ではなくここで管理
+  intervalInClose: false,     // インターバルを閉店時間に含めるか
+  slotMin: 30,                // 予約スロット刻み（5/10/15/30 分）
+  closedDows: [2],            // 定休曜日 0=日…6=土
+  weeklyClose: [],            // 毎週の定期クローズ [{dow,start,end}, ...]
+  bookingWeeks: 8,            // 何週間先まで予約可
+  lastMin: "same1h",          // 直前予約受付：1week/3days/1day/same3h/same1h/same30m
+  deadline: "前日24時まで"    // 顧客キャンセル受付期限
 }
 ```
 
@@ -282,8 +307,10 @@ salons/{salonId}/menus/{menuId} {
 
 1. **データ構造を3次元予約モデルで固定**
    - 予約には常に `staffId`, `resourceIds`, `editingBy` を含める
-   - メニューには常に `eligibleStaffIds`, `requiredResourceIds`, `intervalBefore`, `intervalAfter` を含める
+   - メニューには常に `eligibleStaffIds`, `requiredResourceIds` を含める
    - フェーズ1では全部 `'owner'` や `['default']` で固定値が入る
+   - ★ v8.1: インターバルはメニュー単位ではなく `settings.intervalMin`
+     （サロン共通・後から変更可・全予約に自動付与）
 
 2. **権限チェックを「サロン所属スタッフ」で抽象化**
    - Firestoreルールは「`staffs/{request.auth.uid}` が存在するか」で判定
@@ -297,8 +324,11 @@ salons/{salonId}/menus/{menuId} {
    - フェーズ1では `staffId='owner'` と `resourceIds=['default']` が固定だが、計算ロジック自体は3次元
    - フェーズ2でスタッフ・設備が増えても、ロジックは変えない
 
-5. **インターバル（前後の片付け時間）を最初から考慮**
-   - フェーズ1の現状は `intervalAfter: 0` でいいが、機能としては最初から存在させる
+5. **インターバル（次の予約までの自動確保時間）はサロン共通設定**
+   - ★ v8.1: `settings.intervalMin` 1箇所で管理。
+     全予約に自動付与され、後から変更可能。
+   - 深夜・早朝・施術中などサロン側が管理できないタイミングで
+     予約がピタピタ入らないための「自動の余白」
 
 6. **salonId 直書き禁止、必ず `getCurrentSalonId()` 経由（GPT指摘①）**
    - すべての DB アクセスで `salonId` を `getCurrentSalonId()` から取得
@@ -1035,7 +1065,7 @@ sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
     - `salons/{uid}/config/cancelPolicy`
     - `salons/{uid}/config/stampCard`
   - 予約ドキュメントには `staffId: 'owner'`, `resourceIds: ['default']`, `editingBy: null` を最初から含める
-  - メニュー作成時は `eligibleStaffIds: ['owner']`, `requiredResourceIds: ['default']`, `intervalBefore: 0`, `intervalAfter: 0` を自動付与
+  - メニュー作成時は `eligibleStaffIds: ['owner']`, `requiredResourceIds: ['default']` を自動付与（★ v8.1: メニュー単位の interval は廃止。`settings.intervalMin` に1本化）
   - 顧客作成時は `notifyChannels: {email: true, line: false, lineUserId: null}` を最初から含める
 
 ### Phase B：速度設計＋3次元予約計算ロジック＋Firestoreコスト最適化
