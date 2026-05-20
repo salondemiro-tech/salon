@@ -603,6 +603,185 @@
   }
   window.dbSalonGetCustomerHistory = dbSalonGetCustomerHistory;
 
+  // ============================================================
+  // サロン側メニュー API
+  // DESIGN.md 0-2 menus スキーマ / 3-3 menus ルールと1対1。
+  // フィールドホワイトリスト:
+  //   name,duration,price,type,public,eligibleStaffIds,
+  //   requiredResourceIds,intervalBefore,intervalAfter,
+  //   description,contraindications,photoUrl,sortOrder,createdAt
+  // フェーズ1ではeligibleStaffIds=['owner'], requiredResourceIds=['default']固定
+  // ============================================================
+
+  // メニュー一覧（サロン側：public/非公開 両方取得、sortOrder順）
+  function dbSalonListMenus(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    dbReadCollection('salons/' + sid + '/menus', null, function (list) {
+      if (!list) { _safeCb(cb, null); return; }
+      // sortOrder 昇順、未設定は末尾、同値は name 昇順で安定化
+      list.sort(function (a, b) {
+        var ao = (typeof a.sortOrder === 'number') ? a.sortOrder : 999999;
+        var bo = (typeof b.sortOrder === 'number') ? b.sortOrder : 999999;
+        if (ao !== bo) { return ao - bo; }
+        var an = (a && a.name) ? String(a.name) : '';
+        var bn = (b && b.name) ? String(b.name) : '';
+        if (an === bn) { return 0; }
+        return (an < bn) ? -1 : 1;
+      });
+      _safeCb(cb, list);
+    });
+  }
+  window.dbSalonListMenus = dbSalonListMenus;
+
+  // メニュー単体取得
+  function dbSalonGetMenu(menuId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !menuId) { _safeCb(cb, null); return; }
+    dbReadDoc('salons/' + sid + '/menus/' + menuId, cb);
+  }
+  window.dbSalonGetMenu = dbSalonGetMenu;
+
+  // メニュー作成（DESIGN.md 3-3 menus 作成ホワイトリスト1対1）
+  // data: { name, duration, price, type, public,
+  //         description?, contraindications?, intervalBefore?,
+  //         intervalAfter?, sortOrder? }
+  // eligibleStaffIds/requiredResourceIds はフェーズ1固定値を自動付与
+  function dbSalonCreateMenu(data, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    if (!data || !data.name) {
+      console.error('[shared_db] dbSalonCreateMenu: name is required');
+      _safeCb(cb, null); return;
+    }
+
+    var dur = parseInt(data.duration, 10);
+    if (isNaN(dur) || dur <= 0) {
+      console.error('[shared_db] dbSalonCreateMenu: duration must be > 0');
+      _safeCb(cb, null); return;
+    }
+    var pr = parseInt(data.price, 10);
+    if (isNaN(pr) || pr < 0) { pr = 0; }
+
+    var typ = (data.type === 'option') ? 'option' : 'main';
+    var pub = (data.public !== false);  // 既定 true
+
+    var doc = {
+      name: String(data.name),
+      duration: dur,
+      price: pr,
+      type: typ,
+      public: pub,
+      eligibleStaffIds: ['owner'],     // フェーズ1固定
+      requiredResourceIds: ['default'], // フェーズ1固定
+      intervalBefore:
+        (typeof data.intervalBefore === 'number' && data.intervalBefore >= 0)
+          ? parseInt(data.intervalBefore, 10) : 0,
+      intervalAfter:
+        (typeof data.intervalAfter === 'number' && data.intervalAfter >= 0)
+          ? parseInt(data.intervalAfter, 10) : 0,
+      createdAt: _serverTimestamp()
+    };
+    if (data.description) { doc.description = String(data.description); }
+    if (data.contraindications) {
+      doc.contraindications = String(data.contraindications);
+    }
+    if (data.photoUrl) { doc.photoUrl = String(data.photoUrl); }
+    if (typeof data.sortOrder === 'number' && data.sortOrder >= 0) {
+      doc.sortOrder = parseInt(data.sortOrder, 10);
+    }
+
+    dbAddDoc('salons/' + sid + '/menus', doc, cb);
+  }
+  window.dbSalonCreateMenu = dbSalonCreateMenu;
+
+  // メニュー更新。createdAt/eligibleStaffIds/requiredResourceIds は
+  // クライアント書込みから除外（フェーズ1固定値・サーバ管理）
+  function dbSalonUpdateMenu(menuId, patch, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !menuId) { _safeCb(cb, null); return; }
+    if (patch) {
+      var _protected = [
+        'createdAt', 'eligibleStaffIds', 'requiredResourceIds'
+      ];
+      var i;
+      for (i = 0; i < _protected.length; i++) {
+        if (patch.hasOwnProperty(_protected[i])) {
+          delete patch[_protected[i]];
+        }
+      }
+      // 型の最低限の正規化
+      if (patch.hasOwnProperty('duration')) {
+        var d = parseInt(patch.duration, 10);
+        if (isNaN(d) || d <= 0) { delete patch.duration; }
+        else { patch.duration = d; }
+      }
+      if (patch.hasOwnProperty('price')) {
+        var p = parseInt(patch.price, 10);
+        if (isNaN(p) || p < 0) { p = 0; }
+        patch.price = p;
+      }
+      if (patch.hasOwnProperty('type') &&
+          patch.type !== 'main' && patch.type !== 'option') {
+        delete patch.type;
+      }
+      if (patch.hasOwnProperty('public')) {
+        patch.public = (patch.public === true);
+      }
+      if (patch.hasOwnProperty('sortOrder')) {
+        var so = parseInt(patch.sortOrder, 10);
+        if (isNaN(so) || so < 0) { delete patch.sortOrder; }
+        else { patch.sortOrder = so; }
+      }
+      patch.updatedAt = _serverTimestamp();
+    }
+    dbUpdateDoc('salons/' + sid + '/menus/' + menuId, patch, cb);
+  }
+  window.dbSalonUpdateMenu = dbSalonUpdateMenu;
+
+  // メニュー削除（オーナーのみ）。
+  // 注意：過去予約は menuNameSnapshot 等を持っているので参照不能には
+  //   ならないが、将来の予約導線から外したいだけなら public:false を
+  //   推奨。物理削除する場合のみこれを使う。
+  function dbSalonDeleteMenu(menuId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !menuId) { _safeCb(cb, null); return; }
+    dbDeleteDoc('salons/' + sid + '/menus/' + menuId, cb);
+  }
+  window.dbSalonDeleteMenu = dbSalonDeleteMenu;
+
+  // 並び替え用：複数メニューの sortOrder を一括更新
+  // orderList: [{ _id: 'm1', sortOrder: 0 }, { _id: 'm2', sortOrder: 1 }, ...]
+  // 1件ずつ dbUpdateDoc を順次実行（数件程度の想定・分割バッチ不要）
+  function dbSalonReorderMenus(orderList, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !orderList || orderList.length === 0) {
+      _safeCb(cb, false); return;
+    }
+    var done = 0, errCount = 0;
+    var total = orderList.length;
+    var i;
+    function _one(item) {
+      dbUpdateDoc('salons/' + sid + '/menus/' + item._id,
+        { sortOrder: item.sortOrder, updatedAt: _serverTimestamp() },
+        function (ok) {
+          if (!ok) { errCount++; }
+          done++;
+          if (done >= total) { _safeCb(cb, errCount === 0); }
+        });
+    }
+    for (i = 0; i < total; i++) {
+      if (orderList[i] && orderList[i]._id != null
+          && typeof orderList[i].sortOrder === 'number') {
+        _one(orderList[i]);
+      } else {
+        done++;
+        if (done >= total) { _safeCb(cb, errCount === 0); }
+      }
+    }
+  }
+  window.dbSalonReorderMenus = dbSalonReorderMenus;
+
   // 予約一覧
   // filterObj: { dateKey: '2026-05-14' } のように指定可能 (任意)
   //            指定なしなら全件
