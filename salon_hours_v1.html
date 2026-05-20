@@ -1,0 +1,797 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>TORITA - 営業時間設定</title>
+<!--
+  C-6 営業時間設定画面 v1
+  DESIGN.md 0-2 サロン共通設定スキーマ / shared_db dbGetSettings/dbSaveSettings と1対1
+  管理対象:
+    openTime, closeTime, intervalMin, intervalInClose,
+    slotMin, closedDows, weeklyClose, bookingWeeks,
+    lastMin, deadline
+  ★ v8.1: intervalMin はここで管理（メニュー単位の interval は廃止済み）
+  ロード順序: firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js → shared_ui.js
+  ES5 互換: var/function のみ
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --gn:#7b9e87; --gl:#eef3ef;
+    --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
+    --iv:#d4b483; --ivl:#faf3e6;
+    --bl:#7a8fbf; --bll:#eaeefc;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2); color:var(--tx);
+    -webkit-text-size-adjust:100%; min-height:100vh;
+  }
+
+  .topbar{
+    background:#fff; border-bottom:1px solid var(--bd);
+    padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:10;
+  }
+  .back-link{
+    background:none; border:none; cursor:pointer;
+    font-family:inherit; font-size:13px; color:var(--mu);
+    display:flex; align-items:center; gap:5px;
+  }
+  .back-link:hover{color:var(--ac);}
+  .topbar-title{
+    font-size:15px; font-weight:600; color:var(--ad);
+    letter-spacing:.03em;
+  }
+  .save-btn{
+    background:var(--ac); color:#fff; border:none;
+    border-radius:9px; padding:8px 18px; cursor:pointer;
+    font-family:inherit; font-size:13px; font-weight:600;
+  }
+  .save-btn:hover{background:var(--ad);}
+  .save-btn:disabled{opacity:.5; cursor:not-allowed;}
+
+  .wrap{max-width:680px; margin:0 auto; padding:18px 14px 80px;}
+
+  /* セクション */
+  .sec{
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    overflow:hidden; margin-bottom:16px;
+  }
+  .sec-head{
+    background:var(--al); padding:13px 18px;
+    border-bottom:1px solid var(--bd);
+  }
+  .sec-title{font-size:14px; color:var(--ad); font-weight:600;}
+  .sec-sub{font-size:11px; color:var(--mu); margin-top:3px;}
+  .sec-body{padding:16px 18px;}
+
+  .field{margin-bottom:14px;}
+  .field:last-child{margin-bottom:0;}
+  .field label{
+    display:block; font-size:12px; color:var(--mu);
+    margin-bottom:6px; letter-spacing:.02em;
+  }
+  .field input[type=time], .field input[type=number]{
+    background:var(--sf); border:1px solid var(--bd);
+    border-radius:9px; padding:9px 12px;
+    font-family:inherit; font-size:14px; color:var(--tx);
+  }
+  .field input:focus{outline:none; border-color:var(--ac); background:#fff;}
+  .time-input{width:120px;}
+  .num-input{width:90px; text-align:center;}
+
+  .hours-row{display:flex; align-items:center; gap:10px; flex-wrap:wrap;}
+  .hours-row .lbl{font-size:12px; color:var(--mu);}
+  .hours-row .sep{color:var(--mu); font-size:14px;}
+
+  /* チップ */
+  .chips{display:flex; gap:7px; flex-wrap:wrap; margin-top:6px;}
+  .chip{
+    padding:7px 14px; border:1px solid var(--bd);
+    border-radius:18px; font-size:12px; cursor:pointer;
+    background:#fff; color:var(--tx);
+    user-select:none; white-space:nowrap;
+  }
+  .chip:hover{border-color:var(--ac); color:var(--ac);}
+  .chip.on.ac{background:var(--ac); color:#fff; border-color:var(--ac); font-weight:600;}
+  .chip.on.iv{background:var(--ivl); color:#5a4010; border-color:var(--iv); font-weight:600;}
+  .chip.on.bl{background:var(--bll); color:#2c3a66; border-color:var(--bl); font-weight:600;}
+  .chip.on.gn{background:var(--gl); color:#1e4d2b; border-color:var(--gn); font-weight:600;}
+
+  /* トグル */
+  .toggle-row{
+    display:flex; align-items:center; justify-content:space-between;
+    background:var(--sf); border:1px solid var(--bd);
+    border-radius:9px; padding:10px 14px;
+    margin-top:12px;
+  }
+  .toggle-row .left{flex:1; min-width:0;}
+  .toggle-row .t-label{font-size:13px; color:var(--tx);}
+  .toggle-row .t-sub{font-size:11px; color:var(--mu); margin-top:3px; line-height:1.5;}
+  .tg{
+    position:relative; width:44px; height:24px;
+    background:var(--bd); border-radius:12px;
+    cursor:pointer; flex-shrink:0;
+    transition:background .15s;
+  }
+  .tg.on{background:var(--gn);}
+  .tg::after{
+    content:''; position:absolute; left:3px; top:3px;
+    width:18px; height:18px; background:#fff;
+    border-radius:50%; transition:left .15s;
+    box-shadow:0 1px 3px rgba(0,0,0,.2);
+  }
+  .tg.on::after{left:23px;}
+
+  /* プレビュー枠 */
+  .prev{
+    background:var(--al); border:1px solid var(--ac);
+    border-radius:10px; padding:12px 14px;
+    margin-top:14px;
+  }
+  .prev-t{font-size:11px; color:var(--ad); font-weight:600; margin-bottom:8px;}
+  .prev-row{
+    display:flex; justify-content:space-between;
+    font-size:12px; padding:3px 0;
+    border-bottom:1px solid rgba(181,132,90,.15);
+  }
+  .prev-row:last-child{border-bottom:none;}
+  .prev-row span:last-child{font-weight:600; color:var(--ad);}
+  .prev-row.cur{font-weight:600;}
+
+  /* 受付期間プレビュー（緑） */
+  .bk-prev{
+    background:var(--gl); border:1px solid var(--gn);
+    border-radius:10px; padding:11px 14px; margin-top:12px;
+  }
+  .bk-prev-t{font-size:10px; color:#1e4d2b; font-weight:600; letter-spacing:.05em; margin-bottom:5px;}
+  .bk-prev-d{font-size:13px; font-weight:600; color:#1e4d2b;}
+  .bk-prev-s{font-size:11px; color:#2e5c3a; margin-top:3px;}
+
+  /* 注釈 */
+  .note{
+    font-size:11px; color:var(--mu);
+    background:var(--sf); border-radius:7px;
+    padding:8px 11px; margin-top:8px; line-height:1.6;
+  }
+  .note.amber{background:var(--ivl); border-left:3px solid var(--iv);}
+  .note.blue{background:var(--bll); border-left:3px solid var(--bl);}
+  .note.green{background:var(--gl); border-left:3px solid var(--gn);}
+
+  /* 定休日グリッド */
+  .dow-grid{
+    display:grid; grid-template-columns:repeat(7, 1fr);
+    gap:6px;
+  }
+  .dow-chip{
+    text-align:center; padding:11px 4px;
+    border:1px solid var(--bd); border-radius:8px;
+    cursor:pointer; font-size:13px; font-weight:600;
+    user-select:none; background:#fff;
+  }
+  .dow-chip.sun{color:#c47b7b;}
+  .dow-chip.sat{color:var(--ac);}
+  .dow-chip.closed{background:var(--rl); border-color:var(--rd); color:#7a2020;}
+  .dow-chip:not(.closed):hover{background:var(--al); border-color:var(--ac);}
+  .dow-chip-lbl{font-size:9px; font-weight:400; color:var(--mu); margin-top:3px;}
+  .dow-chip.closed .dow-chip-lbl{color:#c47b7b;}
+  .dow-summary{font-size:12px; color:var(--mu); margin-top:10px;}
+
+  /* 定期クローズ */
+  .wc-list{display:flex; flex-direction:column; gap:7px;}
+  .wc-row{
+    display:flex; align-items:center; gap:8px;
+    background:var(--sf); border:1px solid var(--bd);
+    border-radius:8px; padding:9px 11px;
+  }
+  .wc-row select{
+    background:#fff; border:1px solid var(--bd);
+    border-radius:6px; padding:5px 7px;
+    font-family:inherit; font-size:12px; color:var(--tx);
+    width:64px;
+  }
+  .wc-row input[type=time]{
+    background:#fff; border:1px solid var(--bd);
+    border-radius:6px; padding:5px 7px;
+    font-family:inherit; font-size:12px; width:90px;
+  }
+  .wc-row .sep{font-size:12px; color:var(--mu);}
+  .wc-del{
+    width:26px; height:26px;
+    background:none; border:1px solid var(--bd); border-radius:6px;
+    cursor:pointer; color:var(--mu); font-size:13px;
+    font-family:inherit;
+  }
+  .wc-del:hover{border-color:var(--rd); color:var(--rd);}
+  .add-wc{
+    margin-top:10px; width:100%; padding:9px;
+    background:none; border:1px dashed var(--bd);
+    border-radius:8px; cursor:pointer;
+    font-family:inherit; font-size:12px; color:var(--mu);
+  }
+  .add-wc:hover{border-color:var(--ac); color:var(--ac);}
+  .wc-empty{font-size:12px; color:var(--mu); padding:4px 0;}
+
+  /* 保存ボタンの固定下部 */
+  .save-bar{
+    position:fixed; bottom:0; left:0; right:0;
+    background:#fff; border-top:1px solid var(--bd);
+    padding:12px 16px;
+    display:flex; justify-content:flex-end;
+    box-shadow:0 -4px 16px rgba(0,0,0,.05);
+    z-index:20;
+  }
+  .save-bar .save-btn{padding:11px 28px; font-size:14px;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back-link" onclick="goDashboard()">&#8592; 戻る</button>
+  <div class="topbar-title">営業時間・予約設定</div>
+  <div style="width:60px;"></div>
+</div>
+
+<div class="wrap">
+
+  <!-- 1. 営業時間 + インターバル -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">営業時間</div>
+      <div class="sec-sub">サロンの開店・閉店時間</div>
+    </div>
+    <div class="sec-body">
+      <div class="field">
+        <label>営業時間帯</label>
+        <div class="hours-row">
+          <span class="lbl">開店</span>
+          <input type="time" class="time-input" id="openTime" value="10:00">
+          <span class="sep">〜</span>
+          <span class="lbl">閉店</span>
+          <input type="time" class="time-input" id="closeTime" value="19:00">
+        </div>
+      </div>
+
+      <div class="field" style="margin-top:18px;">
+        <label>準備インターバル（次の予約までの自動余白）</label>
+        <div class="note">
+          全予約に自動でつく「次の予約までの間隔」です。サロン全体共通の運営ポリシーとして1箇所で管理します（メニュー単位ではありません）。
+        </div>
+        <div class="hours-row" style="margin-top:10px;">
+          <input type="number" class="num-input" id="intervalMin"
+                 min="0" max="120" step="5" value="30">
+          <span class="lbl">分</span>
+        </div>
+        <div class="chips" id="ivChips"></div>
+
+        <div class="toggle-row">
+          <div class="left">
+            <div class="t-label">インターバルを閉店時間に含める</div>
+            <div class="t-sub" id="ivTgNote">オフ＝閉店時間に施術終了でOK／オン＝閉店時間内にインターバルも収める</div>
+          </div>
+          <div class="tg" id="ivTg" onclick="toggleIvInClose()"></div>
+        </div>
+
+        <div class="prev">
+          <div class="prev-t">最終受付時間プレビュー（施術90分の場合）</div>
+          <div class="prev-row"><span>閉店時間</span><span id="pvClose">—</span></div>
+          <div class="prev-row"><span>インターバルなし</span><span id="pvNoIv">—</span></div>
+          <div class="prev-row"><span>インターバルあり</span><span id="pvWithIv">—</span></div>
+          <div class="prev-row cur"><span>現在の設定</span><span id="pvCur">—</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 予約スロット間隔 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">予約スロット間隔</div>
+      <div class="sec-sub">予約を受け付ける時刻の刻み</div>
+    </div>
+    <div class="sec-body">
+      <div class="chips" id="slotChips"></div>
+      <div class="note blue" id="slotNote"></div>
+    </div>
+  </div>
+
+  <!-- 3. 定休日 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">定休日</div>
+      <div class="sec-sub">毎週のお休み曜日</div>
+    </div>
+    <div class="sec-body">
+      <div class="dow-grid" id="dowGrid"></div>
+      <div class="dow-summary">定休日：<span id="dowSummary">—</span></div>
+    </div>
+  </div>
+
+  <!-- 4. 毎週の定期クローズ -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">毎週の定期クローズ</div>
+      <div class="sec-sub">特定曜日の特定時間帯を毎週ブロック（休憩・他予定など）</div>
+    </div>
+    <div class="sec-body">
+      <div class="wc-list" id="wcList"></div>
+      <button class="add-wc" onclick="addWc()">＋ 定期クローズを追加</button>
+    </div>
+  </div>
+
+  <!-- 5. 予約受付期間 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">予約受付期間</div>
+      <div class="sec-sub">何週間先まで予約を受け付けるか</div>
+    </div>
+    <div class="sec-body">
+      <div class="chips" id="bkChips"></div>
+      <div class="bk-prev">
+        <div class="bk-prev-t">受付期間プレビュー</div>
+        <div class="bk-prev-d" id="bkPvD">—</div>
+        <div class="bk-prev-s" id="bkPvS">—</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. 直前予約の受付 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">直前予約の受付</div>
+      <div class="sec-sub">予約日のどれくらい前まで受け付けるか</div>
+    </div>
+    <div class="sec-body">
+      <div class="chips" id="lmChips"></div>
+      <div class="note amber" id="lmNote"></div>
+    </div>
+  </div>
+
+  <!-- 7. キャンセル受付期限 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">キャンセル受付期限</div>
+      <div class="sec-sub">顧客がアプリからキャンセルできる期限</div>
+    </div>
+    <div class="sec-body">
+      <div class="chips" id="dlChips"></div>
+      <div class="note green" id="dlNote"></div>
+    </div>
+  </div>
+
+</div>
+
+<div class="save-bar">
+  <button class="save-btn" id="saveBtn" onclick="saveAll()">保存する</button>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_ui.js"></script>
+
+<script>
+(function () {
+
+  var DOWS = ['日','月','火','水','木','金','土'];
+  var IV_PRESETS = [0, 10, 15, 20, 30, 45, 60];
+  var SLOT_OPTS = [
+    { v: 5,  l: '5分' },
+    { v: 10, l: '10分' },
+    { v: 15, l: '15分' },
+    { v: 30, l: '30分' }
+  ];
+  var LM_OPTS = [
+    { v: '1week',   l: '1週間前' },
+    { v: '3days',   l: '3日前' },
+    { v: '1day',    l: '前日' },
+    { v: 'same3h',  l: '当日3時間前' },
+    { v: 'same1h',  l: '当日1時間前' },
+    { v: 'same30m', l: '当日30分前' }
+  ];
+  var LM_NOTE = {
+    '1week':'予約日の1週間前まで受付。',
+    '3days':'3日前まで受付。',
+    '1day':'前日までに予約が必要です。',
+    'same3h':'当日3時間前まで受付。',
+    'same1h':'当日1時間前まで受付。',
+    'same30m':'当日30分前まで受付。'
+  };
+  var DL_OPTS = ['3日前まで', '2日前まで', '前日まで', '前日24時まで'];
+  var DL_NOTE = {
+    '3日前まで':'予約日の3日前23:59までキャンセル操作ができます。',
+    '2日前まで':'2日前23:59まで。',
+    '前日まで':'前日23:59まで。',
+    '前日24時まで':'前日24:00（当日0:00）まで。'
+  };
+  var BK_OPTS = [4, 5, 6, 7, 8, 10, 12, 16, 20, 24];
+
+  // 状態
+  var st = {
+    openTime: '10:00',
+    closeTime: '19:00',
+    intervalMin: 30,
+    intervalInClose: false,
+    slotMin: 30,
+    closedDows: [],
+    weeklyClose: [],
+    bookingWeeks: 8,
+    lastMin: 'same1h',
+    deadline: '前日24時まで'
+  };
+  var wcNextId = 1;
+
+  function goDashboard() {
+    window.location.href = 'salon_dashboard_v1.html';
+  }
+  window.goDashboard = goDashboard;
+
+  // ----- インターバル -----
+  function renderIvChips() {
+    var box = document.getElementById('ivChips');
+    box.innerHTML = '';
+    var i;
+    for (i = 0; i < IV_PRESETS.length; i++) {
+      (function (v) {
+        var c = document.createElement('div');
+        c.className = 'chip' + (st.intervalMin === v ? ' on iv' : '');
+        c.textContent = (v === 0) ? 'なし' : (v + '分');
+        c.onclick = function () {
+          st.intervalMin = v;
+          document.getElementById('intervalMin').value = v;
+          renderIvChips();
+          updatePreview();
+        };
+        box.appendChild(c);
+      })(IV_PRESETS[i]);
+    }
+  }
+  function onIvInput() {
+    var n = parseInt(document.getElementById('intervalMin').value, 10);
+    if (isNaN(n) || n < 0) { n = 0; }
+    st.intervalMin = n;
+    renderIvChips();
+    updatePreview();
+  }
+  function toggleIvInClose() {
+    st.intervalInClose = !st.intervalInClose;
+    var tg = document.getElementById('ivTg');
+    tg.className = st.intervalInClose ? 'tg on' : 'tg';
+    updatePreview();
+  }
+  window.toggleIvInClose = toggleIvInClose;
+
+  function updatePreview() {
+    var closeStr = document.getElementById('closeTime').value || '19:00';
+    document.getElementById('pvClose').textContent = closeStr;
+    var p = closeStr.split(':');
+    var closeMin = parseInt(p[0], 10) * 60 + parseInt(p[1], 10);
+    function fmt(m) {
+      if (isNaN(m) || m < 0) { return '受付不可'; }
+      var hh = Math.floor(m / 60);
+      var mm = m % 60;
+      return (hh < 10 ? '0' : '') + hh + ':' + (mm < 10 ? '0' : '') + mm + ' まで';
+    }
+    var noIv = closeMin - 90;
+    var withIv = closeMin - 90 - st.intervalMin;
+    document.getElementById('pvNoIv').textContent = fmt(noIv);
+    document.getElementById('pvWithIv').textContent = fmt(withIv);
+    document.getElementById('pvCur').textContent =
+      fmt(st.intervalInClose ? withIv : noIv);
+  }
+
+  // ----- スロット -----
+  function renderSlotChips() {
+    var box = document.getElementById('slotChips');
+    box.innerHTML = '';
+    var i;
+    for (i = 0; i < SLOT_OPTS.length; i++) {
+      (function (o) {
+        var c = document.createElement('div');
+        c.className = 'chip' + (st.slotMin === o.v ? ' on bl' : '');
+        c.textContent = o.l;
+        c.onclick = function () {
+          st.slotMin = o.v;
+          renderSlotChips();
+        };
+        box.appendChild(c);
+      })(SLOT_OPTS[i]);
+    }
+    var map = {
+      5:  '5分刻み：10:00・10:05・10:10…',
+      10: '10分刻み：10:00・10:10・10:20…',
+      15: '15分刻み：10:00・10:15・10:30…',
+      30: '30分刻み：10:00・10:30・11:00…'
+    };
+    document.getElementById('slotNote').textContent = map[st.slotMin] || '';
+  }
+
+  // ----- 定休日 -----
+  function renderDow() {
+    var box = document.getElementById('dowGrid');
+    box.innerHTML = '';
+    var i;
+    for (i = 0; i < 7; i++) {
+      (function (idx) {
+        var isClosed = (st.closedDows.indexOf(idx) >= 0);
+        var c = document.createElement('div');
+        var cls = 'dow-chip';
+        if (idx === 0) { cls += ' sun'; }
+        if (idx === 6) { cls += ' sat'; }
+        if (isClosed) { cls += ' closed'; }
+        c.className = cls;
+        var d = document.createElement('div');
+        d.textContent = DOWS[idx];
+        c.appendChild(d);
+        var l = document.createElement('div');
+        l.className = 'dow-chip-lbl';
+        l.textContent = isClosed ? '定休' : '営業';
+        c.appendChild(l);
+        c.onclick = function () {
+          var pos = st.closedDows.indexOf(idx);
+          if (pos >= 0) { st.closedDows.splice(pos, 1); }
+          else { st.closedDows.push(idx); st.closedDows.sort(); }
+          renderDow();
+        };
+        box.appendChild(c);
+      })(i);
+    }
+    var labels = [];
+    for (i = 0; i < st.closedDows.length; i++) {
+      labels.push(DOWS[st.closedDows[i]] + '曜日');
+    }
+    document.getElementById('dowSummary').textContent =
+      labels.length ? labels.join('・') : 'なし';
+  }
+
+  // ----- 定期クローズ -----
+  function renderWc() {
+    var box = document.getElementById('wcList');
+    box.innerHTML = '';
+    if (st.weeklyClose.length === 0) {
+      var em = document.createElement('div');
+      em.className = 'wc-empty';
+      em.textContent = '設定されていません';
+      box.appendChild(em);
+      return;
+    }
+    var i;
+    for (i = 0; i < st.weeklyClose.length; i++) {
+      (function (idx, w) {
+        var row = document.createElement('div');
+        row.className = 'wc-row';
+
+        var sel = document.createElement('select');
+        var j;
+        for (j = 0; j < 7; j++) {
+          var op = document.createElement('option');
+          op.value = String(j);
+          op.textContent = DOWS[j] + '曜';
+          if (w.dow === j) { op.selected = true; }
+          sel.appendChild(op);
+        }
+        sel.onchange = function () {
+          st.weeklyClose[idx].dow = parseInt(this.value, 10);
+        };
+        row.appendChild(sel);
+
+        var i1 = document.createElement('input');
+        i1.type = 'time';
+        i1.value = w.start || '12:00';
+        i1.onchange = function () {
+          st.weeklyClose[idx].start = this.value;
+        };
+        row.appendChild(i1);
+
+        var sp = document.createElement('span');
+        sp.className = 'sep';
+        sp.textContent = '〜';
+        row.appendChild(sp);
+
+        var i2 = document.createElement('input');
+        i2.type = 'time';
+        i2.value = w.end || '13:00';
+        i2.onchange = function () {
+          st.weeklyClose[idx].end = this.value;
+        };
+        row.appendChild(i2);
+
+        var del = document.createElement('button');
+        del.className = 'wc-del';
+        del.textContent = '\u2715';
+        del.onclick = function () {
+          st.weeklyClose.splice(idx, 1);
+          renderWc();
+        };
+        row.appendChild(del);
+
+        box.appendChild(row);
+      })(i, st.weeklyClose[i]);
+    }
+  }
+  function addWc() {
+    st.weeklyClose.push({ dow: 1, start: '12:00', end: '13:00' });
+    renderWc();
+  }
+  window.addWc = addWc;
+
+  // ----- 予約受付期間 -----
+  function renderBk() {
+    var box = document.getElementById('bkChips');
+    box.innerHTML = '';
+    var i;
+    for (i = 0; i < BK_OPTS.length; i++) {
+      (function (w) {
+        var c = document.createElement('div');
+        c.className = 'chip' + (st.bookingWeeks === w ? ' on gn' : '');
+        c.textContent = w + '週間';
+        c.onclick = function () {
+          st.bookingWeeks = w;
+          renderBk();
+        };
+        box.appendChild(c);
+      })(BK_OPTS[i]);
+    }
+    // プレビュー
+    var today = new Date(); today.setHours(0,0,0,0);
+    var last = new Date(today);
+    last.setDate(today.getDate() + st.bookingWeeks * 7);
+    function fmt(d) {
+      return (d.getMonth()+1) + '月' + d.getDate() + '日（' + DOWS[d.getDay()] + '）';
+    }
+    document.getElementById('bkPvD').textContent =
+      fmt(today) + ' 〜 ' + fmt(last);
+    document.getElementById('bkPvS').textContent =
+      '本日から ' + st.bookingWeeks + ' 週間先（' + (st.bookingWeeks * 7) + '日後）まで予約可能';
+  }
+
+  // ----- 直前予約 -----
+  function renderLm() {
+    var box = document.getElementById('lmChips');
+    box.innerHTML = '';
+    var i;
+    for (i = 0; i < LM_OPTS.length; i++) {
+      (function (o) {
+        var c = document.createElement('div');
+        c.className = 'chip' + (st.lastMin === o.v ? ' on ac' : '');
+        c.textContent = o.l;
+        c.onclick = function () {
+          st.lastMin = o.v;
+          renderLm();
+        };
+        box.appendChild(c);
+      })(LM_OPTS[i]);
+    }
+    document.getElementById('lmNote').textContent = LM_NOTE[st.lastMin] || '';
+  }
+
+  // ----- キャンセル期限 -----
+  function renderDl() {
+    var box = document.getElementById('dlChips');
+    box.innerHTML = '';
+    var i;
+    for (i = 0; i < DL_OPTS.length; i++) {
+      (function (v) {
+        var c = document.createElement('div');
+        c.className = 'chip' + (st.deadline === v ? ' on ac' : '');
+        c.textContent = v;
+        c.onclick = function () {
+          st.deadline = v;
+          renderDl();
+        };
+        box.appendChild(c);
+      })(DL_OPTS[i]);
+    }
+    document.getElementById('dlNote').textContent = DL_NOTE[st.deadline] || '';
+  }
+
+  // ----- 保存 -----
+  function saveAll() {
+    // 画面の数値・時刻入力を最終的に状態へ反映
+    st.openTime = document.getElementById('openTime').value || '10:00';
+    st.closeTime = document.getElementById('closeTime').value || '19:00';
+    var iv = parseInt(document.getElementById('intervalMin').value, 10);
+    if (isNaN(iv) || iv < 0) { iv = 0; }
+    st.intervalMin = iv;
+    // 簡易バリデーション
+    if (st.openTime >= st.closeTime) {
+      uiToast('閉店時間は開店時間より後にしてください');
+      return;
+    }
+    var i;
+    for (i = 0; i < st.weeklyClose.length; i++) {
+      var w = st.weeklyClose[i];
+      if (!w.start || !w.end || w.start >= w.end) {
+        uiToast(DOWS[w.dow] + '曜の定期クローズの時刻を確認してください');
+        return;
+      }
+    }
+
+    document.getElementById('saveBtn').disabled = true;
+    uiShowLoading('保存中...');
+    dbSaveSettings(st, function (err) {
+      uiHideLoading();
+      document.getElementById('saveBtn').disabled = false;
+      if (err) {
+        uiToast('保存に失敗しました');
+        return;
+      }
+      uiToast('設定を保存しました');
+    });
+  }
+  window.saveAll = saveAll;
+
+  // ----- 初期読み込み -----
+  function loadAll() {
+    uiShowLoading('読み込み中...');
+    dbGetSettings(function (s) {
+      uiHideLoading();
+      if (s) {
+        if (typeof s.openTime === 'string') { st.openTime = s.openTime; }
+        if (typeof s.closeTime === 'string') { st.closeTime = s.closeTime; }
+        if (typeof s.intervalMin === 'number') { st.intervalMin = s.intervalMin; }
+        if (typeof s.intervalInClose === 'boolean') {
+          st.intervalInClose = s.intervalInClose;
+        }
+        if (typeof s.slotMin === 'number') { st.slotMin = s.slotMin; }
+        if (Array.isArray(s.closedDows)) {
+          st.closedDows = s.closedDows.slice();
+        }
+        if (Array.isArray(s.weeklyClose)) {
+          st.weeklyClose = s.weeklyClose.slice();
+        }
+        if (typeof s.bookingWeeks === 'number') { st.bookingWeeks = s.bookingWeeks; }
+        if (typeof s.lastMin === 'string') { st.lastMin = s.lastMin; }
+        if (typeof s.deadline === 'string') { st.deadline = s.deadline; }
+      }
+
+      // 値を画面に反映
+      document.getElementById('openTime').value = st.openTime;
+      document.getElementById('closeTime').value = st.closeTime;
+      document.getElementById('intervalMin').value = st.intervalMin;
+      document.getElementById('ivTg').className =
+        st.intervalInClose ? 'tg on' : 'tg';
+
+      // 描画
+      renderIvChips();
+      renderSlotChips();
+      renderDow();
+      renderWc();
+      renderBk();
+      renderLm();
+      renderDl();
+      updatePreview();
+    });
+  }
+
+  // 入力イベントバインド
+  document.getElementById('intervalMin').addEventListener('input', onIvInput);
+  document.getElementById('closeTime').addEventListener('change', updatePreview);
+
+  // 起動
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (!isStaff) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+      loadAll();
+    });
+  });
+
+})();
+</script>
+</body>
+</html>
