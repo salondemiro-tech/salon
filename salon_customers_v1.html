@@ -320,6 +320,16 @@
       });
       _all = list;
       applyFilter();
+
+      // URL ?docId=xxx で来ていれば自動的に詳細パネルを開く
+      // （C-9 カルテ画面の「顧客情報を編集」リンク経由）
+      try {
+        var params = new URLSearchParams(window.location.search);
+        var did = params.get('docId');
+        if (did) {
+          openDetail(did);
+        }
+      } catch (e) {}
     });
   }
 
@@ -503,8 +513,16 @@
     // アクション
     var act = document.getElementById('panelActions');
     act.innerHTML = '';
+    var bKarte = document.createElement('button');
+    bKarte.className = 'btn btn-primary';
+    bKarte.textContent = '📋 カルテを開く';
+    bKarte.onclick = function () {
+      window.location.href = 'salon_karte_v1.html?docId='
+                           + encodeURIComponent(c._id);
+    };
+    act.appendChild(bKarte);
     var bEdit = document.createElement('button');
-    bEdit.className = 'btn btn-primary';
+    bEdit.className = 'btn btn-ghost';
     bEdit.textContent = '編集';
     bEdit.onclick = function () { openEdit(c); };
     act.appendChild(bEdit);

@@ -163,6 +163,18 @@
     return firebase.firestore();
   }
 
+  // ★ カルテ写真用 Storage ヘルパー（v8.1+ C-9）
+  //   使用画面は <script src="firebase-storage-compat.js"> の追加が必要
+  //   firebase.storage() が無ければ null を返す（写真機能 OFF 相当）
+  function _storage() {
+    if (!firebase.storage) {
+      console.warn('[shared_db] firebase.storage が未ロード。'
+                 + 'firebase-storage-compat.js を <script> に追加してください');
+      return null;
+    }
+    return firebase.storage();
+  }
+
   function _serverTimestamp() {
     return firebase.firestore.FieldValue.serverTimestamp();
   }
@@ -1090,6 +1102,162 @@
     dbDeleteDoc('salons/' + sid + '/appointments/' + appointmentId, cb);
   }
   window.dbSalonDeleteAppointment = dbSalonDeleteAppointment;
+
+  // ============================================================
+  // ★ カルテ機能 API（v8.1+ C-9）
+  // DESIGN.md 0-2 appointment スキーマ payment/visitMemo/photos
+  //   + customer スキーマ karteNote と1対1。
+  // 写真は Firebase Storage に保存し、photos[] にメタを持つ。
+  // ============================================================
+
+  // 支払い金額を更新（円・整数。-1 で未入力に戻す）
+  function dbSalonUpdateAppointmentPayment(aid, payment, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !aid) { _safeCb(cb, false); return; }
+    var p = parseInt(payment, 10);
+    var patch = {};
+    if (isNaN(p) || p < 0) {
+      patch.payment = _deleteField();
+    } else {
+      patch.payment = p;
+    }
+    patch.updatedAt = _serverTimestamp();
+    dbUpdateDoc('salons/' + sid + '/appointments/' + aid, patch, cb);
+  }
+  window.dbSalonUpdateAppointmentPayment = dbSalonUpdateAppointmentPayment;
+
+  // 訪問メモを更新（自動保存用・空文字許可）
+  function dbSalonUpdateAppointmentMemo(aid, memo, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !aid) { _safeCb(cb, false); return; }
+    var patch = {
+      visitMemo: String(memo == null ? '' : memo),
+      updatedAt: _serverTimestamp()
+    };
+    dbUpdateDoc('salons/' + sid + '/appointments/' + aid, patch, cb);
+  }
+  window.dbSalonUpdateAppointmentMemo = dbSalonUpdateAppointmentMemo;
+
+  // 顧客カルテ全体メモ（karteNote）の更新（自動保存用）
+  function dbSalonUpdateCustomerKarteNote(customerDocId, note, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !customerDocId) { _safeCb(cb, false); return; }
+    var patch = {
+      karteNote: String(note == null ? '' : note),
+      updatedAt: _serverTimestamp()
+    };
+    dbUpdateDoc('salons/' + sid + '/customers/' + customerDocId, patch, cb);
+  }
+  window.dbSalonUpdateCustomerKarteNote = dbSalonUpdateCustomerKarteNote;
+
+  // 写真を Storage にアップロード（blob 受け取り。リサイズは画面側責務）
+  // 戻り値 cb(err, { id, path, url, time })
+  // path: salons/{sid}/appointmentPhotos/{aid}/{photoId}.jpg
+  function dbSalonUploadAppointmentPhoto(aid, blob, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !aid || !blob) {
+      _safeCb(cb, new Error('invalid args'));
+      return;
+    }
+    var st = _storage();
+    if (!st) {
+      _safeCb(cb, new Error('firebase.storage 未ロード'));
+      return;
+    }
+    // 写真ID = 時刻 + ランダム（衝突回避）
+    var photoId = 'p_' + Date.now() + '_' +
+                  Math.floor(Math.random() * 100000);
+    var path = 'salons/' + sid +
+               '/appointmentPhotos/' + aid + '/' + photoId + '.jpg';
+    var ref = st.ref(path);
+    var metadata = { contentType: 'image/jpeg' };
+    ref.put(blob, metadata)
+      .then(function (snapshot) {
+        return snapshot.ref.getDownloadURL();
+      })
+      .then(function (url) {
+        _safeCb(cb, null, {
+          id: photoId,
+          path: path,
+          url: url,
+          time: new Date().toISOString()
+        });
+      })
+      .catch(function (err) {
+        _logErr('dbSalonUploadAppointmentPhoto(' + path + ')', err);
+        _safeCb(cb, err);
+      });
+  }
+  window.dbSalonUploadAppointmentPhoto = dbSalonUploadAppointmentPhoto;
+
+  // appointment.photos[] に1枚追加（3枚上限は画面側で制御）
+  // photoObj: { id, path, url, time }
+  // 戻り値 cb(ok bool)
+  function dbSalonAddAppointmentPhoto(aid, photoObj, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !aid || !photoObj) { _safeCb(cb, false); return; }
+    var ref = _db().collection('salons').doc(sid)
+                   .collection('appointments').doc(aid);
+    ref.update({
+      photos: firebase.firestore.FieldValue.arrayUnion(photoObj),
+      updatedAt: _serverTimestamp()
+    })
+    .then(function () { _safeCb(cb, true); })
+    .catch(function (err) {
+      _logErr('dbSalonAddAppointmentPhoto(' + aid + ')', err);
+      _safeCb(cb, false);
+    });
+  }
+  window.dbSalonAddAppointmentPhoto = dbSalonAddAppointmentPhoto;
+
+  // appointment.photos から1枚削除 + Storage からも消す
+  // 戻り値 cb(ok bool)
+  //   Firestore の photos[] は要素全体一致でないと remove できないため
+  //   一度ドキュメントを読み出し、対象 id を除外して書き戻す方式
+  function dbSalonDeleteAppointmentPhoto(aid, photoId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !aid || !photoId) { _safeCb(cb, false); return; }
+    var docPath = 'salons/' + sid + '/appointments/' + aid;
+    dbReadDoc(docPath, function (doc) {
+      if (!doc) { _safeCb(cb, false); return; }
+      var photos = Array.isArray(doc.photos) ? doc.photos : [];
+      var target = null;
+      var kept = [];
+      var i;
+      for (i = 0; i < photos.length; i++) {
+        if (photos[i] && photos[i].id === photoId) {
+          target = photos[i];
+        } else {
+          kept.push(photos[i]);
+        }
+      }
+      if (!target) {
+        // 既に Firestore からは消えている。Storage 残骸の可能性も低い
+        _safeCb(cb, true);
+        return;
+      }
+      // 先に Firestore を更新（成功してから Storage 削除）
+      dbUpdateDoc(docPath, {
+        photos: kept,
+        updatedAt: _serverTimestamp()
+      }, function (ok) {
+        if (!ok) { _safeCb(cb, false); return; }
+        // Storage 削除（失敗しても Firestore は更新済みなので OK 扱い）
+        var st = _storage();
+        if (st && target.path) {
+          st.ref(target.path).delete()
+            .then(function () { _safeCb(cb, true); })
+            .catch(function (err) {
+              _logErr('storage delete(' + target.path + ')', err);
+              _safeCb(cb, true);  // メタは消えたので成功扱い
+            });
+        } else {
+          _safeCb(cb, true);
+        }
+      });
+    });
+  }
+  window.dbSalonDeleteAppointmentPhoto = dbSalonDeleteAppointmentPhoto;
 
   // ============================================================
   // 顧客側 CRUD  (dbCustomer*)
