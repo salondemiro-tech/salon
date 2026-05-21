@@ -349,6 +349,11 @@ service cloud.firestore {
         //  - サロンは customerDocId/source 改ざん以外は可能
         //  - 詳細な status 遷移は Cloud Functions の責任
         //  - merge による customerDocId 付替は Function=admin のみ
+        //  ★ カルテ機能(v8.1+): サロンスタッフは下記フィールドを追加・更新可
+        //    - payment (int >= 0)        実支払い金額
+        //    - visitMemo (string)        訪問メモ（施術内容・申し送り）
+        //    - photos (list, 最大3要素)  施術前後の写真 [{id,path,url,time}]
+        //    顧客アプリからはこれらを書けない（顧客の更新は status のみ）
         allow update: if (
           (isSignedIn() &&
            resource.data.authUid == request.auth.uid &&

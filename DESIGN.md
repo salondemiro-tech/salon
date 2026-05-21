@@ -81,7 +81,9 @@ salons/{salonId}/appointments/{appointmentId} {
   // === 顧客が書き込めるフィールド ===
   dateKey: "2026-05-14",                 // 営業日キー（並べ替え・日別取得用）
   start: "10:00",                        // 時刻ラベル（表示用）
-  customerId: "<顧客Auth UID>",          // = 顧客の Auth UID
+  customerDocId: "cus_xxx",              // ★ v8.1: 採番された顧客ドキュメントID
+  authUid: "<顧客Auth UID> or null",     // ★ v8.1: claim 済みなら Auth UID、未claimなら null
+                                         //   サロン手動登録予約は最初 null、後で claim Function が後埋め
   menuId: "m1",                          // メインメニュー1つ
   optionMenuIds: ["m4"],                 // オプションメニュー（任意）
 
@@ -93,7 +95,17 @@ salons/{salonId}/appointments/{appointmentId} {
   resourceIds: ["default"],              // フェーズ1：['default'] 固定
   status: "confirmed",                   // 作成時は confirmed 固定
   priceSnapshot: 12000,                  // menus.price から計算
+  menuNameSnapshot: "フェイシャル",      // メニュー名のスナップショット（後でメニュー削除されても残る）
+  source: "online",                      // 'online' = 顧客アプリ / 'manual' = サロン手動登録
   createdAt: <serverTimestamp>,          // serverTimestamp() で確定
+
+  // === サロン側がカルテとして後から書き加えるフィールド（v8.1+ カルテ機能）===
+  payment: 12000,                        // 実支払い金額（円・整数）。null=未入力
+  visitMemo: "<施術内容・申し送り>",     // 来店ごとの訪問メモ（自動保存）
+  photos: [                              // 施術前後の写真（最大3枚）
+    { id: "p1", path: "salons/<salonId>/appointmentPhotos/<aid>/p1.jpg",
+      url: "<download URL>", time: "<ISO8601>" }
+  ],
 
   // === フェーズ2の箱（フェーズ1では null）===
   editingBy: null
@@ -102,8 +114,12 @@ salons/{salonId}/appointments/{appointmentId} {
 
 **核心原則：顧客入力を信用するのは最小限のフィールドだけ**
 
-顧客が送れるフィールド：`dateKey`, `start`, `customerId`, `menuId`, `optionMenuIds` のみ。
-それ以外（`end`, `startAt`, `endAt`, `staffId`, `resourceIds`, `status`, `priceSnapshot`, `createdAt`）は **すべてサーバー側で確定**する。
+顧客が送れるフィールド：`dateKey`, `start`, `customerDocId`, `menuId`, `optionMenuIds` のみ。
+それ以外（`end`, `startAt`, `endAt`, `staffId`, `resourceIds`, `status`, `priceSnapshot`, `menuNameSnapshot`, `source`, `createdAt`）は **すべてサーバー側で確定**する。
+
+`authUid` は **顧客アプリ経由の予約では Function が auth コンテキストから自動付与**し、サロン手動登録は最初 null（後で claim Function が同一メール検出時に後埋め）。
+
+`payment` / `visitMemo` / `photos` は **サロンスタッフのみ書き込み可能**。顧客アプリからは書けない（ルールで拒否）。
 
 **なぜ`end` も顧客に書かせないか**：
 顧客が `start: "10:00", end: "10:05"` のように短く送って、本来90分のメニュー予約を5分で押さえる攻撃を防ぐため。サーバ側で `start + menu.duration + optionMenusのduration合計 + settings.intervalMin` から算出する（★ v8.1: インターバルはサロン共通設定 `settings.intervalMin` を使う。詳細は 0-2 メニュースキーマの注釈参照）。
@@ -166,7 +182,10 @@ salons/{salonId}/customers/{customerDocId} {
   createdSource: "salon",            // salon|self|import|line|admin|...
   notifyChannels: { email: true, line: false },
 
-  memo: "敏感肌",                    // スタッフのみ
+  memo: "敏感肌",                    // スタッフのみ（短い特記事項用・C-4 顧客管理で編集）
+  karteNote: "<カルテ全体メモ>",     // ★ カルテ機能用：アレルギー・好み・性格・禁忌など
+                                     //   顧客全体に紐づくメモ（来店毎ではない）
+                                     //   スタッフのみ・C-9 カルテ画面で編集
   stampCount: 5,                     // スタッフのみ（merge は再計算が正）
   lastVisit: <Timestamp>,
   totalSpent: 84000,                 // スタッフのみ（merge は再計算が正）
@@ -1173,6 +1192,11 @@ sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
 - C-6. `salon_hours_v1.html` 営業時間
 - C-7. `salon_cancel_v1.html` キャンセル規定
 - C-8. `salon_stamp_v1.html` スタンプ設定
+- C-9. `salon_karte_v1.html` 顧客メモ（カルテ・施術履歴）
+       ★ 2026/5/21 追加：顧客管理(C-4)から「カルテを開く」、
+         ダッシュボードからも独立カードで入れる（C案：両方の入口+互いにリンク）
+         機能：顧客選択 → 来店履歴 / 各回の支払い・訪問メモ・写真（最大3枚） /
+              全体メモ(karteNote) / 統計(来店回数・累計・平均)
 - 全画面が `shared_db.js` / `shared_db_*.js` / `shared_auth.js` / `shared_ui.js` を読み込む
 - 各画面が独立して必要なデータだけ取得する
 - HTML ファイル内の JavaScript は最小限（イベントハンドラと画面固有のロジックだけ）、複雑な処理は `shared_*.js` に切り出す
