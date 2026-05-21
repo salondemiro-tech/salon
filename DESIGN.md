@@ -304,6 +304,27 @@ salons/{salonId}/config/cancelPolicy {
 QRコードURLを含むメッセージが顧客に自動送付される（フェーズ1）。
 実際の支払いは顧客と店舗の間で行う。
 
+**スタンプカードスキーマ（stampCard）**：
+
+```
+salons/{salonId}/config/stampCard {
+  enabled: true,            // スタンプカード機能を使うか
+  goal: 10,                 // ゴールスタンプ数（3〜50程度）
+  reward: "次回施術10%OFF", // ゴール達成時の特典文
+  bonusStamps: [            // 途中ボーナス（任意・複数可）
+    { at: 5, reward: "オプション1品無料" }
+  ],
+  color: "#b5845a",         // スタンプカード色（hex）
+  expiry: "none",           // 有効期限: '3m'|'6m'|'12m'|'none'
+                            //   最初のスタンプ取得日から起算
+  updatedAt: <serverTimestamp>
+}
+```
+
+スタンプの**カウント自体**は顧客カルテの `customers.stampCount`
+（サロン管理フィールド）で持つ。この `stampCard` ドキュメントは
+「カードの仕様」（ゴール数・特典・色・有効期限）のみを保持する。
+
 **メニューの読み取り権限ルール（重要）**：
 - `public: true` のメニュー → 認証ユーザーなら誰でも読める（顧客の予約画面で表示するため）
 - `public: false` のメニュー → サロンスタッフのみ読める（内部用メニュー、スタッフ研修用、開発中など）

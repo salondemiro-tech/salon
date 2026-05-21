@@ -1,0 +1,632 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>TORITA - スタンプ設定</title>
+<!--
+  C-8 スタンプカード設定画面 v1
+  DESIGN.md 0-2 スタンプカードスキーマ / shared_db dbGetStampCard/dbSaveStampCard と1対1
+  管理対象:
+    enabled, goal, reward, bonusStamps[{at,reward}], color, expiry
+  ※ スタンプ個数自体は customers.stampCount で管理（C-4 顧客管理で操作）
+  ロード順序: firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js → shared_ui.js
+  ES5 互換: var/function のみ
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --gn:#7b9e87; --gl:#eef3ef;
+    --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
+    --bl:#7a8fbf; --bll:#eaeefc;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2); color:var(--tx);
+    -webkit-text-size-adjust:100%; min-height:100vh;
+  }
+
+  .topbar{
+    background:#fff; border-bottom:1px solid var(--bd);
+    padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:10;
+  }
+  .back-link{
+    background:none; border:none; cursor:pointer;
+    font-family:inherit; font-size:13px; color:var(--mu);
+    display:flex; align-items:center; gap:5px;
+  }
+  .back-link:hover{color:var(--ac);}
+  .topbar-title{
+    font-size:15px; font-weight:600; color:var(--ad);
+    letter-spacing:.03em;
+  }
+
+  .wrap{max-width:680px; margin:0 auto; padding:18px 14px 80px;}
+
+  .sec{
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    overflow:hidden; margin-bottom:16px;
+  }
+  .sec-head{
+    background:var(--al); padding:13px 18px;
+    border-bottom:1px solid var(--bd);
+    display:flex; align-items:center; justify-content:space-between;
+    gap:10px;
+  }
+  .sec-title{font-size:14px; color:var(--ad); font-weight:600;}
+  .sec-sub{font-size:11px; color:var(--mu); margin-top:3px;}
+  .sec-body{padding:16px 18px;}
+  .sec-body.disabled{opacity:.42; pointer-events:none;}
+
+  .field{margin-bottom:14px;}
+  .field:last-child{margin-bottom:0;}
+  .field label{
+    display:block; font-size:12px; color:var(--mu);
+    margin-bottom:6px; letter-spacing:.02em;
+  }
+  input[type=number], input[type=text], textarea{
+    background:var(--sf); border:1px solid var(--bd);
+    border-radius:9px; padding:10px 12px;
+    font-family:inherit; font-size:14px; color:var(--tx);
+  }
+  input[type=number]:focus, input[type=text]:focus, textarea:focus{
+    outline:none; border-color:var(--ac); background:#fff;
+  }
+  textarea{width:100%; min-height:70px; resize:vertical;}
+  .num-input{width:100px; text-align:center;}
+
+  .row-2{display:flex; gap:14px; flex-wrap:wrap;}
+  .row-2 .field{flex:1; min-width:130px;}
+
+  /* トグル */
+  .tg{
+    position:relative; width:44px; height:24px;
+    background:var(--bd); border-radius:12px;
+    cursor:pointer; flex-shrink:0;
+    transition:background .15s;
+  }
+  .tg.on{background:var(--gn);}
+  .tg::after{
+    content:''; position:absolute; left:3px; top:3px;
+    width:18px; height:18px; background:#fff;
+    border-radius:50%; transition:left .15s;
+    box-shadow:0 1px 3px rgba(0,0,0,.2);
+  }
+  .tg.on::after{left:23px;}
+
+  /* カラーチップ */
+  .color-chips{display:flex; gap:8px; flex-wrap:wrap;}
+  .color-chip{
+    width:34px; height:34px; border-radius:50%;
+    cursor:pointer; position:relative;
+    border:2px solid transparent;
+    transition:transform .12s;
+  }
+  .color-chip:hover{transform:scale(1.08);}
+  .color-chip.sel{
+    border-color:#fff;
+    box-shadow:0 0 0 2px var(--tx);
+  }
+
+  /* プレビューカード（顧客アプリでの見え方） */
+  .preview-wrap{
+    margin-top:14px; padding:14px;
+    background:var(--s2); border-radius:10px;
+  }
+  .preview-t{
+    font-size:10px; color:var(--mu); font-weight:600;
+    letter-spacing:.06em; margin-bottom:8px;
+  }
+  .sp-card{
+    background:#fff; border-radius:10px; padding:14px;
+    border:1px solid var(--bd);
+  }
+  .sp-card-title{
+    font-size:14px; font-weight:600; color:var(--ad);
+    text-align:center;
+  }
+  .sp-card-sub{
+    font-size:11px; color:var(--mu); margin-top:3px;
+    text-align:center;
+  }
+  .sp-grid{
+    display:grid; grid-template-columns:repeat(5, 1fr);
+    gap:7px; margin:12px 0;
+  }
+  .sp-cell{
+    aspect-ratio:1; border-radius:50%;
+    background:var(--sf); border:1px dashed var(--bd);
+    display:flex; align-items:center; justify-content:center;
+    font-size:10px; color:var(--mu);
+  }
+  .sp-cell.filled{
+    background:var(--sc, var(--ac));
+    border-color:transparent;
+    color:#fff; font-weight:600;
+  }
+  .sp-cell.bonus{
+    background:var(--sf);
+    border:2px solid var(--sc, var(--ac));
+    color:var(--sc, var(--ad));
+  }
+  .sp-cell.bonus::after{
+    content:'🎁'; font-size:13px;
+  }
+  .sp-cell.bonus span{display:none;}
+  .sp-reward{
+    background:var(--al); border:1px solid var(--ac);
+    border-radius:8px; padding:7px 11px;
+    font-size:12px; color:var(--ad); text-align:center;
+    font-weight:600;
+    margin-top:8px;
+  }
+
+  /* ボーナス一覧 */
+  .bonus-list{display:flex; flex-direction:column; gap:7px;}
+  .bonus-row{
+    display:flex; align-items:center; gap:8px;
+    background:var(--sf); border:1px solid var(--bd);
+    border-radius:8px; padding:9px 11px;
+  }
+  .bonus-row .at-input{
+    background:#fff; border:1px solid var(--bd);
+    border-radius:6px; padding:6px 8px;
+    font-family:inherit; font-size:13px; text-align:center;
+    width:56px;
+  }
+  .bonus-row .at-lbl{font-size:12px; color:var(--mu); white-space:nowrap;}
+  .bonus-row input[type=text]{
+    flex:1; min-width:0;
+    background:#fff; border:1px solid var(--bd);
+    border-radius:6px; padding:6px 8px;
+    font-family:inherit; font-size:12px;
+  }
+  .bonus-del{
+    width:26px; height:26px;
+    background:none; border:1px solid var(--bd); border-radius:6px;
+    cursor:pointer; color:var(--mu); font-size:13px;
+    font-family:inherit; flex-shrink:0;
+  }
+  .bonus-del:hover{border-color:var(--rd); color:var(--rd);}
+  .add-btn{
+    margin-top:10px; width:100%; padding:9px;
+    background:none; border:1px dashed var(--bd);
+    border-radius:8px; cursor:pointer;
+    font-family:inherit; font-size:12px; color:var(--mu);
+  }
+  .add-btn:hover{border-color:var(--ac); color:var(--ac);}
+
+  /* 期限チップ */
+  .chips{display:flex; gap:7px; flex-wrap:wrap;}
+  .chip{
+    padding:7px 14px; border:1px solid var(--bd);
+    border-radius:18px; font-size:12px; cursor:pointer;
+    background:#fff; color:var(--tx);
+    user-select:none; white-space:nowrap;
+  }
+  .chip:hover{border-color:var(--ac); color:var(--ac);}
+  .chip.on{background:var(--ac); color:#fff; border-color:var(--ac); font-weight:600;}
+
+  .note{
+    font-size:11px; color:var(--mu);
+    background:var(--sf); border-radius:7px;
+    padding:8px 11px; margin-top:10px; line-height:1.6;
+  }
+  .note.blue{background:var(--bll); border-left:3px solid var(--bl);}
+
+  /* 保存ボタン固定 */
+  .save-bar{
+    position:fixed; bottom:0; left:0; right:0;
+    background:#fff; border-top:1px solid var(--bd);
+    padding:12px 16px;
+    display:flex; justify-content:flex-end;
+    box-shadow:0 -4px 16px rgba(0,0,0,.05);
+    z-index:20;
+  }
+  .save-btn{
+    background:var(--ac); color:#fff; border:none;
+    border-radius:9px; padding:11px 28px; cursor:pointer;
+    font-family:inherit; font-size:14px; font-weight:600;
+  }
+  .save-btn:hover{background:var(--ad);}
+  .save-btn:disabled{opacity:.5; cursor:not-allowed;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back-link" onclick="goDashboard()">&#8592; 戻る</button>
+  <div class="topbar-title">スタンプカード設定</div>
+  <div style="width:60px;"></div>
+</div>
+
+<div class="wrap">
+
+  <!-- 1. 基本設定 + ON/OFF -->
+  <div class="sec">
+    <div class="sec-head">
+      <div>
+        <div class="sec-title">スタンプカード機能</div>
+        <div class="sec-sub">顧客アプリに表示されるスタンプカード</div>
+      </div>
+      <div class="tg" id="tgEnabled" onclick="toggleEnabled()"></div>
+    </div>
+    <div class="sec-body" id="bodyMain">
+      <div class="row-2">
+        <div class="field">
+          <label>ゴールスタンプ数</label>
+          <input type="number" class="num-input" id="fGoal"
+                 min="3" max="50" value="10">
+        </div>
+        <div class="field">
+          <label>スタンプの色</label>
+          <div class="color-chips" id="colorChips"></div>
+        </div>
+      </div>
+
+      <div class="field">
+        <label>ゴール達成特典</label>
+        <textarea id="fReward" placeholder="例：次回施術10%OFF"></textarea>
+      </div>
+
+      <div class="preview-wrap">
+        <div class="preview-t">顧客アプリでの表示プレビュー</div>
+        <div class="sp-card">
+          <div class="sp-card-title" id="pvSalon">スタンプカード</div>
+          <div class="sp-card-sub" id="pvSub">あと—個でゴール</div>
+          <div class="sp-grid" id="pvGrid"></div>
+          <div class="sp-reward" id="pvReward">🎁 —</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 途中ボーナス -->
+  <div class="sec">
+    <div class="sec-head">
+      <div>
+        <div class="sec-title">途中ボーナス特典</div>
+        <div class="sec-sub">指定スタンプ数到達時に追加特典を設定（任意）</div>
+      </div>
+    </div>
+    <div class="sec-body" id="bodyBonus">
+      <div class="bonus-list" id="bonusList"></div>
+      <button class="add-btn" onclick="addBonus()">＋ ボーナスを追加</button>
+    </div>
+  </div>
+
+  <!-- 3. 有効期限 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div>
+        <div class="sec-title">スタンプカードの有効期限</div>
+        <div class="sec-sub">最初のスタンプ取得日から起算します</div>
+      </div>
+    </div>
+    <div class="sec-body" id="bodyExpiry">
+      <div class="chips" id="expChips"></div>
+      <div class="note">期限を過ぎたスタンプは失効します。「無期限」の場合は失効しません。</div>
+    </div>
+  </div>
+
+</div>
+
+<div class="save-bar">
+  <button class="save-btn" id="saveBtn" onclick="saveAll()">保存する</button>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_ui.js"></script>
+
+<script>
+(function () {
+
+  var STAMP_COLORS = [
+    '#b5845a', '#7b9e87', '#7a8fbf', '#c47b7b',
+    '#c9a84c', '#9b7bb5', '#5a9e9e', '#1a1a18'
+  ];
+  var EXP_OPTS = [
+    { v: '3m',   l: '3ヶ月' },
+    { v: '6m',   l: '6ヶ月' },
+    { v: '12m',  l: '12ヶ月' },
+    { v: 'none', l: '無期限' }
+  ];
+
+  // 状態
+  var st = {
+    enabled: false,
+    goal: 10,
+    reward: '',
+    bonusStamps: [],
+    color: '#b5845a',
+    expiry: 'none'
+  };
+
+  function goDashboard() {
+    window.location.href = 'salon_dashboard_v1.html';
+  }
+  window.goDashboard = goDashboard;
+
+  function _v(id) {
+    var el = document.getElementById(id);
+    return el ? String(el.value || '') : '';
+  }
+
+  // ----- ON/OFF -----
+  function toggleEnabled() {
+    st.enabled = !st.enabled;
+    refreshEnabledUi();
+  }
+  window.toggleEnabled = toggleEnabled;
+  function refreshEnabledUi() {
+    document.getElementById('tgEnabled').className =
+      st.enabled ? 'tg on' : 'tg';
+    var cls = st.enabled ? 'sec-body' : 'sec-body disabled';
+    document.getElementById('bodyMain').className = cls;
+    document.getElementById('bodyBonus').className = cls;
+    document.getElementById('bodyExpiry').className = cls;
+  }
+
+  // ----- カラーチップ -----
+  function renderColors() {
+    var box = document.getElementById('colorChips');
+    box.innerHTML = '';
+    var i;
+    for (i = 0; i < STAMP_COLORS.length; i++) {
+      (function (c) {
+        var el = document.createElement('div');
+        el.className = 'color-chip' + (st.color === c ? ' sel' : '');
+        el.style.background = c;
+        el.onclick = function () {
+          st.color = c;
+          renderColors();
+          renderPreview();
+        };
+        box.appendChild(el);
+      })(STAMP_COLORS[i]);
+    }
+  }
+
+  // ----- ボーナス -----
+  function renderBonuses() {
+    var box = document.getElementById('bonusList');
+    box.innerHTML = '';
+    if (st.bonusStamps.length === 0) {
+      var em = document.createElement('div');
+      em.style.fontSize = '12px';
+      em.style.color = 'var(--mu)';
+      em.style.padding = '4px 0';
+      em.textContent = '設定されていません';
+      box.appendChild(em);
+      return;
+    }
+    var i;
+    for (i = 0; i < st.bonusStamps.length; i++) {
+      (function (idx, b) {
+        var row = document.createElement('div');
+        row.className = 'bonus-row';
+
+        var inp = document.createElement('input');
+        inp.type = 'number';
+        inp.min = '1'; inp.max = String(st.goal);
+        inp.className = 'at-input';
+        inp.value = String(b.at);
+        inp.oninput = function () {
+          var n = parseInt(this.value, 10);
+          if (isNaN(n) || n < 1) { n = 1; }
+          st.bonusStamps[idx].at = n;
+          renderPreview();
+        };
+        row.appendChild(inp);
+
+        var lbl = document.createElement('span');
+        lbl.className = 'at-lbl';
+        lbl.textContent = '個目で';
+        row.appendChild(lbl);
+
+        var rew = document.createElement('input');
+        rew.type = 'text';
+        rew.placeholder = '例：オプション1品無料';
+        rew.value = b.reward || '';
+        rew.oninput = function () {
+          st.bonusStamps[idx].reward = this.value;
+        };
+        row.appendChild(rew);
+
+        var del = document.createElement('button');
+        del.className = 'bonus-del';
+        del.textContent = '\u2715';
+        del.onclick = function () {
+          st.bonusStamps.splice(idx, 1);
+          renderBonuses();
+          renderPreview();
+        };
+        row.appendChild(del);
+
+        box.appendChild(row);
+      })(i, st.bonusStamps[i]);
+    }
+  }
+  function addBonus() {
+    var at = Math.max(1, Math.floor(st.goal / 2));
+    st.bonusStamps.push({ at: at, reward: '' });
+    renderBonuses();
+    renderPreview();
+  }
+  window.addBonus = addBonus;
+
+  // ----- 期限チップ -----
+  function renderExp() {
+    var box = document.getElementById('expChips');
+    box.innerHTML = '';
+    var i;
+    for (i = 0; i < EXP_OPTS.length; i++) {
+      (function (o) {
+        var c = document.createElement('div');
+        c.className = 'chip' + (st.expiry === o.v ? ' on' : '');
+        c.textContent = o.l;
+        c.onclick = function () {
+          st.expiry = o.v;
+          renderExp();
+        };
+        box.appendChild(c);
+      })(EXP_OPTS[i]);
+    }
+  }
+
+  // ----- プレビュー -----
+  function renderPreview() {
+    var goal = st.goal;
+    var sub = document.getElementById('pvSub');
+    sub.textContent = 'あと ' + goal + ' 個でゴール';
+
+    // ボーナス位置のセット（1始まりの番号）
+    var bonusSet = {};
+    var i;
+    for (i = 0; i < st.bonusStamps.length; i++) {
+      bonusSet[st.bonusStamps[i].at] = true;
+    }
+
+    // グリッド構築
+    var grid = document.getElementById('pvGrid');
+    grid.innerHTML = '';
+    grid.style.setProperty('--sc', st.color);
+    // 最大15個まで表示（25以上のゴールは末尾を省略）
+    var max = Math.min(goal, 15);
+    for (i = 1; i <= max; i++) {
+      var cell = document.createElement('div');
+      if (bonusSet[i]) {
+        cell.className = 'sp-cell bonus';
+      } else if (i === goal) {
+        // ゴール枠もボーナス的に表示
+        cell.className = 'sp-cell bonus';
+      } else {
+        cell.className = 'sp-cell';
+        cell.textContent = String(i);
+      }
+      grid.appendChild(cell);
+    }
+    if (goal > 15) {
+      var more = document.createElement('div');
+      more.style.gridColumn = '1 / -1';
+      more.style.fontSize = '10px';
+      more.style.color = 'var(--mu)';
+      more.style.textAlign = 'center';
+      more.textContent = '（プレビューは15個まで・実際は' + goal + '個）';
+      grid.appendChild(more);
+    }
+
+    // 特典表示
+    var reward = document.getElementById('fReward').value || '特典';
+    document.getElementById('pvReward').textContent =
+      '🎁 ' + goal + '個達成で：' + reward;
+  }
+
+  // ----- 保存 -----
+  function saveAll() {
+    // 画面値を最終反映
+    var g = parseInt(_v('fGoal'), 10);
+    if (isNaN(g) || g < 3) { g = 3; }
+    if (g > 50) { g = 50; }
+    st.goal = g;
+    st.reward = _v('fReward');
+
+    if (st.enabled) {
+      if (!st.reward) {
+        uiToast('ゴール達成特典を入力してください');
+        return;
+      }
+      var i;
+      for (i = 0; i < st.bonusStamps.length; i++) {
+        var b = st.bonusStamps[i];
+        if (b.at < 1 || b.at >= st.goal) {
+          uiToast('ボーナスの個数はゴール未満（1〜' + (st.goal - 1) + '）にしてください');
+          return;
+        }
+        if (!b.reward) {
+          uiToast('ボーナス特典の内容を入力してください');
+          return;
+        }
+      }
+    }
+
+    document.getElementById('saveBtn').disabled = true;
+    uiShowLoading('保存中...');
+    dbSaveStampCard(st, function (err) {
+      uiHideLoading();
+      document.getElementById('saveBtn').disabled = false;
+      if (err) {
+        uiToast('保存に失敗しました');
+        return;
+      }
+      uiToast('スタンプカード設定を保存しました');
+    });
+  }
+  window.saveAll = saveAll;
+
+  // ----- 初期読み込み -----
+  function loadAll() {
+    uiShowLoading('読み込み中...');
+    dbGetStampCard(function (sc) {
+      uiHideLoading();
+      if (sc) {
+        if (typeof sc.enabled === 'boolean') { st.enabled = sc.enabled; }
+        if (typeof sc.goal === 'number') { st.goal = sc.goal; }
+        if (typeof sc.reward === 'string') { st.reward = sc.reward; }
+        if (typeof sc.color === 'string') { st.color = sc.color; }
+        if (typeof sc.expiry === 'string') { st.expiry = sc.expiry; }
+        if (Array.isArray(sc.bonusStamps)) {
+          st.bonusStamps = sc.bonusStamps.slice();
+        }
+      }
+
+      document.getElementById('fGoal').value = st.goal;
+      document.getElementById('fReward').value = st.reward;
+      refreshEnabledUi();
+      renderColors();
+      renderBonuses();
+      renderExp();
+      renderPreview();
+    });
+  }
+
+  // イベントバインド
+  document.getElementById('fGoal').addEventListener('input', function () {
+    var n = parseInt(this.value, 10);
+    if (isNaN(n) || n < 1) { n = 1; }
+    st.goal = n;
+    renderPreview();
+  });
+  document.getElementById('fReward').addEventListener('input', function () {
+    st.reward = this.value;
+    renderPreview();
+  });
+
+  // 起動
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (!isStaff) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+      loadAll();
+    });
+  });
+
+})();
+</script>
+</body>
+</html>

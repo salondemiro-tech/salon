@@ -955,6 +955,83 @@
     };
   }
 
+  // ============================================================
+  // スタンプカード API（stampCard）
+  // パス: salons/{salonId}/config/stampCard
+  // DESIGN.md 0-2 スタンプカードスキーマと1対1
+  // ※ スタンプの「個数」は customers.stampCount にあり、
+  //   このドキュメントは「カードの仕様」のみ保持
+  // ============================================================
+
+  // 取得。未作成なら既定値を返す
+  function dbGetStampCard(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, _defaultStampCard()); return; }
+    dbReadDoc('salons/' + sid + '/config/stampCard', function (doc) {
+      if (!doc) { _safeCb(cb, _defaultStampCard()); return; }
+      var base = _defaultStampCard();
+      var k;
+      for (k in doc) {
+        if (doc.hasOwnProperty(k)) { base[k] = doc[k]; }
+      }
+      _safeCb(cb, base);
+    });
+  }
+  window.dbGetStampCard = dbGetStampCard;
+
+  // 保存（set merge:true）
+  // policy: { enabled, goal, reward, bonusStamps[], color, expiry }
+  function dbSaveStampCard(policy, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, new Error('no salon')); return; }
+    if (!policy || typeof policy !== 'object') {
+      _safeCb(cb, new Error('invalid policy'));
+      return;
+    }
+    var doc = {};
+    if (typeof policy.enabled === 'boolean') {
+      doc.enabled = policy.enabled;
+    }
+    if (policy.goal != null) {
+      var g = parseInt(policy.goal, 10);
+      if (!isNaN(g) && g >= 1 && g <= 100) { doc.goal = g; }
+    }
+    if (typeof policy.reward === 'string') { doc.reward = policy.reward; }
+    if (typeof policy.color === 'string')  { doc.color  = policy.color; }
+    if (typeof policy.expiry === 'string'
+        && ['3m','6m','12m','none'].indexOf(policy.expiry) >= 0) {
+      doc.expiry = policy.expiry;
+    }
+    if (Array.isArray(policy.bonusStamps)) {
+      doc.bonusStamps = policy.bonusStamps.map(function (b) {
+        var at = parseInt(b.at, 10);
+        if (isNaN(at) || at < 1) { at = 1; }
+        return {
+          at: at,
+          reward: String(b.reward || '')
+        };
+      });
+    }
+    doc.updatedAt = _serverTimestamp();
+
+    dbWriteDoc('salons/' + sid + '/config/stampCard', doc, true,
+      function (ok) {
+        _safeCb(cb, ok ? null : new Error('save failed'));
+      });
+  }
+  window.dbSaveStampCard = dbSaveStampCard;
+
+  function _defaultStampCard() {
+    return {
+      enabled: false,
+      goal: 10,
+      reward: '',
+      bonusStamps: [],
+      color: '#b5845a',
+      expiry: 'none'
+    };
+  }
+
   // 予約一覧
   // filterObj: { dateKey: '2026-05-14' } のように指定可能 (任意)
   //            指定なしなら全件
