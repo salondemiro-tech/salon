@@ -279,6 +279,31 @@ salons/{salonId}/config/settings {
 }
 ```
 
+**キャンセル規定スキーマ（cancelPolicy）**：
+
+```
+salons/{salonId}/config/cancelPolicy {
+  text: "<キャンセル規定の本文>",  // 顧客画面に表示する規定文
+  rates: [                          // キャンセル料の段階（自由に追加可）
+    { label: "3日前から", percent: 30 },
+    { label: "前日から",  percent: 50 },
+    { label: "当日",      percent: 100 },
+    { label: "無断キャンセル", percent: 100 }
+  ],
+  showOnBook: true,         // 予約時に規定を表示・同意を求める
+  showOnCancel: true,       // キャンセル時に規定を表示
+  qrUrl: "",                // 決済・振込用QR/リンク（PayPay/Square等）
+  qrMsg: "",                // キャンセル料発生時の自動送信メッセージ
+                            // 変数: {顧客名}{予約日時}{メニュー}
+                            //       {キャンセル料}{QRリンク}
+  updatedAt: <serverTimestamp>
+}
+```
+
+★ キャンセル料は**自動引き落としではない**：規定に該当した場合、
+QRコードURLを含むメッセージが顧客に自動送付される（フェーズ1）。
+実際の支払いは顧客と店舗の間で行う。
+
 **メニューの読み取り権限ルール（重要）**：
 - `public: true` のメニュー → 認証ユーザーなら誰でも読める（顧客の予約画面で表示するため）
 - `public: false` のメニュー → サロンスタッフのみ読める（内部用メニュー、スタッフ研修用、開発中など）

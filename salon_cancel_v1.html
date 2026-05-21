@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>TORITA - キャンセル規定</title>
+<!--
+  C-7 キャンセル規定画面 v1
+  DESIGN.md 0-2 キャンセル規定スキーマ / shared_db dbGetCancelPolicy/dbSaveCancelPolicy と1対1
+  管理対象:
+    text, rates[{label,percent}], showOnBook, showOnCancel, qrUrl, qrMsg
+  ★ フェーズ1: キャンセル料は自動引き落としではなくQRコード送付方式
+  ロード順序: firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js → shared_ui.js
+  ES5 互換: var/function のみ
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --gn:#7b9e87; --gl:#eef3ef;
+    --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
+    --bl:#7a8fbf; --bll:#eaeefc;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2); color:var(--tx);
+    -webkit-text-size-adjust:100%; min-height:100vh;
+  }
+
+  .topbar{
+    background:#fff; border-bottom:1px solid var(--bd);
+    padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:10;
+  }
+  .back-link{
+    background:none; border:none; cursor:pointer;
+    font-family:inherit; font-size:13px; color:var(--mu);
+    display:flex; align-items:center; gap:5px;
+  }
+  .back-link:hover{color:var(--ac);}
+  .topbar-title{
+    font-size:15px; font-weight:600; color:var(--ad);
+    letter-spacing:.03em;
+  }
+
+  .wrap{max-width:680px; margin:0 auto; padding:18px 14px 80px;}
+
+  .sec{
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    overflow:hidden; margin-bottom:16px;
+  }
+  .sec-head{
+    background:var(--al); padding:13px 18px;
+    border-bottom:1px solid var(--bd);
+  }
+  .sec-title{font-size:14px; color:var(--ad); font-weight:600;}
+  .sec-sub{font-size:11px; color:var(--mu); margin-top:3px;}
+  .sec-body{padding:16px 18px;}
+
+  .field{margin-bottom:14px;}
+  .field:last-child{margin-bottom:0;}
+  .field label{
+    display:block; font-size:12px; color:var(--mu);
+    margin-bottom:6px; letter-spacing:.02em;
+  }
+  textarea, input[type=text]{
+    width:100%; background:var(--sf);
+    border:1px solid var(--bd); border-radius:9px;
+    padding:10px 12px;
+    font-family:inherit; font-size:14px; color:var(--tx);
+  }
+  textarea:focus, input[type=text]:focus{
+    outline:none; border-color:var(--ac); background:#fff;
+  }
+  textarea.policy-ta{min-height:140px; resize:vertical;}
+  textarea.msg-ta{min-height:110px; resize:vertical;}
+
+  .char-count{
+    font-size:11px; color:var(--mu);
+    text-align:right; margin-top:5px;
+  }
+
+  /* プレビュー */
+  .prev{
+    background:var(--sf); border:1px solid var(--bd);
+    border-radius:9px; padding:12px 14px; margin-top:12px;
+  }
+  .prev-t{
+    font-size:10px; color:var(--mu); font-weight:600;
+    letter-spacing:.06em; margin-bottom:7px;
+  }
+  .prev-c{
+    font-size:13px; color:var(--tx); line-height:1.6;
+    white-space:pre-wrap; word-break:break-word;
+  }
+
+  /* トグル行 */
+  .toggle-row{
+    display:flex; align-items:center; justify-content:space-between;
+    background:var(--sf); border:1px solid var(--bd);
+    border-radius:9px; padding:10px 14px;
+    margin-bottom:10px;
+  }
+  .toggle-row:last-child{margin-bottom:0;}
+  .toggle-row .left{flex:1; min-width:0;}
+  .toggle-row .t-label{font-size:13px; color:var(--tx);}
+  .toggle-row .t-sub{font-size:11px; color:var(--mu); margin-top:3px; line-height:1.5;}
+  .tg{
+    position:relative; width:44px; height:24px;
+    background:var(--bd); border-radius:12px;
+    cursor:pointer; flex-shrink:0;
+    transition:background .15s;
+  }
+  .tg.on{background:var(--gn);}
+  .tg::after{
+    content:''; position:absolute; left:3px; top:3px;
+    width:18px; height:18px; background:#fff;
+    border-radius:50%; transition:left .15s;
+    box-shadow:0 1px 3px rgba(0,0,0,.2);
+  }
+  .tg.on::after{left:23px;}
+
+  /* 段階別料率テーブル */
+  .rate-list{display:flex; flex-direction:column; gap:7px;}
+  .rate-row{
+    display:flex; align-items:center; gap:8px;
+    background:var(--sf); border:1px solid var(--bd);
+    border-radius:8px; padding:9px 11px;
+  }
+  .rate-row select{
+    background:#fff; border:1px solid var(--bd);
+    border-radius:6px; padding:6px 8px;
+    font-family:inherit; font-size:12px; color:var(--tx);
+    flex:1; min-width:0;
+  }
+  .rate-row input[type=number]{
+    background:#fff; border:1px solid var(--bd);
+    border-radius:6px; padding:6px 8px;
+    font-family:inherit; font-size:13px; text-align:center;
+    width:62px;
+  }
+  .rate-row .unit{font-size:12px; color:var(--mu);}
+  .rate-del{
+    width:26px; height:26px;
+    background:none; border:1px solid var(--bd); border-radius:6px;
+    cursor:pointer; color:var(--mu); font-size:13px;
+    font-family:inherit;
+  }
+  .rate-del:hover{border-color:var(--rd); color:var(--rd);}
+  .add-rate{
+    margin-top:10px; width:100%; padding:9px;
+    background:none; border:1px dashed var(--bd);
+    border-radius:8px; cursor:pointer;
+    font-family:inherit; font-size:12px; color:var(--mu);
+  }
+  .add-rate:hover{border-color:var(--ac); color:var(--ac);}
+
+  .rate-summary{
+    margin-top:12px;
+    background:var(--al); border:1px solid var(--ac);
+    border-radius:9px; padding:11px 13px;
+  }
+  .rate-summary-t{
+    font-size:10px; color:var(--ad); font-weight:600;
+    letter-spacing:.06em; margin-bottom:6px;
+  }
+  .rs-row{
+    display:flex; justify-content:space-between;
+    font-size:12px; padding:3px 0;
+    border-bottom:1px solid rgba(181,132,90,.18);
+  }
+  .rs-row:last-child{border-bottom:none;}
+  .rs-row span:last-child{font-weight:600;}
+  .rs-free{color:var(--gn);}
+  .rs-part{color:var(--ac);}
+  .rs-full{color:var(--rd);}
+
+  .note{
+    font-size:11px; color:var(--mu);
+    background:var(--sf); border-radius:7px;
+    padding:8px 11px; margin-top:10px; line-height:1.6;
+  }
+  .note.blue{background:var(--bll); border-left:3px solid var(--bl);}
+  .note.amber{background:#faf3e6; border-left:3px solid #d4b483;}
+
+  .var-hint{
+    font-size:11px; color:var(--mu);
+    background:var(--sf); border-radius:7px;
+    padding:8px 11px; margin:8px 0; line-height:1.8;
+  }
+  .var-hint b{color:var(--ad); font-weight:600;}
+
+  /* 保存ボタン固定下部 */
+  .save-bar{
+    position:fixed; bottom:0; left:0; right:0;
+    background:#fff; border-top:1px solid var(--bd);
+    padding:12px 16px;
+    display:flex; justify-content:flex-end;
+    box-shadow:0 -4px 16px rgba(0,0,0,.05);
+    z-index:20;
+  }
+  .save-btn{
+    background:var(--ac); color:#fff; border:none;
+    border-radius:9px; padding:11px 28px; cursor:pointer;
+    font-family:inherit; font-size:14px; font-weight:600;
+  }
+  .save-btn:hover{background:var(--ad);}
+  .save-btn:disabled{opacity:.5; cursor:not-allowed;}
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back-link" onclick="goDashboard()">&#8592; 戻る</button>
+  <div class="topbar-title">キャンセル規定</div>
+  <div style="width:60px;"></div>
+</div>
+
+<div class="wrap">
+
+  <!-- 1. 規定文章 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">キャンセル規定の文章</div>
+      <div class="sec-sub">顧客の予約・キャンセル時に表示されます</div>
+    </div>
+    <div class="sec-body">
+      <div class="field">
+        <textarea class="policy-ta" id="policyText"
+                  placeholder="例：&#10;・キャンセル料は予約日のXX日前から発生します&#10;・無断キャンセルの場合は施術料金の100%を申し受けます"></textarea>
+        <div class="char-count"><span id="charCount">0</span> 文字</div>
+      </div>
+      <div class="prev">
+        <div class="prev-t">顧客画面でのプレビュー</div>
+        <div class="prev-c" id="policyPreview"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. 表示タイミング -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">規定の表示タイミング</div>
+    </div>
+    <div class="sec-body">
+      <div class="toggle-row">
+        <div class="left">
+          <div class="t-label">予約時に表示する</div>
+          <div class="t-sub">新規予約の完了前に規定を表示し、確認ボタンを押さないと予約できません</div>
+        </div>
+        <div class="tg" id="tgBook" onclick="toggleBook()"></div>
+      </div>
+      <div class="toggle-row">
+        <div class="left">
+          <div class="t-label">キャンセル時に表示する</div>
+          <div class="t-sub">キャンセル操作の際に規定を表示します</div>
+        </div>
+        <div class="tg" id="tgCancel" onclick="toggleCancel()"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. 段階別料率 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">キャンセル料の段階設定</div>
+      <div class="sec-sub">段階を自由に追加・削除できます</div>
+    </div>
+    <div class="sec-body">
+      <div class="rate-list" id="rateList"></div>
+      <button class="add-rate" onclick="addRate()">＋ 段階を追加</button>
+
+      <div class="rate-summary">
+        <div class="rate-summary-t">現在の設定まとめ</div>
+        <div id="rateSummary"></div>
+      </div>
+
+      <div class="note blue">
+        キャンセルが規定に該当した場合、自動でQRコード付きメッセージが送付されます。
+        自動引き落としではありません（フェーズ1）。
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. 自動通知設定 -->
+  <div class="sec">
+    <div class="sec-head">
+      <div class="sec-title">キャンセル料発生時の自動通知</div>
+      <div class="sec-sub">決済QRと自動送信メッセージ</div>
+    </div>
+    <div class="sec-body">
+      <div class="field">
+        <label>決済・振込用のQRコードURL</label>
+        <input type="text" id="qrUrl"
+               placeholder="例：https://pay.paypay.ne.jp/xxxxx">
+        <div class="note">PayPay・Square・銀行振込ページなど</div>
+      </div>
+      <div class="field" style="margin-top:18px;">
+        <label>自動送信メッセージ</label>
+        <div class="var-hint">
+          使える変数：
+          <b>{顧客名}</b>　<b>{予約日時}</b>　<b>{メニュー}</b>　
+          <b>{キャンセル料}</b>　<b>{QRリンク}</b>
+        </div>
+        <textarea class="msg-ta" id="qrMsg"
+                  placeholder="例：&#10;{顧客名}様&#10;{予約日時}の{メニュー}のキャンセル料 {キャンセル料} について、お振込みをお願いいたします。&#10;{QRリンク}"></textarea>
+        <div class="prev">
+          <div class="prev-t">送信イメージ（山田 花子さんの場合）</div>
+          <div class="prev-c" id="msgPreview"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div class="save-bar">
+  <button class="save-btn" id="saveBtn" onclick="saveAll()">保存する</button>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_ui.js"></script>
+
+<script>
+(function () {
+
+  var LABEL_OPTS = [
+    '7日前から', '6日前から', '5日前から', '4日前から',
+    '3日前から', '2日前から', '前日から', '当日',
+    '無断キャンセル'
+  ];
+
+  // 状態
+  var st = {
+    text: '',
+    rates: [],
+    showOnBook: true,
+    showOnCancel: true,
+    qrUrl: '',
+    qrMsg: ''
+  };
+
+  function goDashboard() {
+    window.location.href = 'salon_dashboard_v1.html';
+  }
+  window.goDashboard = goDashboard;
+
+  function _v(id) {
+    var el = document.getElementById(id);
+    return el ? String(el.value || '') : '';
+  }
+
+  // ----- 規定文章 -----
+  function onPolicyInput() {
+    st.text = _v('policyText');
+    document.getElementById('charCount').textContent = st.text.length;
+    document.getElementById('policyPreview').textContent =
+      st.text || '（未入力）';
+  }
+
+  // ----- 表示タイミング -----
+  function refreshToggles() {
+    document.getElementById('tgBook').className =
+      st.showOnBook ? 'tg on' : 'tg';
+    document.getElementById('tgCancel').className =
+      st.showOnCancel ? 'tg on' : 'tg';
+  }
+  function toggleBook() {
+    st.showOnBook = !st.showOnBook;
+    refreshToggles();
+  }
+  function toggleCancel() {
+    st.showOnCancel = !st.showOnCancel;
+    refreshToggles();
+  }
+  window.toggleBook = toggleBook;
+  window.toggleCancel = toggleCancel;
+
+  // ----- 段階別料率 -----
+  function renderRates() {
+    var box = document.getElementById('rateList');
+    box.innerHTML = '';
+    var i;
+    for (i = 0; i < st.rates.length; i++) {
+      (function (idx, r) {
+        var row = document.createElement('div');
+        row.className = 'rate-row';
+
+        var sel = document.createElement('select');
+        var j;
+        for (j = 0; j < LABEL_OPTS.length; j++) {
+          var op = document.createElement('option');
+          op.value = LABEL_OPTS[j];
+          op.textContent = LABEL_OPTS[j];
+          if (r.label === LABEL_OPTS[j]) { op.selected = true; }
+          sel.appendChild(op);
+        }
+        sel.onchange = function () {
+          st.rates[idx].label = this.value;
+          renderSummary();
+        };
+        row.appendChild(sel);
+
+        var inp = document.createElement('input');
+        inp.type = 'number';
+        inp.min = '0'; inp.max = '100'; inp.step = '10';
+        inp.value = String(r.percent);
+        inp.oninput = function () {
+          var n = parseInt(this.value, 10);
+          if (isNaN(n) || n < 0) { n = 0; }
+          if (n > 100) { n = 100; }
+          st.rates[idx].percent = n;
+          renderSummary();
+        };
+        row.appendChild(inp);
+
+        var u = document.createElement('span');
+        u.className = 'unit';
+        u.textContent = '%';
+        row.appendChild(u);
+
+        var del = document.createElement('button');
+        del.className = 'rate-del';
+        del.textContent = '\u2715';
+        del.onclick = function () {
+          if (st.rates.length <= 1) {
+            uiToast('最低1段階は必要です');
+            return;
+          }
+          st.rates.splice(idx, 1);
+          renderRates();
+          renderSummary();
+        };
+        row.appendChild(del);
+
+        box.appendChild(row);
+      })(i, st.rates[i]);
+    }
+  }
+  function addRate() {
+    st.rates.push({ label: '2日前から', percent: 30 });
+    renderRates();
+    renderSummary();
+  }
+  window.addRate = addRate;
+
+  function renderSummary() {
+    var box = document.getElementById('rateSummary');
+    box.innerHTML = '';
+    if (st.rates.length === 0) {
+      box.innerHTML = '<div style="font-size:12px;color:var(--mu);">段階が設定されていません</div>';
+      return;
+    }
+    var i, html = '';
+    for (i = 0; i < st.rates.length; i++) {
+      var r = st.rates[i];
+      var cls = 'rs-part';
+      var disp;
+      if (r.percent === 0) { cls = 'rs-free'; disp = '無料'; }
+      else if (r.percent >= 100) { cls = 'rs-full'; disp = '100%'; }
+      else { disp = r.percent + '%'; }
+      html += '<div class="rs-row"><span>'
+        + escHtml(r.label) + '</span><span class="' + cls + '">'
+        + disp + '</span></div>';
+    }
+    box.innerHTML = html;
+  }
+  function escHtml(s) {
+    s = (s == null) ? '' : String(s);
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  // ----- 通知メッセージ -----
+  function onMsgInput() {
+    st.qrMsg = _v('qrMsg');
+    updateMsgPreview();
+  }
+  function onQrUrlInput() {
+    st.qrUrl = _v('qrUrl');
+    updateMsgPreview();
+  }
+  function updateMsgPreview() {
+    var url = st.qrUrl || '（QRコードURL未設定）';
+    var msg = st.qrMsg || '（メッセージ未設定）';
+    msg = msg.replace(/\{顧客名\}/g, '山田 花子')
+             .replace(/\{予約日時\}/g, '6月3日（水）14:00')
+             .replace(/\{メニュー\}/g, 'フェイシャル')
+             .replace(/\{キャンセル料\}/g, '¥6,000（50%）')
+             .replace(/\{QRリンク\}/g, url);
+    document.getElementById('msgPreview').textContent = msg;
+  }
+
+  // ----- 保存 -----
+  function saveAll() {
+    // 最終的に画面値を状態へ反映
+    st.text = _v('policyText');
+    st.qrUrl = _v('qrUrl');
+    st.qrMsg = _v('qrMsg');
+
+    // 簡易バリデーション
+    if (st.rates.length === 0) {
+      uiToast('キャンセル料の段階を少なくとも1つ設定してください');
+      return;
+    }
+    var i;
+    for (i = 0; i < st.rates.length; i++) {
+      var r = st.rates[i];
+      if (!r.label) {
+        uiToast('段階のタイミングが空です');
+        return;
+      }
+      if (typeof r.percent !== 'number' || r.percent < 0 || r.percent > 100) {
+        uiToast('キャンセル料は0〜100%で入力してください');
+        return;
+      }
+    }
+
+    document.getElementById('saveBtn').disabled = true;
+    uiShowLoading('保存中...');
+    dbSaveCancelPolicy(st, function (err) {
+      uiHideLoading();
+      document.getElementById('saveBtn').disabled = false;
+      if (err) {
+        uiToast('保存に失敗しました');
+        return;
+      }
+      uiToast('キャンセル規定を保存しました');
+    });
+  }
+  window.saveAll = saveAll;
+
+  // ----- 初期読み込み -----
+  function loadAll() {
+    uiShowLoading('読み込み中...');
+    dbGetCancelPolicy(function (p) {
+      uiHideLoading();
+      if (p) {
+        if (typeof p.text === 'string') { st.text = p.text; }
+        if (typeof p.qrUrl === 'string') { st.qrUrl = p.qrUrl; }
+        if (typeof p.qrMsg === 'string') { st.qrMsg = p.qrMsg; }
+        if (typeof p.showOnBook === 'boolean') {
+          st.showOnBook = p.showOnBook;
+        }
+        if (typeof p.showOnCancel === 'boolean') {
+          st.showOnCancel = p.showOnCancel;
+        }
+        if (Array.isArray(p.rates) && p.rates.length > 0) {
+          st.rates = p.rates.slice();
+        }
+      }
+
+      document.getElementById('policyText').value = st.text;
+      document.getElementById('qrUrl').value = st.qrUrl;
+      document.getElementById('qrMsg').value = st.qrMsg;
+      refreshToggles();
+      onPolicyInput();
+      renderRates();
+      renderSummary();
+      updateMsgPreview();
+    });
+  }
+
+  // イベントバインド
+  document.getElementById('policyText').addEventListener('input', onPolicyInput);
+  document.getElementById('qrUrl').addEventListener('input', onQrUrlInput);
+  document.getElementById('qrMsg').addEventListener('input', onMsgInput);
+
+  // 起動
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (!isStaff) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+      loadAll();
+    });
+  });
+
+})();
+</script>
+</body>
+</html>

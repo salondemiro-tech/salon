@@ -877,6 +877,84 @@
     };
   }
 
+  // ============================================================
+  // キャンセル規定 API（cancelPolicy）
+  // パス: salons/{salonId}/config/cancelPolicy
+  // DESIGN.md 0-2 キャンセル規定スキーマと1対1
+  // ============================================================
+
+  // 取得。未作成なら既定値を返す（初回起動時の挙動）
+  function dbGetCancelPolicy(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, _defaultCancelPolicy()); return; }
+    dbReadDoc('salons/' + sid + '/config/cancelPolicy', function (doc) {
+      if (!doc) { _safeCb(cb, _defaultCancelPolicy()); return; }
+      var base = _defaultCancelPolicy();
+      var k;
+      for (k in doc) {
+        if (doc.hasOwnProperty(k)) { base[k] = doc[k]; }
+      }
+      _safeCb(cb, base);
+    });
+  }
+  window.dbGetCancelPolicy = dbGetCancelPolicy;
+
+  // 保存（set merge:true で部分更新）
+  // policy: { text, rates[], showOnBook, showOnCancel, qrUrl, qrMsg }
+  // 戻り値 cb(err): 成功 null / 失敗 Error 相当
+  function dbSaveCancelPolicy(policy, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, new Error('no salon')); return; }
+    if (!policy || typeof policy !== 'object') {
+      _safeCb(cb, new Error('invalid policy'));
+      return;
+    }
+    var doc = {};
+    if (typeof policy.text === 'string')  { doc.text  = policy.text; }
+    if (typeof policy.qrUrl === 'string') { doc.qrUrl = policy.qrUrl; }
+    if (typeof policy.qrMsg === 'string') { doc.qrMsg = policy.qrMsg; }
+    if (typeof policy.showOnBook === 'boolean') {
+      doc.showOnBook = policy.showOnBook;
+    }
+    if (typeof policy.showOnCancel === 'boolean') {
+      doc.showOnCancel = policy.showOnCancel;
+    }
+    if (Array.isArray(policy.rates)) {
+      doc.rates = policy.rates.map(function (r) {
+        var p = parseInt(r.percent, 10);
+        if (isNaN(p) || p < 0) { p = 0; }
+        if (p > 100) { p = 100; }
+        return {
+          label: String(r.label || ''),
+          percent: p
+        };
+      });
+    }
+    doc.updatedAt = _serverTimestamp();
+
+    dbWriteDoc('salons/' + sid + '/config/cancelPolicy', doc, true,
+      function (ok) {
+        _safeCb(cb, ok ? null : new Error('save failed'));
+      });
+  }
+  window.dbSaveCancelPolicy = dbSaveCancelPolicy;
+
+  function _defaultCancelPolicy() {
+    return {
+      text: '',
+      rates: [
+        { label: '3日前から', percent: 30 },
+        { label: '前日から',  percent: 50 },
+        { label: '当日',      percent: 100 },
+        { label: '無断キャンセル', percent: 100 }
+      ],
+      showOnBook: true,
+      showOnCancel: true,
+      qrUrl: '',
+      qrMsg: ''
+    };
+  }
+
   // 予約一覧
   // filterObj: { dateKey: '2026-05-14' } のように指定可能 (任意)
   //            指定なしなら全件
