@@ -409,12 +409,11 @@
     'same1h':'当日1時間前まで受付。',
     'same30m':'当日30分前まで受付。'
   };
-  var DL_OPTS = ['3日前まで', '2日前まで', '前日まで', '前日24時まで'];
+  var DL_OPTS = ['3日前まで', '2日前まで', '前日まで'];
   var DL_NOTE = {
     '3日前まで':'予約日の3日前23:59までキャンセル操作ができます。',
     '2日前まで':'2日前23:59まで。',
-    '前日まで':'前日23:59まで。',
-    '前日24時まで':'前日24:00（当日0:00）まで。'
+    '前日まで':'前日23:59まで。'
   };
   var BK_OPTS = [4, 5, 6, 7, 8, 10, 12, 16, 20, 24];
 
@@ -429,7 +428,7 @@
     weeklyClose: [],
     bookingWeeks: 8,
     lastMin: 'same1h',
-    deadline: '前日24時まで'
+    deadline: '前日まで'
   };
   var wcNextId = 1;
 
@@ -754,7 +753,15 @@
         }
         if (typeof s.bookingWeeks === 'number') { st.bookingWeeks = s.bookingWeeks; }
         if (typeof s.lastMin === 'string') { st.lastMin = s.lastMin; }
-        if (typeof s.deadline === 'string') { st.deadline = s.deadline; }
+        if (typeof s.deadline === 'string') {
+          // 旧選択肢「前日24時まで」は廃止。「前日まで」へ自動移行
+          // （次回保存で正規化される）
+          if (s.deadline === '前日24時まで') {
+            st.deadline = '前日まで';
+          } else {
+            st.deadline = s.deadline;
+          }
+        }
       }
 
       // 値を画面に反映

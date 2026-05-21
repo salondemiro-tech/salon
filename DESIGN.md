@@ -275,7 +275,7 @@ salons/{salonId}/config/settings {
   weeklyClose: [],            // 毎週の定期クローズ [{dow,start,end}, ...]
   bookingWeeks: 8,            // 何週間先まで予約可
   lastMin: "same1h",          // 直前予約受付：1week/3days/1day/same3h/same1h/same30m
-  deadline: "前日24時まで"    // 顧客キャンセル受付期限
+  deadline: "前日まで"        // 顧客キャンセル受付期限
 }
 ```
 

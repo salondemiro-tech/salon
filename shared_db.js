@@ -873,7 +873,7 @@
       weeklyClose: [],
       bookingWeeks: 8,
       lastMin: 'same1h',
-      deadline: '前日24時まで'
+      deadline: '前日まで'
     };
   }
 
