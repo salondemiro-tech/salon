@@ -315,7 +315,7 @@ service cloud.firestore {
              'dateKey', 'start', 'end',
              'startAt', 'endAt',
              'customerDocId', 'authUid', 'customerSnapshot',
-             'menuId', 'menuName', 'optionMenuIds',
+             'menuId', 'menuNameSnapshot', 'optionMenuIds',
              'staffId', 'resourceIds',
              'status', 'source',
              'priceSnapshot', 'durationMin',
