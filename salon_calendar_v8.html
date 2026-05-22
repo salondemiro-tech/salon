@@ -66,6 +66,170 @@
 
   .wrap{max-width:680px; margin:0 auto; padding:18px 14px 40px;}
 
+  /* ===== アクションバー (+予約 / +クローズ) ===== */
+  .action-bar{
+    display:flex; gap:10px; margin-bottom:14px;
+  }
+  .action-btn{
+    flex:1; background:var(--ac); color:#fff; border:none;
+    border-radius:11px; padding:11px 14px; cursor:pointer;
+    font-family:inherit; font-size:14px; font-weight:600;
+  }
+  .action-btn:hover{background:var(--ad);}
+  .action-btn.alt{
+    background:#fff; color:var(--ad);
+    border:1.5px solid var(--ac);
+  }
+  .action-btn.alt:hover{background:var(--al);}
+
+  /* ===== 予約登録モーダル ===== */
+  .modal-ov{
+    display:none; position:fixed; inset:0;
+    background:rgba(0,0,0,.42); z-index:60;
+    overflow-y:auto; padding:24px 12px;
+  }
+  .modal-ov.show{display:block;}
+  .modal{
+    max-width:520px; margin:0 auto;
+    background:#fff; border-radius:15px;
+    box-shadow:0 12px 40px rgba(0,0,0,.22);
+    overflow:hidden;
+  }
+  .modal-head{
+    background:var(--al); padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .modal-title{font-size:16px; color:var(--ad); font-weight:600;}
+  .modal-close{
+    background:none; border:none; cursor:pointer;
+    font-size:22px; color:var(--mu); line-height:1;
+  }
+
+  .tab-row{
+    display:flex; border-bottom:1px solid var(--bd);
+    background:var(--sf);
+  }
+  .tab-btn{
+    flex:1; background:none; border:none; cursor:pointer;
+    padding:12px; font-family:inherit; font-size:13px;
+    color:var(--mu); font-weight:600;
+    border-bottom:2px solid transparent;
+  }
+  .tab-btn.active{
+    color:var(--ad); border-bottom-color:var(--ac);
+    background:#fff;
+  }
+
+  .modal-body{padding:16px 18px;}
+  .modal-body.hidden{display:none;}
+
+  .field{margin-bottom:14px;}
+  .field label{
+    display:block; font-size:12px; color:var(--mu);
+    margin-bottom:5px;
+  }
+  .field input, .field select, .field textarea{
+    width:100%; background:var(--sf);
+    border:1px solid var(--bd); border-radius:9px;
+    padding:9px 12px;
+    font-family:inherit; font-size:14px; color:var(--tx);
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{
+    outline:none; border-color:var(--ac); background:#fff;
+  }
+  .row-2{display:flex; gap:10px;}
+  .row-2 .field{flex:1; margin-bottom:0;}
+
+  /* 顧客選択 */
+  .cust-mode{
+    display:flex; gap:8px; margin-bottom:10px;
+  }
+  .cust-mode-btn{
+    flex:1; background:#fff; border:1.5px solid var(--bd);
+    border-radius:9px; padding:9px;
+    cursor:pointer; font-family:inherit;
+    font-size:13px; color:var(--mu);
+  }
+  .cust-mode-btn.on{
+    background:var(--al); border-color:var(--ac);
+    color:var(--ad); font-weight:600;
+  }
+  .cust-search-box{
+    position:relative;
+  }
+  .cust-results{
+    position:absolute; left:0; right:0; top:100%;
+    background:#fff; border:1px solid var(--bd);
+    border-radius:9px; margin-top:3px;
+    max-height:200px; overflow-y:auto;
+    box-shadow:0 4px 14px rgba(0,0,0,.12);
+    z-index:5;
+    display:none;
+  }
+  .cust-results.show{display:block;}
+  .cust-result-item{
+    padding:9px 12px; cursor:pointer;
+    border-bottom:1px solid var(--bd);
+    font-size:13px;
+  }
+  .cust-result-item:last-child{border-bottom:none;}
+  .cust-result-item:hover{background:var(--al);}
+  .cust-result-sub{
+    font-size:11px; color:var(--mu); margin-top:1px;
+  }
+  .cust-picked{
+    background:var(--al); border:1px solid var(--ac);
+    border-radius:9px; padding:10px 12px;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .cust-picked-name{
+    font-size:13px; color:var(--ad); font-weight:600;
+  }
+  .cust-picked-clear{
+    background:none; border:none; cursor:pointer;
+    color:var(--mu); font-size:18px; line-height:1;
+  }
+
+  /* オプションメニュー */
+  .opt-list{
+    display:flex; flex-direction:column; gap:6px;
+    margin-bottom:8px;
+  }
+  .opt-row{
+    display:flex; gap:6px; align-items:center;
+  }
+  .opt-row select{flex:1;}
+  .opt-del{
+    width:28px; height:28px;
+    background:none; border:1px solid var(--bd); border-radius:6px;
+    cursor:pointer; color:var(--mu); font-size:13px;
+    font-family:inherit;
+  }
+  .opt-del:hover{border-color:var(--rd); color:var(--rd);}
+  .add-opt{
+    width:100%; padding:8px;
+    background:none; border:1px dashed var(--bd);
+    border-radius:8px; cursor:pointer;
+    font-family:inherit; font-size:12px; color:var(--mu);
+  }
+  .add-opt:hover{border-color:var(--ac); color:var(--ac);}
+
+  /* モーダル下部アクション */
+  .modal-actions{
+    display:flex; gap:10px; padding:14px 18px;
+    border-top:1px solid var(--bd); background:var(--sf);
+  }
+  .btn{
+    flex:1; border:none; border-radius:10px;
+    padding:11px; cursor:pointer;
+    font-family:inherit; font-size:14px; font-weight:600;
+  }
+  .btn-primary{background:var(--ac); color:#fff;}
+  .btn-primary:hover{background:var(--ad);}
+  .btn-primary:disabled{opacity:.5; cursor:not-allowed;}
+  .btn-ghost{background:var(--s2); color:var(--mu);}
+  .btn-ghost:hover{background:var(--bd);}
+
   /* ===== 月ナビ ===== */
   .month-nav{
     display:flex; align-items:center; justify-content:space-between;
@@ -211,6 +375,11 @@
     <button id="nextBtn" onclick="changeMonth(1)">&#8250;</button>
   </div>
 
+  <div class="action-bar">
+    <button class="action-btn" onclick="openBookingModal()">＋ 予約を登録</button>
+    <button class="action-btn alt" onclick="openCloseModal()">＋ クローズ時間</button>
+  </div>
+
   <div class="cal-card">
     <div class="cal-dow">
       <div class="sun">日</div><div>月</div><div>火</div>
@@ -224,6 +393,126 @@
   </div>
 
   <footer>&copy; TORITA</footer>
+</div>
+
+<!-- 予約登録 / クローズ時間 モーダル -->
+<div class="modal-ov" id="modalOv">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="modalTitle">予約を登録</div>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="tab-row">
+      <button class="tab-btn active" id="tabBookBtn" onclick="switchTab('book')">予約登録</button>
+      <button class="tab-btn" id="tabCloseBtn" onclick="switchTab('close')">クローズ時間</button>
+    </div>
+
+    <!-- 予約タブ -->
+    <div class="modal-body" id="bookBody">
+      <!-- 顧客選択モード切替 -->
+      <div class="cust-mode">
+        <button class="cust-mode-btn on" id="modeExistBtn" onclick="setCustMode('exist')">既存顧客から選ぶ</button>
+        <button class="cust-mode-btn" id="modeNewBtn" onclick="setCustMode('new')">新規顧客を登録</button>
+      </div>
+
+      <!-- 既存顧客検索 -->
+      <div id="custExistPane">
+        <div id="custPickedArea" style="display:none;">
+          <div class="cust-picked">
+            <div>
+              <div class="cust-picked-name" id="custPickedName">—</div>
+              <div class="cust-result-sub" id="custPickedSub">—</div>
+            </div>
+            <button class="cust-picked-clear" onclick="clearPickedCustomer()">&times;</button>
+          </div>
+        </div>
+        <div id="custSearchArea" class="cust-search-box">
+          <div class="field" style="margin-bottom:0;">
+            <label>顧客を検索</label>
+            <input type="text" id="custSearchInp" placeholder="名前・電話" autocomplete="off">
+          </div>
+          <div class="cust-results" id="custResults"></div>
+        </div>
+      </div>
+
+      <!-- 新規顧客 -->
+      <div id="custNewPane" style="display:none;">
+        <div class="field">
+          <label>お名前（必須）</label>
+          <input type="text" id="newName" placeholder="例：山田 花子">
+        </div>
+        <div class="row-2">
+          <div class="field">
+            <label>電話番号</label>
+            <input type="tel" id="newPhone" placeholder="090-1234-5678">
+          </div>
+          <div class="field">
+            <label>メール（任意）</label>
+            <input type="email" id="newEmail">
+          </div>
+        </div>
+      </div>
+
+      <div style="height:14px;"></div>
+
+      <!-- 日時 -->
+      <div class="row-2" style="margin-bottom:14px;">
+        <div class="field" style="margin-bottom:0;">
+          <label>日付</label>
+          <input type="date" id="bDate">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>開始時間</label>
+          <input type="time" id="bTime" value="10:00">
+        </div>
+      </div>
+
+      <!-- メニュー -->
+      <div class="field">
+        <label>メインメニュー</label>
+        <select id="bMenu"></select>
+      </div>
+
+      <!-- オプション -->
+      <div class="field">
+        <label>オプション（任意）</label>
+        <div class="opt-list" id="optList"></div>
+        <button class="add-opt" onclick="addOption()">＋ オプションを追加</button>
+      </div>
+
+      <div class="field">
+        <label>メモ（任意・サロン内部用）</label>
+        <input type="text" id="bMemo" placeholder="備考など">
+      </div>
+    </div>
+
+    <!-- クローズ時間タブ -->
+    <div class="modal-body hidden" id="closeBody">
+      <div class="field">
+        <label>日付</label>
+        <input type="date" id="cDate">
+      </div>
+      <div class="row-2">
+        <div class="field">
+          <label>開始時間</label>
+          <input type="time" id="cStart" value="12:00">
+        </div>
+        <div class="field">
+          <label>終了時間</label>
+          <input type="time" id="cEnd" value="13:00">
+        </div>
+      </div>
+      <div class="field">
+        <label>理由（任意）</label>
+        <input type="text" id="cReason" placeholder="例：ランチ休憩 / 私用">
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">キャンセル</button>
+      <button class="btn btn-primary" id="modalSaveBtn" onclick="saveModal()">登録する</button>
+    </div>
+  </div>
 </div>
 
 <!-- ===== Firebase SDK (compat) ===== -->
@@ -477,6 +766,435 @@
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
+
+  // ============================================================
+  // 予約登録 / クローズ時間モーダル
+  // ============================================================
+  var _modalTab = 'book';           // 'book' | 'close'
+  var _custMode = 'exist';          // 'exist' | 'new'
+  var _pickedCust = null;           // { _id, name, phone, email }
+  var _allCust = [];                // 顧客一覧（モーダル開く時に取得）
+  var _optionSelects = [];          // オプション select 要素のリスト
+
+  function _norm(s) {
+    s = (s == null) ? '' : String(s);
+    s = s.replace(/[\uFF01-\uFF5E]/g, function (ch) {
+      return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+    });
+    s = s.replace(/[\s\u3000]+/g, '');
+    return s.toLowerCase();
+  }
+
+  function openBookingModal() {
+    _modalTab = 'book';
+    switchTabUI();
+    initBookForm();
+    initCloseForm();
+    loadCustomersForModal();
+    document.getElementById('modalOv').className = 'modal-ov show';
+  }
+  window.openBookingModal = openBookingModal;
+
+  function openCloseModal() {
+    _modalTab = 'close';
+    switchTabUI();
+    initBookForm();
+    initCloseForm();
+    loadCustomersForModal();
+    document.getElementById('modalOv').className = 'modal-ov show';
+  }
+  window.openCloseModal = openCloseModal;
+
+  function closeModal() {
+    document.getElementById('modalOv').className = 'modal-ov';
+  }
+  window.closeModal = closeModal;
+
+  function switchTab(tab) {
+    _modalTab = tab;
+    switchTabUI();
+  }
+  window.switchTab = switchTab;
+
+  function switchTabUI() {
+    var isBook = (_modalTab === 'book');
+    document.getElementById('tabBookBtn').className = isBook ? 'tab-btn active' : 'tab-btn';
+    document.getElementById('tabCloseBtn').className = isBook ? 'tab-btn' : 'tab-btn active';
+    document.getElementById('bookBody').className = isBook ? 'modal-body' : 'modal-body hidden';
+    document.getElementById('closeBody').className = isBook ? 'modal-body hidden' : 'modal-body';
+    document.getElementById('modalTitle').textContent =
+      isBook ? '予約を登録' : 'クローズ時間を登録';
+    document.getElementById('modalSaveBtn').textContent =
+      isBook ? '予約を登録' : 'クローズを登録';
+  }
+
+  // ----- 既存/新規切替 -----
+  function setCustMode(mode) {
+    _custMode = mode;
+    document.getElementById('modeExistBtn').className =
+      mode === 'exist' ? 'cust-mode-btn on' : 'cust-mode-btn';
+    document.getElementById('modeNewBtn').className =
+      mode === 'new' ? 'cust-mode-btn on' : 'cust-mode-btn';
+    document.getElementById('custExistPane').style.display =
+      mode === 'exist' ? '' : 'none';
+    document.getElementById('custNewPane').style.display =
+      mode === 'new' ? '' : 'none';
+  }
+  window.setCustMode = setCustMode;
+
+  // ----- 顧客一覧取得（モーダル用） -----
+  function loadCustomersForModal() {
+    if (_allCust.length > 0) { return; }  // 1度取れば使い回し
+    if (typeof dbSalonListCustomers !== 'function') { return; }
+    dbSalonListCustomers(function (list) {
+      _allCust = list || [];
+    });
+  }
+
+  // ----- 顧客検索結果 -----
+  function onCustSearchInput() {
+    var q = _norm(document.getElementById('custSearchInp').value);
+    var box = document.getElementById('custResults');
+    if (!q) {
+      box.className = 'cust-results';
+      box.innerHTML = '';
+      return;
+    }
+    var hits = [];
+    var i, c, hay;
+    for (i = 0; i < _allCust.length; i++) {
+      c = _allCust[i];
+      hay = _norm((c.name || '') + (c.phone || ''));
+      if (hay.indexOf(q) >= 0) { hits.push(c); }
+    }
+    box.className = 'cust-results show';
+    if (hits.length === 0) {
+      box.innerHTML = '<div class="cust-result-item" style="color:var(--mu);">該当なし</div>';
+      return;
+    }
+    box.innerHTML = '';
+    for (i = 0; i < hits.length && i < 12; i++) {
+      box.appendChild(buildCustResultItem(hits[i]));
+    }
+  }
+
+  function buildCustResultItem(c) {
+    var row = document.createElement('div');
+    row.className = 'cust-result-item';
+    var nm = document.createElement('div');
+    nm.textContent = c.name || '(名前なし)';
+    row.appendChild(nm);
+    if (c.phone) {
+      var s = document.createElement('div');
+      s.className = 'cust-result-sub';
+      s.textContent = c.phone;
+      row.appendChild(s);
+    }
+    row.onclick = function () { pickCustomer(c); };
+    return row;
+  }
+
+  function pickCustomer(c) {
+    _pickedCust = c;
+    document.getElementById('custPickedArea').style.display = '';
+    document.getElementById('custSearchArea').style.display = 'none';
+    document.getElementById('custPickedName').textContent =
+      c.name || '(名前なし)';
+    document.getElementById('custPickedSub').textContent =
+      (c.phone || '') + (c.email ? ('  ' + c.email) : '');
+    document.getElementById('custResults').className = 'cust-results';
+  }
+
+  function clearPickedCustomer() {
+    _pickedCust = null;
+    document.getElementById('custPickedArea').style.display = 'none';
+    document.getElementById('custSearchArea').style.display = '';
+    document.getElementById('custSearchInp').value = '';
+    document.getElementById('custResults').className = 'cust-results';
+  }
+  window.clearPickedCustomer = clearPickedCustomer;
+
+  // ----- 予約フォーム初期化 -----
+  function initBookForm() {
+    _pickedCust = null;
+    setCustMode('exist');
+    document.getElementById('custPickedArea').style.display = 'none';
+    document.getElementById('custSearchArea').style.display = '';
+    document.getElementById('custSearchInp').value = '';
+    document.getElementById('custResults').className = 'cust-results';
+    document.getElementById('newName').value = '';
+    document.getElementById('newPhone').value = '';
+    document.getElementById('newEmail').value = '';
+
+    // 日付：選択中の日 or 今日
+    var dateKey = _selectedKey || todayKey();
+    document.getElementById('bDate').value = dateKey;
+    document.getElementById('bTime').value = '10:00';
+
+    // メニュー select
+    var sel = document.getElementById('bMenu');
+    sel.innerHTML = '';
+    var menus = (_bundle && _bundle.menus) ? _bundle.menus : [];
+    var i;
+    // メインメニューのみ
+    var hasAny = false;
+    for (i = 0; i < menus.length; i++) {
+      if (menus[i].type === 'option') { continue; }
+      if (menus[i].public === false) { continue; }  // 非公開は登録に使わない
+      var op = document.createElement('option');
+      op.value = menus[i]._id;
+      op.textContent = menus[i].name +
+        (menus[i].duration ? '（' + menus[i].duration + '分）' : '');
+      sel.appendChild(op);
+      hasAny = true;
+    }
+    if (!hasAny) {
+      var op0 = document.createElement('option');
+      op0.value = '';
+      op0.textContent = '（メニューが登録されていません）';
+      sel.appendChild(op0);
+    }
+
+    // オプションリスト初期化
+    _optionSelects = [];
+    document.getElementById('optList').innerHTML = '';
+
+    // メモ
+    document.getElementById('bMemo').value = '';
+  }
+
+  function initCloseForm() {
+    var dateKey = _selectedKey || todayKey();
+    document.getElementById('cDate').value = dateKey;
+    document.getElementById('cStart').value = '12:00';
+    document.getElementById('cEnd').value = '13:00';
+    document.getElementById('cReason').value = '';
+  }
+
+  // ----- オプション追加 -----
+  function addOption() {
+    var menus = (_bundle && _bundle.menus) ? _bundle.menus : [];
+    var opts = [];
+    var i;
+    for (i = 0; i < menus.length; i++) {
+      if (menus[i].type !== 'option') { continue; }
+      if (menus[i].public === false) { continue; }
+      opts.push(menus[i]);
+    }
+    if (opts.length === 0) {
+      uiToast('オプションメニューが登録されていません');
+      return;
+    }
+
+    var row = document.createElement('div');
+    row.className = 'opt-row';
+    var sel = document.createElement('select');
+    for (i = 0; i < opts.length; i++) {
+      var op = document.createElement('option');
+      op.value = opts[i]._id;
+      op.textContent = opts[i].name;
+      sel.appendChild(op);
+    }
+    row.appendChild(sel);
+    var del = document.createElement('button');
+    del.className = 'opt-del';
+    del.textContent = '\u2715';
+    del.onclick = function () {
+      var idx = _optionSelects.indexOf(sel);
+      if (idx >= 0) { _optionSelects.splice(idx, 1); }
+      row.parentNode.removeChild(row);
+    };
+    row.appendChild(del);
+    document.getElementById('optList').appendChild(row);
+    _optionSelects.push(sel);
+  }
+  window.addOption = addOption;
+
+  // ----- 保存 -----
+  function saveModal() {
+    if (_modalTab === 'close') {
+      saveCloseBlock();
+    } else {
+      saveBooking();
+    }
+  }
+  window.saveModal = saveModal;
+
+  function saveCloseBlock() {
+    var date = document.getElementById('cDate').value;
+    var start = document.getElementById('cStart').value;
+    var end = document.getElementById('cEnd').value;
+    var reason = document.getElementById('cReason').value;
+    if (!date || !start || !end) {
+      uiToast('日付・時刻を入力してください');
+      return;
+    }
+    if (start >= end) {
+      uiToast('終了時刻は開始より後にしてください');
+      return;
+    }
+    var btn = document.getElementById('modalSaveBtn');
+    btn.disabled = true;
+    uiShowLoading('登録中...');
+    dbSalonCreateCloseBlock({
+      dateKey: date, start: start, end: end, reason: reason
+    }, function (res) {
+      uiHideLoading();
+      btn.disabled = false;
+      if (!res || !res._id) {
+        uiToast('クローズ時間の登録に失敗しました');
+        return;
+      }
+      uiToast('クローズ時間を登録しました');
+      closeModal();
+      loadMonth();   // 反映のため再取得
+    });
+  }
+
+  function saveBooking() {
+    // 顧客チェック
+    var custDocId = null;
+    var custData = null;  // 新規の場合
+    if (_custMode === 'exist') {
+      if (!_pickedCust || !_pickedCust._id) {
+        uiToast('顧客を選択してください');
+        return;
+      }
+      custDocId = _pickedCust._id;
+    } else {
+      var nm = (document.getElementById('newName').value || '').trim();
+      var ph = (document.getElementById('newPhone').value || '').trim();
+      var em = (document.getElementById('newEmail').value || '').trim();
+      if (!nm) {
+        uiToast('お名前を入力してください');
+        return;
+      }
+      custData = { name: nm, phone: ph, email: em };
+    }
+
+    // 日時
+    var date = document.getElementById('bDate').value;
+    var time = document.getElementById('bTime').value;
+    if (!date || !time) {
+      uiToast('日時を入力してください');
+      return;
+    }
+
+    // メニュー
+    var menuSel = document.getElementById('bMenu');
+    var menuId = menuSel.value;
+    if (!menuId) {
+      uiToast('メニューを選択してください');
+      return;
+    }
+    var menus = (_bundle && _bundle.menus) ? _bundle.menus : [];
+    var i, mainMenu = null;
+    for (i = 0; i < menus.length; i++) {
+      if (menus[i]._id === menuId) { mainMenu = menus[i]; break; }
+    }
+    if (!mainMenu) {
+      uiToast('メニュー情報が見つかりません');
+      return;
+    }
+
+    // オプション
+    var optionIds = [];
+    for (i = 0; i < _optionSelects.length; i++) {
+      if (_optionSelects[i].value) { optionIds.push(_optionSelects[i].value); }
+    }
+    // 重複除去
+    var seen = {}, uniqOpt = [];
+    for (i = 0; i < optionIds.length; i++) {
+      if (!seen[optionIds[i]]) {
+        seen[optionIds[i]] = true;
+        uniqOpt.push(optionIds[i]);
+      }
+    }
+
+    // 合計時間・料金（クライアント側計算は snapshot 用。最終確定は Functions の責任）
+    var durMin = (typeof mainMenu.duration === 'number') ? mainMenu.duration : 60;
+    var totPrice = (typeof mainMenu.price === 'number') ? mainMenu.price : 0;
+    for (i = 0; i < uniqOpt.length; i++) {
+      var m;
+      for (var j = 0; j < menus.length; j++) {
+        if (menus[j]._id === uniqOpt[i]) { m = menus[j]; break; }
+      }
+      if (m) {
+        if (typeof m.duration === 'number') { durMin += m.duration; }
+        if (typeof m.price === 'number') { totPrice += m.price; }
+      }
+    }
+
+    // end 時刻計算
+    var parts = time.split(':');
+    var startMin = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    var endMin = startMin + durMin;
+    var endH = Math.floor(endMin / 60), endM = endMin % 60;
+    var endStr = pad2(endH) + ':' + pad2(endM);
+
+    var memo = document.getElementById('bMemo').value || '';
+    var btn = document.getElementById('modalSaveBtn');
+    btn.disabled = true;
+
+    function _doCreateAppt(docId) {
+      var data = {
+        dateKey: date,
+        start: time,
+        end: endStr,
+        durationMin: durMin,
+        customerDocId: docId,
+        menuId: menuId,
+        priceSnapshot: totPrice,
+        menuNameSnapshot: mainMenu.name || ''
+      };
+      if (uniqOpt.length > 0) { data.optionMenuIds = uniqOpt; }
+      if (memo) { data.memo = memo; }
+      dbSalonCreateAppointment(data, function (res) {
+        uiHideLoading();
+        btn.disabled = false;
+        if (!res || !res._id) {
+          uiToast('予約の登録に失敗しました');
+          return;
+        }
+        uiToast('予約を登録しました');
+        closeModal();
+        loadMonth();
+      });
+    }
+
+    uiShowLoading('登録中...');
+    if (custDocId) {
+      _doCreateAppt(custDocId);
+    } else {
+      // 新規顧客先行作成
+      dbSalonCreateCustomer(custData, function (res) {
+        if (!res || !res._id) {
+          uiHideLoading();
+          btn.disabled = false;
+          uiToast('顧客の登録に失敗しました');
+          return;
+        }
+        // _allCust にも追加（次回モーダルで検索できるよう）
+        _allCust.push({
+          _id: res._id,
+          name: custData.name,
+          phone: custData.phone || '',
+          email: custData.email || '',
+          createdSource: 'salon',
+          isMerged: false
+        });
+        _doCreateAppt(res._id);
+      });
+    }
+  }
+
+  // 検索入力イベント
+  document.getElementById('custSearchInp').addEventListener('input', onCustSearchInput);
+
+  // 背景タップで閉じる
+  document.getElementById('modalOv').addEventListener('click', function (e) {
+    if (e.target === this) { closeModal(); }
+  });
 
   // ----- 起動 -----
   var now = new Date();

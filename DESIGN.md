@@ -344,6 +344,23 @@ salons/{salonId}/config/stampCard {
 （サロン管理フィールド）で持つ。この `stampCard` ドキュメントは
 「カードの仕様」（ゴール数・特典・色・有効期限）のみを保持する。
 
+**クローズ時間スキーマ（closeBlocks）**：
+
+```
+salons/{salonId}/closeBlocks/{closeBlockId} {
+  dateKey: "2026-05-24",    // 営業日キー YYYY-MM-DD
+  start: "12:00",           // 開始時刻 HH:MM
+  end: "13:00",             // 終了時刻 HH:MM（start < end 必須）
+  reason: "ランチ休憩",      // 表示用ラベル（任意）
+  createdAt: <serverTimestamp>
+}
+```
+
+クローズ時間は「特定日の一時的な予約ブロック」用。営業時間設定(C-6)の
+`weeklyClose` は曜日繰り返しの「毎週の定期クローズ」で別物。
+クローズ時間中は顧客アプリの予約受付スロットから除外される
+（重複チェックは Functions の責任）。
+
 **メニューの読み取り権限ルール（重要）**：
 - `public: true` のメニュー → 認証ユーザーなら誰でも読める（顧客の予約画面で表示するため）
 - `public: false` のメニュー → サロンスタッフのみ読める（内部用メニュー、スタッフ研修用、開発中など）

@@ -1094,6 +1094,140 @@
   }
   window.dbSalonUpdateAppointment = dbSalonUpdateAppointment;
 
+  // ============================================================
+  // ★ サロン手動予約作成（B経路）
+  // DESIGN.md 0-2 appointment スキーマ + 3-3 ルール B経路と1対1
+  // ホワイトリスト: dateKey, start, customerDocId, authUid,
+  //   menuId, optionMenuIds, end, durationMin, staffId,
+  //   resourceIds, status, source, priceSnapshot, menuNameSnapshot,
+  //   intervalAfterOverride, memo, editingBy, createdAt, updatedAt
+  // 必須: source=='manual', status=='confirmed', authUid=null(可)
+  // ============================================================
+  function dbSalonCreateAppointment(data, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    if (!data || !data.dateKey || !data.start
+        || !data.customerDocId || !data.menuId) {
+      console.error('[shared_db] dbSalonCreateAppointment: '
+                  + 'dateKey/start/customerDocId/menuId are required');
+      _safeCb(cb, null);
+      return;
+    }
+    // dateKey 形式チェック
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(String(data.dateKey))) {
+      console.error('[shared_db] invalid dateKey'); _safeCb(cb, null); return;
+    }
+    // start 形式チェック
+    if (!/^[0-9]{2}:[0-9]{2}$/.test(String(data.start))) {
+      console.error('[shared_db] invalid start'); _safeCb(cb, null); return;
+    }
+
+    var doc = {
+      dateKey: String(data.dateKey),
+      start: String(data.start),
+      customerDocId: String(data.customerDocId),
+      authUid: null,                     // ★ B経路：最初 null。claim Function が後埋め
+      menuId: String(data.menuId),
+      status: 'confirmed',                // B経路は最初から confirmed
+      source: 'manual',                   // 必須
+      staffId: 'owner',                   // フェーズ1固定
+      resourceIds: ['default'],           // フェーズ1固定
+      createdAt: _serverTimestamp()
+    };
+    // 任意フィールド
+    if (Array.isArray(data.optionMenuIds)) {
+      doc.optionMenuIds = data.optionMenuIds.map(String);
+    }
+    if (typeof data.end === 'string'
+        && /^[0-9]{2}:[0-9]{2}$/.test(data.end)) {
+      doc.end = data.end;
+    }
+    if (typeof data.durationMin === 'number' && data.durationMin > 0) {
+      doc.durationMin = parseInt(data.durationMin, 10);
+    }
+    if (typeof data.priceSnapshot === 'number' && data.priceSnapshot >= 0) {
+      doc.priceSnapshot = parseInt(data.priceSnapshot, 10);
+    }
+    if (typeof data.menuNameSnapshot === 'string') {
+      doc.menuNameSnapshot = data.menuNameSnapshot;
+    }
+    if (typeof data.memo === 'string' && data.memo) {
+      doc.memo = data.memo;
+    }
+    if (typeof data.intervalAfterOverride === 'number'
+        && data.intervalAfterOverride >= 0) {
+      doc.intervalAfterOverride = parseInt(data.intervalAfterOverride, 10);
+    }
+
+    dbAddDoc('salons/' + sid + '/appointments', doc, cb);
+  }
+  window.dbSalonCreateAppointment = dbSalonCreateAppointment;
+
+  // ============================================================
+  // ★ closeBlocks API（臨時休業ブロック・カレンダー用）
+  // DESIGN.md 0-2 closeBlocks スキーマと1対1
+  // パス: salons/{salonId}/closeBlocks/{blockId}
+  // ============================================================
+
+  // 月別取得（YYYY-MM）
+  function dbSalonListCloseBlocks(yearMonth, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    if (!yearMonth || !/^[0-9]{4}-[0-9]{2}$/.test(String(yearMonth))) {
+      // 全件取得（少なめ想定）
+      dbReadCollection('salons/' + sid + '/closeBlocks', null, cb);
+      return;
+    }
+    var ym = String(yearMonth);
+    var from = ym + '-01';
+    var to = ym + '-31';  // 月末日キーは01-31なら全範囲カバー
+    dbReadCollection('salons/' + sid + '/closeBlocks', function (col) {
+      return col.where('dateKey', '>=', from)
+                .where('dateKey', '<=', to);
+    }, cb);
+  }
+  window.dbSalonListCloseBlocks = dbSalonListCloseBlocks;
+
+  // 作成
+  // data: { dateKey, start, end, reason? }
+  function dbSalonCreateCloseBlock(data, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, null); return; }
+    if (!data || !data.dateKey || !data.start || !data.end) {
+      console.error('[shared_db] dbSalonCreateCloseBlock: '
+                  + 'dateKey/start/end are required');
+      _safeCb(cb, null);
+      return;
+    }
+    if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(String(data.dateKey))) {
+      console.error('[shared_db] invalid dateKey'); _safeCb(cb, null); return;
+    }
+    if (!/^[0-9]{2}:[0-9]{2}$/.test(String(data.start))
+        || !/^[0-9]{2}:[0-9]{2}$/.test(String(data.end))) {
+      console.error('[shared_db] invalid start/end'); _safeCb(cb, null); return;
+    }
+    if (data.start >= data.end) {
+      console.error('[shared_db] start must be < end'); _safeCb(cb, null); return;
+    }
+    var doc = {
+      dateKey: String(data.dateKey),
+      start: String(data.start),
+      end: String(data.end),
+      reason: (typeof data.reason === 'string') ? data.reason : '',
+      createdAt: _serverTimestamp()
+    };
+    dbAddDoc('salons/' + sid + '/closeBlocks', doc, cb);
+  }
+  window.dbSalonCreateCloseBlock = dbSalonCreateCloseBlock;
+
+  // 削除
+  function dbSalonDeleteCloseBlock(blockId, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !blockId) { _safeCb(cb, null); return; }
+    dbDeleteDoc('salons/' + sid + '/closeBlocks/' + blockId, cb);
+  }
+  window.dbSalonDeleteCloseBlock = dbSalonDeleteCloseBlock;
+
   // 予約削除 (オーナーのみ: ルール 260 行)
   // 通常は status='cancelled' でソフト削除する方を推奨
   function dbSalonDeleteAppointment(appointmentId, cb) {
