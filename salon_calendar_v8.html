@@ -980,8 +980,11 @@
     switchTabUI();
     initBookForm();
     initCloseForm();
-    loadCustomersForModal();
-    document.getElementById('modalOv').className = 'modal-ov show';
+    // ★ 2026/5/23 修正：顧客一覧取得を完了してからモーダルを開く
+    //   理由：顧客検索ボックスで「該当なし」が出てしまう問題対応
+    loadCustomersForModal(function () {
+      document.getElementById('modalOv').className = 'modal-ov show';
+    });
   }
   window.openBookingModal = openBookingModal;
 
@@ -990,8 +993,9 @@
     switchTabUI();
     initBookForm();
     initCloseForm();
-    loadCustomersForModal();
-    document.getElementById('modalOv').className = 'modal-ov show';
+    loadCustomersForModal(function () {
+      document.getElementById('modalOv').className = 'modal-ov show';
+    });
   }
   window.openCloseModal = openCloseModal;
 
@@ -1031,11 +1035,20 @@
   }
   window.setCustMode = setCustMode;
 
-  function loadCustomersForModal() {
-    if (_allCust.length > 0) { return; }
-    if (typeof dbSalonListCustomers !== 'function') { return; }
+  function loadCustomersForModal(done) {
+    if (_allCust.length > 0) {
+      if (done) { done(); }
+      return;
+    }
+    if (typeof dbSalonListCustomers !== 'function') {
+      if (done) { done(); }
+      return;
+    }
+    uiShowLoading('読み込み中...');
     dbSalonListCustomers(function (list) {
+      uiHideLoading();
       _allCust = list || [];
+      if (done) { done(); }
     });
   }
 
@@ -1188,6 +1201,173 @@
   }
   window.addOption = addOption;
 
+  // ============================================================
+  // ★ 2026/5/23 追加：重複チェックヘルパー
+  //   DESIGN.md C-3 重複チェック仕様と1対1
+  //   戻り値: { ok: boolean, reason: string }
+  //     ok=false なら登録不可（reason をエラー表示）
+  // ============================================================
+
+  // "HH:MM" → 分（10:30 → 630）
+  function _timeToMin(hhmm) {
+    var p = String(hhmm || '').split(':');
+    if (p.length !== 2) { return -1; }
+    var h = parseInt(p[0], 10), m = parseInt(p[1], 10);
+    if (isNaN(h) || isNaN(m)) { return -1; }
+    return h * 60 + m;
+  }
+
+  // 2つの時間範囲 [a1,a2) と [b1,b2) が重なるか
+  function _isOverlap(a1, a2, b1, b2) {
+    return (a1 < b2) && (b1 < a2);
+  }
+
+  // dateKey 文字列から曜日(0=日〜6=土)
+  function _dowOf(dateKey) {
+    var p = String(dateKey || '').split('-');
+    if (p.length !== 3) { return -1; }
+    var dt = new Date(parseInt(p[0], 10),
+                       parseInt(p[1], 10) - 1,
+                       parseInt(p[2], 10));
+    return dt.getDay();
+  }
+
+  // settings.weeklyClose の dow 配列を抽出
+  function _weeklyCloseDows() {
+    var settings = (_bundle && _bundle.settings) || {};
+    var wc = settings.weeklyClose || [];
+    var dows = [];
+    var i;
+    if (!Array.isArray(wc)) { return dows; }
+    for (i = 0; i < wc.length; i++) {
+      var w = wc[i];
+      if (typeof w === 'number') {
+        dows.push(w);
+      } else if (w && typeof w.dow === 'number') {
+        dows.push(w.dow);
+      }
+    }
+    return dows;
+  }
+
+  // settings.intervalMin を取得（数値・0未満は0）
+  function _intervalMin() {
+    var settings = (_bundle && _bundle.settings) || {};
+    var v = parseInt(settings.intervalMin, 10);
+    if (isNaN(v) || v < 0) { return 0; }
+    return v;
+  }
+
+  // 予約の重複チェック
+  // 引数: { dateKey, startMin, endMin }
+  // 自分自身を編集中なら excludeApptId で除外可
+  function _checkApptOverlap(target, excludeApptId) {
+    // 1. 定休日チェック
+    var closeDows = _weeklyCloseDows();
+    var dow = _dowOf(target.dateKey);
+    if (dow >= 0 && closeDows.indexOf(dow) >= 0) {
+      return { ok: false, reason: 'この日は定休日です。予約を登録できません。' };
+    }
+
+    // 2. 営業時間チェック
+    var settings = (_bundle && _bundle.settings) || {};
+    var openTime = settings.openTime || '09:00';
+    var closeTime = settings.closeTime || '21:00';
+    var oMin = _timeToMin(openTime);
+    var cMin = _timeToMin(closeTime);
+    if (oMin >= 0 && target.startMin < oMin) {
+      return { ok: false, reason: '開始時刻が営業時間より前です（営業開始 '
+                                  + openTime + '）' };
+    }
+    if (cMin >= 0 && target.endMin > cMin) {
+      return { ok: false, reason: '終了時刻が営業時間を超えます（営業終了 '
+                                  + closeTime + '）' };
+    }
+
+    // 3. 既存予約との重複（インターバル時間も考慮）
+    var iv = _intervalMin();
+    var appts = (_bundle && _bundle.appointments) || [];
+    var i;
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      if (excludeApptId && a._id === excludeApptId) { continue; }
+      if (a.dateKey !== target.dateKey) { continue; }
+      var aStart = _timeToMin(a.start);
+      var aEnd = _timeToMin(a.end);
+      if (aStart < 0 || aEnd < 0) { continue; }
+      // 既存予約のインターバル領域も考慮
+      var aBlockEnd = aEnd + iv;
+      // 新規予約のインターバル領域も含めて比較
+      var tBlockEnd = target.endMin + iv;
+      if (_isOverlap(target.startMin, tBlockEnd, aStart, aBlockEnd)) {
+        return { ok: false, reason: '既存の予約と時間が重なっています（'
+                                    + a.start + '〜' + a.end + ' '
+                                    + (a.menuNameSnapshot || '') + '）'
+                                    + (iv > 0 ? '\n※準備時間 ' + iv + '分も含めてチェックしています' : '') };
+      }
+    }
+
+    // 4. クローズ時間との重複
+    var cbs = (_bundle && _bundle.closeBlocks) || [];
+    for (i = 0; i < cbs.length; i++) {
+      var cb = cbs[i];
+      if (cb.dateKey !== target.dateKey) { continue; }
+      var cbStart = _timeToMin(cb.start);
+      var cbEnd = _timeToMin(cb.end);
+      if (cbStart < 0 || cbEnd < 0) { continue; }
+      if (_isOverlap(target.startMin, target.endMin, cbStart, cbEnd)) {
+        return { ok: false, reason: 'クローズ時間と重なっています（'
+                                    + cb.start + '〜' + cb.end + ' '
+                                    + (cb.reason || '') + '）' };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  // クローズ時間の重複チェック
+  function _checkCloseOverlap(target) {
+    // 1. 定休日チェック
+    var closeDows = _weeklyCloseDows();
+    var dow = _dowOf(target.dateKey);
+    if (dow >= 0 && closeDows.indexOf(dow) >= 0) {
+      return { ok: false, reason: 'この日は定休日です。クローズ時間を別途登録する必要はありません。' };
+    }
+
+    // 2. 既存予約との重複（インターバル時間は除外して厳密チェック）
+    var appts = (_bundle && _bundle.appointments) || [];
+    var i;
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      if (a.dateKey !== target.dateKey) { continue; }
+      var aStart = _timeToMin(a.start);
+      var aEnd = _timeToMin(a.end);
+      if (aStart < 0 || aEnd < 0) { continue; }
+      if (_isOverlap(target.startMin, target.endMin, aStart, aEnd)) {
+        return { ok: false, reason: '既存の予約と時間が重なっています（'
+                                    + a.start + '〜' + a.end + ' '
+                                    + (a.menuNameSnapshot || '') + '）' };
+      }
+    }
+
+    // 3. 既存クローズとの重複
+    var cbs = (_bundle && _bundle.closeBlocks) || [];
+    for (i = 0; i < cbs.length; i++) {
+      var cb = cbs[i];
+      if (cb.dateKey !== target.dateKey) { continue; }
+      var cbStart = _timeToMin(cb.start);
+      var cbEnd = _timeToMin(cb.end);
+      if (cbStart < 0 || cbEnd < 0) { continue; }
+      if (_isOverlap(target.startMin, target.endMin, cbStart, cbEnd)) {
+        return { ok: false, reason: '既存のクローズ時間と重なっています（'
+                                    + cb.start + '〜' + cb.end
+                                    + (cb.reason ? ' ' + cb.reason : '') + '）' };
+      }
+    }
+
+    return { ok: true };
+  }
+
   function saveModal() {
     if (_modalTab === 'close') {
       saveCloseBlock();
@@ -1210,6 +1390,18 @@
       uiToast('終了時刻は開始より後にしてください');
       return;
     }
+
+    // ★ 2026/5/23 追加：重複チェック
+    var check = _checkCloseOverlap({
+      dateKey: date,
+      startMin: _timeToMin(start),
+      endMin: _timeToMin(end)
+    });
+    if (!check.ok) {
+      window.alert(check.reason);
+      return;
+    }
+
     var btn = document.getElementById('modalSaveBtn');
     btn.disabled = true;
     uiShowLoading('登録中...');
@@ -1301,6 +1493,17 @@
     var endMin = startMin + durMin;
     var endH = Math.floor(endMin / 60), endM = endMin % 60;
     var endStr = pad2(endH) + ':' + pad2(endM);
+
+    // ★ 2026/5/23 追加：重複チェック（定休日・営業時間外・既存予約・クローズ）
+    var check = _checkApptOverlap({
+      dateKey: date,
+      startMin: startMin,
+      endMin: endMin
+    }, null);
+    if (!check.ok) {
+      window.alert(check.reason);
+      return;
+    }
 
     var memo = document.getElementById('bMemo').value || '';
     var btn = document.getElementById('modalSaveBtn');

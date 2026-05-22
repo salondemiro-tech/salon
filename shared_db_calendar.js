@@ -299,11 +299,10 @@
   window.calendarLoadAppointments = calendarLoadAppointments;
 
   // 指定範囲の closeBlocks を取得
-  // closeBlocks のスキーマ: { date: "YYYY-MM-DD", start: "HH:MM", end: "HH:MM", reason }
-  // 注: closeBlocks の日付フィールド名は設計書では明示されていないが、
-  //     旧画面が "date" を使っていたので踏襲する。
-  //     ※ 予約 (appointments) は dateKey、closeBlocks は date とフィールド名が
-  //       揃っていないが、別コレクションなのでクエリには影響しない。
+  // closeBlocks のスキーマ (DESIGN.md 0-2 と1対1):
+  //   { dateKey: "YYYY-MM-DD", start: "HH:MM", end: "HH:MM", reason, createdAt }
+  // ★ 2026/5/23 修正: 旧版で "date" だったフィールド名を v8.1 仕様に合わせて
+  //   "dateKey" に変更。書き込み(dbSalonCreateCloseBlock)と読み取りの整合を取る。
   function calendarLoadCloseBlocks(dateFrom, dateTo, cb) {
     if (!_checkSharedDb()) { _safeCb(cb, null); return; }
     var sp = _salonPath();
@@ -314,17 +313,17 @@
     }
 
     window.dbReadCollection(sp + '/closeBlocks', function (col) {
-      return col.where('date', '>=', dateFrom)
-                .where('date', '<=', dateTo);
+      return col.where('dateKey', '>=', dateFrom)
+                .where('dateKey', '<=', dateTo);
     }, function (arr) {
       if (!arr) {
         _safeCb(cb, null);
         return;
       }
-      // date 昇順 + start 昇順でソート
+      // dateKey 昇順 + start 昇順でソート
       arr.sort(function (a, b) {
-        var ad = a.date || '';
-        var bd = b.date || '';
+        var ad = a.dateKey || '';
+        var bd = b.dateKey || '';
         if (ad !== bd) { return (ad < bd) ? -1 : 1; }
         var as = a.start || '';
         var bs = b.start || '';
