@@ -1722,15 +1722,47 @@
   //   monthStr, dateFrom, dateTo } を返す。
   //   monthStr: "2026-05" 形式。
   // ------------------------------------------------------------
-  function dbLoadSalonCalendar(monthStr, cb) {
+  function dbLoadSalonCalendar(arg, cb) {
+    // ★ v8.1 改訂 (2026/5/22): 週ビュー化により week ベースに変更。
+    //   後方互換: 引数が "YYYY-MM" 形式の月文字列なら旧 calendarLoadMonth に
+    //   フォールバック（呼び出し側を一気に書き換えるリスクを下げる）。
+    //   新仕様: 引数が "YYYY-MM-DD"（週の開始日 dateKey）または Date オブジェクト
+    //   なら calendarLoadWeek で7日分取得。
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
-    if (typeof window.calendarLoadMonth !== 'function') {
+
+    // 月文字列判定（YYYY-MM）
+    if (typeof arg === 'string' && /^[0-9]{4}-[0-9]{2}$/.test(arg)) {
+      if (typeof window.calendarLoadMonth !== 'function') {
+        _logErr('dbLoadSalonCalendar', 'shared_db_calendar.js not loaded');
+        _safeCb(cb, null);
+        return;
+      }
+      window.calendarLoadMonth(arg, cb);
+      return;
+    }
+
+    // それ以外は週ロードに渡す
+    if (typeof window.calendarLoadWeek !== 'function') {
       _logErr('dbLoadSalonCalendar', 'shared_db_calendar.js not loaded');
       _safeCb(cb, null);
       return;
     }
-    window.calendarLoadMonth(monthStr, cb);
+    var weekStart;
+    if (arg instanceof Date) {
+      weekStart = arg;
+    } else if (typeof arg === 'string'
+               && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(arg)) {
+      // dateKey 文字列を Date 化
+      var p = arg.split('-');
+      weekStart = new Date(parseInt(p[0], 10),
+                           parseInt(p[1], 10) - 1,
+                           parseInt(p[2], 10));
+    } else {
+      // 引数なし or 不正 → 今日基準
+      weekStart = new Date();
+    }
+    window.calendarLoadWeek(weekStart, cb);
   }
   window.dbLoadSalonCalendar = dbLoadSalonCalendar;
 

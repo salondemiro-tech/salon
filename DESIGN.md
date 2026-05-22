@@ -1153,7 +1153,12 @@ sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
 ### Phase B：速度設計＋3次元予約計算ロジック＋Firestoreコスト最適化
 - B-1. `shared_db.js` に画面別の並列取得 API を実装
   - `dbLoadSalonDashboard(cb)` → サロンのトップ画面
-  - `dbLoadSalonCalendar(monthStr, cb)` → カレンダー画面（**指定月の appointments のみ**）
+  - `dbLoadSalonCalendar(weekStartKey, cb)` → カレンダー画面（**指定週の appointments + closeBlocks のみ**）
+    ★ 2026/5/22 改訂：週ビュー化により月単位 → 週単位（7日分）取得に変更。
+      旧仕様は `dbLoadSalonCalendar(monthStr, cb)` で月単位だったが、
+      C-3 のUI を「7日×時間軸の週グリッド」に作り替えたため、
+      取得範囲もそれに合わせて削減。月内の予約件数だけ確認したい場合は
+      別途 `dbLoadSalonMonthCounts(monthStr, cb)` を用意（後述）。
   - `dbLoadSalonCustomers(cb)` → 顧客管理画面
   - `dbLoadSalonMenus(cb)` → メニュー設定（menus + staffs + resources）
   - `dbLoadSalonSettings(cb)` → 営業時間など
@@ -1178,9 +1183,9 @@ sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
   - フェーズ1では候補スタッフ=`['owner']`、必要設備=`['default']` だが、ロジックは3次元のまま動く
 
 - B-6. **Firestore クエリ絞り込みでコスト最適化**
-  - カレンダー：`where('date', '>=', monthStart).where('date', '<=', monthEnd)` で1ヶ月分のみ取得
-  - 予約画面：`where('date', '==', selectedDate)` でその日だけ取得
-  - 顧客履歴：`where('customerAuthUid', '==', myUid).orderBy('date', 'desc').limit(20)` で最近20件
+  - カレンダー：`where('dateKey', '>=', weekStart).where('dateKey', '<=', weekEnd)` で1週間分のみ取得（★ v8.1: 週ビュー化により月単位→週単位に短縮）
+  - 予約画面：`where('dateKey', '==', selectedDate)` でその日だけ取得
+  - 顧客履歴：`where('authUid', '==', myUid).orderBy('dateKey', 'desc').limit(20)` で最近20件
   - 全件取得は禁止（`appointments` を `get()` で全取得しない）
 
 - B-7. **Firestore 複合インデックス設計（Phase A-step1 で作成）**
@@ -1204,6 +1209,25 @@ sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
 - C-1. `salon_auth_v2_new.html` 新規登録/ログイン画面
 - C-2. `salon_dashboard_v1.html` ダッシュボード（新規追加）
 - C-3. `salon_calendar_v8.html` カレンダー
+       ★ 2026/5/22 大改修：週ビュー型に作り直し（旧版v7踏襲）
+         旧版の月グリッド+日詳細リスト方式から、縦軸=時間・横軸=曜日7日の
+         週タイムラインに変更。理由：インターバル時間や時間配分の視認性が
+         圧倒的に向上し、1人サロンの日々の運営に最適化される。
+         構成：
+         - 上部：◀ 今週 ▶ の週移動 + 週の表示（例: 5/18〜5/24）
+         - 中段：[+予約][+クローズ]ボタン
+         - メイン：7列×時間軸グリッド
+           * 列：日〜土
+           * 行：settings.openTime〜closeTime を 1時間刻みで表示
+             （settings 未設定時は 9:00〜21:00 をフォールバック）
+           * 定休日列：weeklyClose の曜日は灰色表示+「定休日」ラベル
+           * 予約ブロック：top/height を分単位 px 計算で配置
+           * インターバルブロック：予約直後に settings.intervalMin 分の
+             半透明帯（「準備 XX分」）
+           * クローズブロック：別色（赤系）+ 「クローズ」+ 理由表示
+         - 予約タップ：詳細モーダル（顧客名/メニュー/料金/メモ
+           + [カルテへ][編集][キャンセル] ボタン）
+         - クローズタップ：削除確認モーダル
 - C-4. `salon_customers_v1.html` 顧客管理
 - C-5. `salon_menus_v1.html` メニュー設定
 - C-6. `salon_hours_v1.html` 営業時間
