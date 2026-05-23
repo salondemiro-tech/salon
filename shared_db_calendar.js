@@ -664,7 +664,8 @@
         var k;
         for (k = 0; k < closeBlocks.length; k++) {
           var c = closeBlocks[k];
-          if (!c || c.date !== dateKey) { continue; }
+          // ★ 2026/5/23 修正: c.date → c.dateKey (v8.1 統一漏れ最後の1個)
+          if (!c || c.dateKey !== dateKey) { continue; }
           var cStartH = _hhmmToHours(c.start);
           var cEndH = _hhmmToHours(c.end);
           if (cStartH === null || cEndH === null) { continue; }

@@ -186,11 +186,6 @@ service cloud.firestore {
       }
       
       // ============================================================
-      // /salons/{salonId}/customers/{customerId}
-      // customerId == 顧客の Auth UID（設計書通り、二重管理は廃止）
-      // ============================================================
-      
-      // ============================================================
       // /salons/{salonId}/customers/{customerDocId}
       // ★ v8.1 改訂（DESIGN.md 3-3 / DESIGN_v8_1 4-1 と1対1照合）
       //   customerDocId = Firestore 採番。本人判定は

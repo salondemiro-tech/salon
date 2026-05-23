@@ -545,7 +545,7 @@
   //   firestore.rules: appointments / appointments_archive とも
   //   read は isSalonStaff(salonId) で許可済み (A-step1, 360-365行)。
   //
-  //   B-6: customerId == 指定顧客で絞り、dateKey 降順 + limit。
+  //   B-6: customerDocId == 指定顧客で絞り、dateKey 降順 + limit。
   //        全件 get() しない。
   //
   //   戻り値: { current:[...], archive:[...], merged:[...] }
@@ -1063,8 +1063,9 @@
       if (filterObj && filterObj.status) {
         q = q.where('status', '==', filterObj.status);
       }
-      if (filterObj && filterObj.customerId) {
-        q = q.where('customerId', '==', filterObj.customerId);
+      if (filterObj && filterObj.customerDocId) {
+        // ★ v8.1: customerId → customerDocId
+        q = q.where('customerDocId', '==', filterObj.customerDocId);
       }
       return q;
     }, cb);
@@ -1080,12 +1081,16 @@
   window.dbSalonGetAppointment = dbSalonGetAppointment;
 
   // 予約更新 (サロン側: status 変更や時間変更など)
-  // 注: customerId は変更不可 (ルール 256 行)
+  // 注: ★ v8.1: customerDocId は変更不可 (ルール 256 行)
+  //     authUid もサロンからは変更不可 (claim Function 専用)
   function dbSalonUpdateAppointment(appointmentId, patch, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !appointmentId) { _safeCb(cb, null); return; }
-    if (patch && patch.hasOwnProperty('customerId')) {
-      delete patch.customerId;
+    if (patch && patch.hasOwnProperty('customerDocId')) {
+      delete patch.customerDocId;
+    }
+    if (patch && patch.hasOwnProperty('authUid')) {
+      delete patch.authUid;
     }
     if (patch) {
       patch.updatedAt = _serverTimestamp();
@@ -1398,6 +1403,31 @@
   //
   // 顧客アプリ (customer_app.html) から呼ばれる想定。
   // URL に ?salon=xxx を持っている前提で getCurrentSalonId() が値を返す。
+  //
+  // ⚠⚠⚠ 重要：以下のセクションは Phase D で全面書き換え予定 ⚠⚠⚠
+  // ============================================================
+  // 【現状】このセクションの関数は旧 customerId 設計のまま残っている。
+  //         サロン側 (Phase C) は全て v8.1 化済み（customerDocId+authUid 分離）だが、
+  //         顧客側はまだ v8.1 化されていない。
+  //
+  // 【理由】顧客側を v8.1 化するには以下を同時に実装する必要があり、
+  //         Phase D で一括で行うのが論理的に正しい:
+  //           1. claim Function (resolveOrClaimCustomer)
+  //              - 同一メールの仮カルテを auth UID にひも付ける
+  //           2. merge Function (mergeCustomers)
+  //              - 重複した顧客カルテを統合する
+  //           3. authIndex/{authUid} → customerDocId のインデックス
+  //           4. 顧客アプリ画面の全面書き換え (customer_app_v8 とは別ファイル)
+  //
+  // 【現時点で動作する画面】
+  //         サロン側の Phase C 画面のみ。
+  //         顧客側の customer_app_v8.html (旧版) は customerId 設計のまま動いている。
+  //
+  // 【DESIGN.md 9-2 / メモリ #21 への遵守】
+  //         この警告コメントは「設計書とコードを揃える」原則を守るため。
+  //         Phase D 着手時に、このセクション全体を新しい claim/merge 仕様で
+  //         書き直すこと。場当たり的に customerId → customerDocId に
+  //         置換するだけでは claim/merge が機能しないので NG。
   // ============================================================
 
   // 予約画面の最初に表示するサロン情報 (info ドキュメント)

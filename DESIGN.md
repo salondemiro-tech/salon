@@ -1376,6 +1376,14 @@ sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
 
 6. **「全部入りを最初から目指さない」**（GPT指摘）。販売開始時の最小機能で完璧に動くことが、機能たくさんで不安定よりずっと価値がある。
 
+7. **v8.1 整合性チェック（2026/5/23 実施）**：Phase C 完了時に全ファイルで古い識別子・スキーマ用語の残存を grep で網羅チェック。発見した問題と対応：
+   - `closeBlock.date` 参照バグ → `dateKey` に修正（shared_db_calendar.js:667）
+   - サロン側 `dbSalonListAppointments` で `customerId` フィルタ → `customerDocId` に修正
+   - サロン側 `dbSalonUpdateAppointment` で `customerId` 保護 → `customerDocId` + `authUid` 保護に修正
+   - 顧客側関数（dbCustomer*）は旧 `customerId` のまま残し、Phase D 着手時に claim/merge Function とセットで全面書き換え予定。セクション先頭に大型警告コメントを記載済み。
+   - 旧 `customerId` コメント記述を `customerDocId` に修正
+   - 完全に v8.1 統一済みと確認した項目: `menuName→menuNameSnapshot`, `intervalBefore/intervalAfter→settings.intervalMin`, `requireSalonAuth→requireSalonStaff`, `localStorage→Firestore`
+
 ### 9-3. 販売開始時の最小機能（参考）
 
 **オーナー側**
