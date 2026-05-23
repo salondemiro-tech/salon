@@ -383,10 +383,18 @@
     </div>
   </div>
 
+  <!-- 今後の予約 -->
+  <div class="sec" id="secUpcoming">
+    <div class="sec-head">
+      <div class="sec-title">📅 今後の予約 <span id="upcomingCount" style="font-size:11px;color:var(--mu);font-weight:400;"></span></div>
+    </div>
+    <div id="upcomingBody"></div>
+  </div>
+
   <!-- 来店履歴 -->
   <div class="sec" id="secHist">
     <div class="sec-head">
-      <div class="sec-title">来店履歴</div>
+      <div class="sec-title">✅ 来店履歴 <span id="visitsCount" style="font-size:11px;color:var(--mu);font-weight:400;"></span></div>
     </div>
     <div id="histBody"></div>
   </div>
@@ -421,12 +429,32 @@
   var _allCustomers = [];
   var _curDocId = null;
   var _curCust = null;
-  var _history = [];      // dbSalonGetCustomerHistory.merged
+  // ★ 2026/5/23 改訂：来店履歴と今後の予約に分割
+  //   shared_db.js dbSalonGetCustomerHistory の戻り値 { upcoming, visits, excluded } を使用
+  var _visits = [];       // 過去予約(自動visited) + 明示visited
+  var _upcoming = [];     // 未来の confirmed
   var _expanded = {};     // { aid: true }
   var _karteTimer = null;
   var _memoTimers = {};
   var _uploadingAid = null;
   var _activeUploadAid = null;
+
+  // 予約ID から _visits / _upcoming のどちらかの要素を探す
+  // 戻り値: { arr, idx } or null
+  function _findApptById(aid) {
+    var i;
+    for (i = 0; i < _visits.length; i++) {
+      if (_visits[i]._id === aid) {
+        return { arr: _visits, idx: i };
+      }
+    }
+    for (i = 0; i < _upcoming.length; i++) {
+      if (_upcoming[i]._id === aid) {
+        return { arr: _upcoming, idx: i };
+      }
+    }
+    return null;
+  }
 
   function goDashboard() {
     window.location.href = 'salon_dashboard_v1.html';
@@ -526,7 +554,8 @@
   function selectCustomer(docId) {
     _curDocId = docId;
     _curCust = null;
-    _history = [];
+    _visits = [];
+    _upcoming = [];
     _expanded = {};
     document.getElementById('searchBox').value = '';
     document.getElementById('pickerResults').className = 'picker-results';
@@ -541,7 +570,8 @@
       _curCust = c;
       dbSalonGetCustomerHistory(docId, function (h) {
         uiHideLoading();
-        _history = (h && h.merged) ? h.merged : [];
+        _visits = (h && h.visits) ? h.visits : [];
+        _upcoming = (h && h.upcoming) ? h.upcoming : [];
         renderAll();
       });
     });
@@ -552,26 +582,30 @@
     if (!_curCust) {
       document.getElementById('custHead').className = 'cust-head';
       document.getElementById('secKarte').className = 'sec';
+      document.getElementById('secUpcoming').className = 'sec';
       document.getElementById('secHist').className = 'sec';
       return;
     }
     document.getElementById('custHead').className = 'cust-head show';
     document.getElementById('secKarte').className = 'sec show';
+    document.getElementById('secUpcoming').className = 'sec show';
     document.getElementById('secHist').className = 'sec show';
 
     document.getElementById('chName').textContent = _curCust.name || '(名前なし)';
     renderStats();
     document.getElementById('karteText').value = _curCust.karteNote || '';
     document.getElementById('karteSaved').textContent = '';
+    renderUpcoming();
     renderHistory();
   }
 
   function renderStats() {
+    // ★ 2026/5/23 改訂：来店履歴 (_visits) のみで統計計算
+    //   未来予約 (_upcoming) は対象外（来店していないため）
     var total = 0, cnt = 0, paidCnt = 0;
     var i;
-    for (i = 0; i < _history.length; i++) {
-      var a = _history[i];
-      if (a.status === 'cancelled' || a.status === 'no_show') { continue; }
+    for (i = 0; i < _visits.length; i++) {
+      var a = _visits[i];
       cnt++;
       if (typeof a.payment === 'number') {
         total += a.payment;
@@ -586,19 +620,42 @@
       avg > 0 ? '¥' + avg.toLocaleString() : '—';
   }
 
+  function renderUpcoming() {
+    // ★ 2026/5/23 追加：今後の予約セクション
+    var box = document.getElementById('upcomingBody');
+    var cntEl = document.getElementById('upcomingCount');
+    box.innerHTML = '';
+    if (!_upcoming || _upcoming.length === 0) {
+      cntEl.textContent = '';
+      var em = document.createElement('div');
+      em.className = 'hist-empty';
+      em.textContent = '今後の予約はありません';
+      box.appendChild(em);
+      return;
+    }
+    cntEl.textContent = '(' + _upcoming.length + '件)';
+    var i;
+    for (i = 0; i < _upcoming.length; i++) {
+      box.appendChild(buildVisit(_upcoming[i]));
+    }
+  }
+
   function renderHistory() {
     var box = document.getElementById('histBody');
+    var cntEl = document.getElementById('visitsCount');
     box.innerHTML = '';
-    if (!_history || _history.length === 0) {
+    if (!_visits || _visits.length === 0) {
+      cntEl.textContent = '';
       var em = document.createElement('div');
       em.className = 'hist-empty';
       em.textContent = '来店履歴はまだありません';
       box.appendChild(em);
       return;
     }
+    cntEl.textContent = '(' + _visits.length + '件)';
     var i;
-    for (i = 0; i < _history.length; i++) {
-      box.appendChild(buildVisit(_history[i]));
+    for (i = 0; i < _visits.length; i++) {
+      box.appendChild(buildVisit(_visits[i]));
     }
   }
 
@@ -806,9 +863,15 @@
     return y + '年' + m + '月' + d + '日' + (dow ? '（' + dow + '）' : '');
   }
 
+  // ★ 写真等の編集後に両セクションを同時更新するヘルパー
+  function _redrawTimeline() {
+    renderHistory();
+    renderUpcoming();
+  }
+
   function toggleVisit(aid) {
     _expanded[aid] = !_expanded[aid];
-    renderHistory();
+    _redrawTimeline();
   }
 
   // ===== 支払い保存 =====
@@ -834,14 +897,11 @@
         msg.style.color = 'var(--gn)';
         setTimeout(function () { if (msg) msg.textContent = ''; }, 2000);
       }
-      // ローカル _history も更新（再描画は最小限）
-      var i;
-      for (i = 0; i < _history.length; i++) {
-        if (_history[i]._id === aid) {
-          if (val < 0) { delete _history[i].payment; }
-          else { _history[i].payment = val; }
-          break;
-        }
+      // ★ 2026/5/23 改訂：_visits / _upcoming 両方を見る
+      var found = _findApptById(aid);
+      if (found) {
+        if (val < 0) { delete found.arr[found.idx].payment; }
+        else { found.arr[found.idx].payment = val; }
       }
       renderStats();
     });
@@ -865,12 +925,9 @@
           msg.style.color = 'var(--gn)';
           setTimeout(function () { if (msg) msg.textContent = ''; }, 1800);
         }
-        var i;
-        for (i = 0; i < _history.length; i++) {
-          if (_history[i]._id === aid) {
-            _history[i].visitMemo = ta.value;
-            break;
-          }
+        var found = _findApptById(aid);
+        if (found) {
+          found.arr[found.idx].visitMemo = ta.value;
         }
       });
     }, 700);
@@ -906,13 +963,11 @@
       return;
     }
     // 既に3枚なら拒否
-    var i, count = 0;
-    for (i = 0; i < _history.length; i++) {
-      if (_history[i]._id === aid) {
-        var ph = _history[i].photos;
-        count = Array.isArray(ph) ? ph.length : 0;
-        break;
-      }
+    var count = 0;
+    var foundCheck = _findApptById(aid);
+    if (foundCheck) {
+      var ph = foundCheck.arr[foundCheck.idx].photos;
+      count = Array.isArray(ph) ? ph.length : 0;
     }
     if (count >= 3) {
       uiToast('写真は最大3枚までです');
@@ -958,42 +1013,39 @@
     var aid = _activeUploadAid;
     if (!aid) { return; }
     _uploadingAid = aid;
-    renderHistory();
+    _redrawTimeline();
 
     resizeImage(file, 1600, 1600, function (blob) {
       // リサイズ後でも 5MB 超のチェック（Storage ルール準拠）
       if (blob.size > 5 * 1024 * 1024) {
         _uploadingAid = null;
-        renderHistory();
+        _redrawTimeline();
         uiToast('画像が大きすぎます（5MB以下）');
         return;
       }
       dbSalonUploadAppointmentPhoto(aid, blob, function (err, photo) {
         if (err) {
           _uploadingAid = null;
-          renderHistory();
+          _redrawTimeline();
           uiToast('写真のアップロードに失敗しました');
           return;
         }
         dbSalonAddAppointmentPhoto(aid, photo, function (ok) {
           _uploadingAid = null;
           if (!ok) {
-            renderHistory();
+            _redrawTimeline();
             uiToast('写真情報の保存に失敗しました');
             return;
           }
-          // ローカル更新
-          var i;
-          for (i = 0; i < _history.length; i++) {
-            if (_history[i]._id === aid) {
-              if (!Array.isArray(_history[i].photos)) {
-                _history[i].photos = [];
-              }
-              _history[i].photos.push(photo);
-              break;
+          // ローカル更新（_visits または _upcoming）
+          var foundAdd = _findApptById(aid);
+          if (foundAdd) {
+            if (!Array.isArray(foundAdd.arr[foundAdd.idx].photos)) {
+              foundAdd.arr[foundAdd.idx].photos = [];
             }
+            foundAdd.arr[foundAdd.idx].photos.push(photo);
           }
-          renderHistory();
+          _redrawTimeline();
           uiToast('写真を追加しました');
         });
       });
@@ -1011,19 +1063,18 @@
             uiToast('削除に失敗しました');
             return;
           }
-          // ローカル更新
-          var i, j;
-          for (i = 0; i < _history.length; i++) {
-            if (_history[i]._id !== aid) { continue; }
-            var ph = _history[i].photos || [];
+          // ローカル更新（_visits または _upcoming）
+          var foundDel = _findApptById(aid);
+          if (foundDel) {
+            var ph = foundDel.arr[foundDel.idx].photos || [];
             var kept = [];
+            var j;
             for (j = 0; j < ph.length; j++) {
               if (ph[j] && ph[j].id !== photoId) { kept.push(ph[j]); }
             }
-            _history[i].photos = kept;
-            break;
+            foundDel.arr[foundDel.idx].photos = kept;
           }
-          renderHistory();
+          _redrawTimeline();
           uiToast('写真を削除しました');
         });
       },

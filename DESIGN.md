@@ -93,7 +93,19 @@ salons/{salonId}/appointments/{appointmentId} {
   endAt: <Timestamp>,                    // 厳密な終了時刻
   staffId: "owner",                      // フェーズ1：'owner' 固定
   resourceIds: ["default"],              // フェーズ1：['default'] 固定
-  status: "confirmed",                   // 作成時は confirmed 固定
+  status: "confirmed",                   // 予約の状態。値は下記5種類のみ
+                                         //   'confirmed'  : 予約確定（未来 or 当日）
+                                         //   'visited'    : 来店済み（任意：例外手動変更用）
+                                         //   'cancelled'  : 顧客 or サロンがキャンセル
+                                         //   'no_show'    : 無断キャンセル（来なかった）
+                                         //   'pendingCreate' : 顧客アプリ予約の作成中
+                                         //                     (Functions が検証して confirmed に書換)
+                                         // ★ 2026/5/23 改訂：
+                                         //   過去予約(endAt < 今)は自動で「来店済み」扱い
+                                         //   （statusは confirmed のままで、表示時に判定する）
+                                         //   明示的に 'visited' を入れる必要はない。
+                                         //   ただし「無断キャンセルだった」「やっぱり来た」
+                                         //   などの例外時はサロンが手動で status 変更可能。
   priceSnapshot: 12000,                  // menus.price から計算
   menuNameSnapshot: "フェイシャル",      // メニュー名のスナップショット（後でメニュー削除されても残る）
   source: "online",                      // 'online' = 顧客アプリ / 'manual' = サロン手動登録
@@ -1265,6 +1277,22 @@ sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
          ダッシュボードからも独立カードで入れる（C案：両方の入口+互いにリンク）
          機能：顧客選択 → 来店履歴 / 各回の支払い・訪問メモ・写真（最大3枚） /
               全体メモ(karteNote) / 統計(来店回数・累計・平均)
+       ★ 2026/5/23 改訂：「自動 visited 判定」+ 「今後の予約」セクション分離
+         予約の分類ルール（status と endAt から計算）:
+           A. 「今後の予約」セクション
+              - status = 'confirmed' かつ endAt >= 今 (未来予約)
+              - 統計の対象外（来店していないため）
+           B. 「来店履歴」セクション
+              - status = 'confirmed' かつ endAt < 今 (過去の confirmed = 自動visited)
+              - status = 'visited' (例外手動変更で visited 化されたもの)
+              - 統計（来店回数・累計支払い・平均単価）の対象
+           C. 表示しない
+              - status = 'cancelled' (キャンセル)
+              - status = 'no_show' (無断キャンセル)
+              - status = 'pendingCreate' (作成中)
+         例外手動変更：
+           - C-3 予約詳細モーダルから「無断キャンセル」「来店済みに変更」
+             「予定に戻す」を選べる（dbSalonUpdateAppointmentStatus 関数）
 - 全画面が `shared_db.js` / `shared_db_*.js` / `shared_auth.js` / `shared_ui.js` を読み込む
 - 各画面が独立して必要なデータだけ取得する
 - HTML ファイル内の JavaScript は最小限（イベントハンドラと画面固有のロジックだけ）、複雑な処理は `shared_*.js` に切り出す

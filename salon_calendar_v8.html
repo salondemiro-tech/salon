@@ -881,13 +881,53 @@
       })(appt.customerDocId);
       acts.appendChild(kBtn);
     }
-    var cBtn = document.createElement('button');
-    cBtn.className = 'btn btn-danger';
-    cBtn.textContent = '予約をキャンセル';
-    (function (ap) {
-      cBtn.onclick = function () { cancelAppt(ap); };
-    })(appt);
-    acts.appendChild(cBtn);
+
+    // ★ 2026/5/23 追加：状態別のアクションボタン
+    //   DESIGN.md status 定義（confirmed/visited/cancelled/no_show）と1対1
+    //   過去 confirmed は表示時に自動 visited 扱いだが、status自体は confirmed のまま。
+    //   例外操作（無断キャンセル等）の時だけ status を書き換える。
+    var st = appt.status || 'confirmed';
+    var endMs = _calcApptEndMs(appt);
+    var isPast = (endMs != null && endMs < Date.now());
+
+    if (st === 'confirmed') {
+      if (isPast) {
+        // 過去の予約 → 主に「無断キャンセル」記録用
+        var nsBtn = document.createElement('button');
+        nsBtn.className = 'btn btn-danger';
+        nsBtn.textContent = '無断キャンセルにする';
+        (function (ap) {
+          nsBtn.onclick = function () { changeStatus(ap, 'no_show'); };
+        })(appt);
+        acts.appendChild(nsBtn);
+      } else {
+        // 未来の予約 → キャンセル可能
+        var cBtn = document.createElement('button');
+        cBtn.className = 'btn btn-danger';
+        cBtn.textContent = '予約をキャンセル';
+        (function (ap) {
+          cBtn.onclick = function () { changeStatus(ap, 'cancelled'); };
+        })(appt);
+        acts.appendChild(cBtn);
+      }
+    } else if (st === 'visited') {
+      var revBtn = document.createElement('button');
+      revBtn.className = 'btn btn-ghost';
+      revBtn.textContent = '予定に戻す';
+      (function (ap) {
+        revBtn.onclick = function () { changeStatus(ap, 'confirmed'); };
+      })(appt);
+      acts.appendChild(revBtn);
+    } else if (st === 'cancelled' || st === 'no_show') {
+      var revBtn2 = document.createElement('button');
+      revBtn2.className = 'btn btn-ghost';
+      revBtn2.textContent = '予定に戻す';
+      (function (ap) {
+        revBtn2.onclick = function () { changeStatus(ap, 'confirmed'); };
+      })(appt);
+      acts.appendChild(revBtn2);
+    }
+
     var xBtn = document.createElement('button');
     xBtn.className = 'btn btn-ghost';
     xBtn.textContent = '閉じる';
@@ -931,20 +971,54 @@
   }
   window.closeDetailModal = closeDetailModal;
 
-  function cancelAppt(appt) {
-    // shared_ui.uiConfirm の API はプロジェクトで使い慣れた window.confirm 互換でいく
-    if (!window.confirm('この予約をキャンセルしますか？\n' + formatDateKey(appt.dateKey)
+  // 予約終了時刻を ms で算出（endAt > end > dateKey 末の順で評価）
+  function _calcApptEndMs(a) {
+    if (!a) { return null; }
+    if (a.endAt && typeof a.endAt.toMillis === 'function') {
+      return a.endAt.toMillis();
+    }
+    if (a.dateKey && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(a.dateKey)
+        && a.end && /^[0-9]{2}:[0-9]{2}$/.test(a.end)) {
+      var p = a.dateKey.split('-');
+      var t = a.end.split(':');
+      var dt = new Date(parseInt(p[0], 10),
+                         parseInt(p[1], 10) - 1,
+                         parseInt(p[2], 10),
+                         parseInt(t[0], 10),
+                         parseInt(t[1], 10));
+      return dt.getTime();
+    }
+    if (a.dateKey && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(a.dateKey)) {
+      var p2 = a.dateKey.split('-');
+      var dt2 = new Date(parseInt(p2[0], 10),
+                          parseInt(p2[1], 10) - 1,
+                          parseInt(p2[2], 10),
+                          23, 59, 59);
+      return dt2.getTime();
+    }
+    return null;
+  }
+
+  // ★ 2026/5/23 改訂：ステータス変更ハンドラ
+  //   cancelled / no_show / visited / confirmed を統一的に処理
+  function changeStatus(appt, newStatus) {
+    var labels = {
+      cancelled: 'この予約をキャンセル',
+      no_show: 'この予約を無断キャンセルとして記録',
+      visited: 'この予約を来店済みに変更',
+      confirmed: 'この予約を予定に戻'
+    };
+    var label = labels[newStatus] || '変更';
+    if (!window.confirm(label + 'しますか？\n' + formatDateKey(appt.dateKey)
                        + ' ' + (appt.start || ''))) { return; }
     uiShowLoading('処理中...');
-    dbSalonUpdateAppointment(appt._id, {
-      status: 'cancelled'
-    }, function (ok) {
+    dbSalonUpdateAppointmentStatus(appt._id, newStatus, function (ok) {
       uiHideLoading();
       if (!ok) {
-        uiToast('キャンセルに失敗しました');
+        uiToast('変更に失敗しました');
         return;
       }
-      uiToast('予約をキャンセルしました');
+      uiToast(label + 'しました');
       closeDetailModal();
       loadWeek();
     });

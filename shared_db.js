@@ -548,8 +548,17 @@
   //   B-6: customerDocId == 指定顧客で絞り、dateKey 降順 + limit。
   //        全件 get() しない。
   //
-  //   戻り値: { current:[...], archive:[...], merged:[...] }
-  //     merged は dateKey 降順 (同日は start 降順) で統合済み。
+  //   戻り値: { current:[...], archive:[...], merged:[...],
+  //             upcoming:[...], visits:[...], excluded:[...] }
+  //     merged   : 全件 dateKey 降順 (後方互換)
+  //     ★ 2026/5/23 追加分類 (DESIGN.md C-9 改訂 と1対1)：
+  //     upcoming : status=='confirmed' && endAt(or end時刻) >= 今
+  //                （今後の予約セクション用）
+  //     visits   : status=='visited' OR
+  //                (status=='confirmed' && endAt < 今)
+  //                （来店履歴セクション用・統計の対象）
+  //     excluded : status=='cancelled' / 'no_show' / 'pendingCreate'
+  //                （表示しない・統計の対象外）
   // ------------------------------------------------------------
   function dbSalonGetCustomerHistory(customerDocId, cb) {
     var sid = getCurrentSalonId();
@@ -606,14 +615,106 @@
         }
         return (ak < bk) ? 1 : -1;
       });
+
+      // ★ 2026/5/23 追加：今後の予約 / 来店履歴 / 除外 に分類
+      //   DESIGN.md C-9 改訂仕様と1対1
+      var nowMs = Date.now();
+      var upcoming = [];
+      var visits = [];
+      var excluded = [];
+      var j;
+      for (j = 0; j < merged.length; j++) {
+        var a = merged[j];
+        var st = a.status || 'confirmed';
+        if (st === 'cancelled' || st === 'no_show'
+            || st === 'pendingCreate') {
+          excluded.push(a);
+          continue;
+        }
+        if (st === 'visited') {
+          // 明示的に visited にされた → 必ず来店履歴
+          visits.push(a);
+          continue;
+        }
+        // status === 'confirmed' を時間で自動分類
+        // 判定優先順位: endAt (Timestamp) → dateKey + end (HH:MM) → dateKey 末
+        var endMs = _calcEndMs(a);
+        if (endMs == null) {
+          // 終了時刻不明 → 安全側として upcoming 扱い
+          upcoming.push(a);
+        } else if (endMs >= nowMs) {
+          upcoming.push(a);
+        } else {
+          visits.push(a);
+        }
+      }
+      // upcoming は時系列昇順 (近い予定が先頭)
+      upcoming.sort(function (a, b) {
+        var ak = a.dateKey || '';
+        var bk = b.dateKey || '';
+        if (ak === bk) {
+          var as = a.start || '';
+          var bs = b.start || '';
+          if (as === bs) { return 0; }
+          return (as < bs) ? -1 : 1;
+        }
+        return (ak < bk) ? -1 : 1;
+      });
+      // visits は時系列降順 (新しい来店が先頭)
+      visits.sort(function (a, b) {
+        var ak = a.dateKey || '';
+        var bk = b.dateKey || '';
+        if (ak === bk) {
+          var as = a.start || '';
+          var bs = b.start || '';
+          if (as === bs) { return 0; }
+          return (as < bs) ? 1 : -1;
+        }
+        return (ak < bk) ? 1 : -1;
+      });
+
       _safeCb(cb, {
         current: cur,
         archive: arc,
-        merged: merged
+        merged: merged,
+        upcoming: upcoming,
+        visits: visits,
+        excluded: excluded
       });
     });
   }
   window.dbSalonGetCustomerHistory = dbSalonGetCustomerHistory;
+
+  // 予約終了時刻を ms で算出（endAt > end > dateKey 末の順で評価）
+  function _calcEndMs(a) {
+    if (!a) { return null; }
+    // 1. Firestore Timestamp の endAt
+    if (a.endAt && typeof a.endAt.toMillis === 'function') {
+      return a.endAt.toMillis();
+    }
+    // 2. dateKey + end "HH:MM"
+    if (a.dateKey && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(a.dateKey)
+        && a.end && /^[0-9]{2}:[0-9]{2}$/.test(a.end)) {
+      var p = a.dateKey.split('-');
+      var t = a.end.split(':');
+      var dt = new Date(parseInt(p[0], 10),
+                         parseInt(p[1], 10) - 1,
+                         parseInt(p[2], 10),
+                         parseInt(t[0], 10),
+                         parseInt(t[1], 10));
+      return dt.getTime();
+    }
+    // 3. dateKey の終わり (23:59) で代用
+    if (a.dateKey && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(a.dateKey)) {
+      var p2 = a.dateKey.split('-');
+      var dt2 = new Date(parseInt(p2[0], 10),
+                          parseInt(p2[1], 10) - 1,
+                          parseInt(p2[2], 10),
+                          23, 59, 59);
+      return dt2.getTime();
+    }
+    return null;
+  }
 
   // ============================================================
   // サロン側メニュー API
@@ -1098,6 +1199,33 @@
     dbUpdateDoc('salons/' + sid + '/appointments/' + appointmentId, patch, cb);
   }
   window.dbSalonUpdateAppointment = dbSalonUpdateAppointment;
+
+  // ============================================================
+  // ★ 予約ステータス変更（例外手動操作用）
+  // DESIGN.md status 定義と1対1：
+  //   'confirmed' / 'visited' / 'cancelled' / 'no_show'
+  //   ('pendingCreate' は手動変更禁止・Functions 専用)
+  // 用途：
+  //   - C-3 予約詳細モーダルから「無断キャンセル」「来店済みに変更」
+  //     「予定に戻す」を選んだ時のラッパー
+  //   - 自動 visited 判定では status を書き換えない（表示時計算で十分）
+  //     例外的にこの API で書き換える時だけ使う
+  // ============================================================
+  function dbSalonUpdateAppointmentStatus(aid, newStatus, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid || !aid) { _safeCb(cb, null); return; }
+    var ALLOWED = ['confirmed', 'visited', 'cancelled', 'no_show'];
+    if (ALLOWED.indexOf(newStatus) < 0) {
+      _logErr('dbSalonUpdateAppointmentStatus',
+              'invalid status: ' + newStatus);
+      _safeCb(cb, null);
+      return;
+    }
+    dbSalonUpdateAppointment(aid, {
+      status: newStatus
+    }, cb);
+  }
+  window.dbSalonUpdateAppointmentStatus = dbSalonUpdateAppointmentStatus;
 
   // ============================================================
   // ★ サロン手動予約作成（B経路）
