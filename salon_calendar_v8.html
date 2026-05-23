@@ -358,7 +358,7 @@
     <button id="prevBtn" onclick="changeWeek(-1)">&#8249;</button>
     <span class="week-label" id="weekLabel">---- 〜 ----</span>
     <button id="nextBtn" onclick="changeWeek(1)">&#8250;</button>
-    <button class="week-today" onclick="goToday()">今週</button>
+    <button class="week-today" onclick="goToday()">今日</button>
   </div>
 
   <div class="action-bar">
@@ -548,10 +548,12 @@
   function todayKey() {
     return dateKeyOf(new Date());
   }
-  function getWeekStartDate(d) {
-    var dt = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    dt.setDate(dt.getDate() - dt.getDay());
-    return dt;
+  // ★ 2026/5/23 改訂: 「今日始まりローリング7日」仕様
+  //   旧仕様（日曜始まり）から変更。
+  //   この関数は「今日0時」の Date を返す（起動時・「今日」ボタンで使う）。
+  function getTodayStart() {
+    var d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
   }
   function timeToHour(hhmm) {
     if (!hhmm) { return null; }
@@ -594,7 +596,7 @@
   window.changeWeek = changeWeek;
 
   function goToday() {
-    _weekStart = getWeekStartDate(new Date());
+    _weekStart = getTodayStart();
     loadWeek();
   }
   window.goToday = goToday;
@@ -1572,7 +1574,7 @@
   });
 
   // ===== 起動 =====
-  _weekStart = getWeekStartDate(new Date());
+  _weekStart = getTodayStart();
 
   onFbReady(function () {
     requireSalonStaff(function (isStaff) {
