@@ -1469,31 +1469,52 @@
   // 戻り値 cb(ok bool)
   // appointment.photos[] に1枚追加（3枚上限は画面側で制御）
   // photoObj: { id, path, url, time }
-  // 戻り値 cb(ok bool)
+  // 戻り値 cb(ok bool, errInfo)  errInfo = { code, message } または null
   //
-  // ★ 2026/5/24: ref.update() 直接呼びから dbUpdateDoc 経由に変更。
-  //   理由: payment/memo は dbUpdateDoc で成功するのに photos だけ失敗する事故が発生。
-  //   dbUpdateDoc は onFbReady() ラップで Auth 状態確定を待つので、
-  //   Storage アップロード直後の Firestore 書き込みでも Auth トークンが安定する。
+  // ★ 2026/5/24 改訂2: arrayUnion を使わず read+rewrite に変更。
+  //   理由: iOS Safari/Chrome の WebKit と Firebase SDK の組み合わせで
+  //   arrayUnion が拒否される事例があるため。
+  //   既存 photos を読んで → 配列に追加 → 配列全体で update する。
+  //   3件以下の小さい配列なので race condition のリスクも低い。
+  //   詳細エラー情報を呼び出し側に返すので画面で原因確認できる。
   function dbSalonAddAppointmentPhoto(aid, photoObj, cb) {
     var sid = getCurrentSalonId();
-    if (!sid || !aid || !photoObj) { _safeCb(cb, false); return; }
-    var patch = {
-      photos: firebase.firestore.FieldValue.arrayUnion(photoObj),
-      updatedAt: _serverTimestamp()
-    };
-    dbUpdateDoc('salons/' + sid + '/appointments/' + aid, patch, function (ok) {
-      if (!ok) {
-        // 詳細ログ用（dbUpdateDoc 内でも _logErr 済みだが追加情報）
-        console.error('[dbSalonAddAppointmentPhoto] FAIL via dbUpdateDoc', {
-          sid: sid,
-          aid: aid,
-          photoObj: photoObj
-        });
-        _safeCb(cb, false);
+    if (!sid || !aid || !photoObj) {
+      _safeCb(cb, false, { code: 'invalid-args', message: 'sid/aid/photoObj いずれか欠落' });
+      return;
+    }
+    var docPath = 'salons/' + sid + '/appointments/' + aid;
+    // Step1: 既存ドキュメントを読む
+    dbReadDoc(docPath, function (doc) {
+      if (!doc) {
+        _safeCb(cb, false, { code: 'doc-not-found', message: '予約ドキュメント不在: ' + aid });
         return;
       }
-      _safeCb(cb, true);
+      var photos = Array.isArray(doc.photos) ? doc.photos.slice() : [];
+      photos.push(photoObj);
+      // Step2: 配列全体で update
+      onFbReady(function () {
+        _db().doc(docPath).update({
+          photos: photos,
+          updatedAt: _serverTimestamp()
+        })
+        .then(function () { _safeCb(cb, true, null); })
+        .catch(function (err) {
+          console.error('[dbSalonAddAppointmentPhoto] FAIL', {
+            sid: sid, aid: aid, photoObj: photoObj,
+            errorCode: err && err.code,
+            errorMessage: err && err.message,
+            errorName: err && err.name,
+            existingPhotos: doc.photos,
+            newPhotos: photos
+          });
+          _logErr('dbSalonAddAppointmentPhoto(' + aid + ')', err);
+          _safeCb(cb, false, {
+            code: (err && err.code) || 'unknown',
+            message: (err && err.message) || '不明なエラー'
+          });
+        });
+      });
     });
   }
   window.dbSalonAddAppointmentPhoto = dbSalonAddAppointmentPhoto;
