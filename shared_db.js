@@ -568,8 +568,15 @@
 
     function _queryCust(col) {
       // ★ v8.1: 予約は customerDocId を持つ（旧 customerId 廃止）
+      // ★ 2026/5/24: orderBy を外して複合インデックス不要に。
+      //   メモリ#26「販売前必須対処：Firestore 初回遅延問題」と関連。
+      //   復活させる時は Firebase Console で
+      //   (customerDocId Asc, dateKey Desc) の複合インデックスを
+      //   appointments / appointments_archive 両方に明示作成すること。
+      //   取得後に merged 配列でクライアントソート済みなので
+      //   並び順は変わらない。limit はランダム100件取得になるが
+      //   1人サロン1顧客の予約は実用上100件未満なので当面OK。
       return col.where('customerDocId', '==', customerDocId)
-                .orderBy('dateKey', 'desc')
                 .limit(HISTORY_LIMIT);
     }
 

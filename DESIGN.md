@@ -1201,10 +1201,18 @@ sendChangeNotification(customerId, oldAppointment, newAppointment, cb);
   - 全件取得は禁止（`appointments` を `get()` で全取得しない）
 
 - B-7. **Firestore 複合インデックス設計（Phase A-step1 で作成）**
-  - `(date)` 単一インデックス：カレンダー用
-  - `(staffId, date)` 複合：将来スタッフ別カレンダー用
-  - `(customerAuthUid, date desc)` 複合：顧客履歴用
-  - `(status, date)` 複合：「未完了予約のみ」絞り込み用
+  - `(dateKey)` 単一インデックス：カレンダー用（自動）
+  - `(staffId, dateKey)` 複合：将来スタッフ別カレンダー用
+  - `(authUid, dateKey desc)` 複合：顧客本人の履歴用
+  - `(customerDocId, dateKey desc)` 複合：**サロン側カルテ画面の顧客履歴用**
+    ★ 2026/5/24 追記：本番運用で「カルテに来店履歴が出ない」事故が発生。
+      原因はこの複合インデックスが未作成だったため。
+      暫定対応：shared_db.js dbSalonGetCustomerHistory の orderBy を外し、
+      クライアントソートに変更（インデックス不要にした）。
+      販売前に必ず復活させ、(customerDocId Asc, dateKey Desc) の複合
+      インデックスを appointments / appointments_archive 両方の
+      サブコレクションに明示作成すること。
+  - `(status, dateKey)` 複合：「未完了予約のみ」絞り込み用
   - 後付けは順序が不安定になるので、最初にまとめて作る
 
 - B-8. **アーカイブ戦略（appointments の肥大化対策）**
