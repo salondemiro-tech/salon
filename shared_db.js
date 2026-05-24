@@ -1478,6 +1478,16 @@
     })
     .then(function () { _safeCb(cb, true); })
     .catch(function (err) {
+      // ★ 2026/5/24 診断用：詳細ログ
+      console.error('[dbSalonAddAppointmentPhoto] FAIL', {
+        sid: sid,
+        aid: aid,
+        photoObj: photoObj,
+        errorCode: err && err.code,
+        errorMessage: err && err.message,
+        errorName: err && err.name,
+        fullError: err
+      });
       _logErr('dbSalonAddAppointmentPhoto(' + aid + ')', err);
       _safeCb(cb, false);
     });

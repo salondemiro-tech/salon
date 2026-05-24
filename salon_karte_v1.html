@@ -1027,14 +1027,27 @@
         if (err) {
           _uploadingAid = null;
           _redrawTimeline();
-          uiToast('写真のアップロードに失敗しました');
+          // ★ 2026/5/24 診断用：エラーコードを表示
+          var msg = '写真のアップロードに失敗: ';
+          if (err.code) { msg += err.code; }
+          else if (err.message) { msg += err.message.substring(0, 80); }
+          else { msg += '不明なエラー'; }
+          uiToast(msg);
           return;
         }
         dbSalonAddAppointmentPhoto(aid, photo, function (ok) {
           _uploadingAid = null;
           if (!ok) {
             _redrawTimeline();
-            uiToast('写真情報の保存に失敗しました');
+            // ★ 2026/5/24 診断用
+            //   Storage には保存済みだが Firestore 更新で失敗。
+            //   Console (PC版Chrome) を開いて F12 で詳細エラー確認推奨。
+            //   よくある原因:
+            //   - aid (予約ID) が存在しない／archive にしかない
+            //   - Auth 状態未確定で request.auth == null
+            //   - Firestore ルール拒否
+            uiToast('写真情報の保存に失敗しました（aid=' +
+                    String(aid).substring(0, 8) + '... 開発者ツールで詳細確認）');
             return;
           }
           // ローカル更新（_visits または _upcoming）
