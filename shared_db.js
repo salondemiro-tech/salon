@@ -1467,29 +1467,33 @@
   // appointment.photos[] に1枚追加（3枚上限は画面側で制御）
   // photoObj: { id, path, url, time }
   // 戻り値 cb(ok bool)
+  // appointment.photos[] に1枚追加（3枚上限は画面側で制御）
+  // photoObj: { id, path, url, time }
+  // 戻り値 cb(ok bool)
+  //
+  // ★ 2026/5/24: ref.update() 直接呼びから dbUpdateDoc 経由に変更。
+  //   理由: payment/memo は dbUpdateDoc で成功するのに photos だけ失敗する事故が発生。
+  //   dbUpdateDoc は onFbReady() ラップで Auth 状態確定を待つので、
+  //   Storage アップロード直後の Firestore 書き込みでも Auth トークンが安定する。
   function dbSalonAddAppointmentPhoto(aid, photoObj, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !aid || !photoObj) { _safeCb(cb, false); return; }
-    var ref = _db().collection('salons').doc(sid)
-                   .collection('appointments').doc(aid);
-    ref.update({
+    var patch = {
       photos: firebase.firestore.FieldValue.arrayUnion(photoObj),
       updatedAt: _serverTimestamp()
-    })
-    .then(function () { _safeCb(cb, true); })
-    .catch(function (err) {
-      // ★ 2026/5/24 診断用：詳細ログ
-      console.error('[dbSalonAddAppointmentPhoto] FAIL', {
-        sid: sid,
-        aid: aid,
-        photoObj: photoObj,
-        errorCode: err && err.code,
-        errorMessage: err && err.message,
-        errorName: err && err.name,
-        fullError: err
-      });
-      _logErr('dbSalonAddAppointmentPhoto(' + aid + ')', err);
-      _safeCb(cb, false);
+    };
+    dbUpdateDoc('salons/' + sid + '/appointments/' + aid, patch, function (ok) {
+      if (!ok) {
+        // 詳細ログ用（dbUpdateDoc 内でも _logErr 済みだが追加情報）
+        console.error('[dbSalonAddAppointmentPhoto] FAIL via dbUpdateDoc', {
+          sid: sid,
+          aid: aid,
+          photoObj: photoObj
+        });
+        _safeCb(cb, false);
+        return;
+      }
+      _safeCb(cb, true);
     });
   }
   window.dbSalonAddAppointmentPhoto = dbSalonAddAppointmentPhoto;
