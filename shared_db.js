@@ -1471,23 +1471,32 @@
   // photoObj: { id, path, url, time }
   // 戻り値 cb(ok bool, errInfo)  errInfo = { code, message } または null
   //
-  // ★ 2026/5/24 改訂2: arrayUnion を使わず read+rewrite に変更。
-  //   理由: iOS Safari/Chrome の WebKit と Firebase SDK の組み合わせで
-  //   arrayUnion が拒否される事例があるため。
-  //   既存 photos を読んで → 配列に追加 → 配列全体で update する。
-  //   3件以下の小さい配列なので race condition のリスクも低い。
-  //   詳細エラー情報を呼び出し側に返すので画面で原因確認できる。
+  // ★ 2026/5/24 改訂3: _safeCb は引数1つしか渡せないバグに対応するため、
+  //   cb を try-catch で直接呼ぶ方式に変更。
+  //   arrayUnion を使わず read+rewrite。
   function dbSalonAddAppointmentPhoto(aid, photoObj, cb) {
+    function callCb(ok, errInfo) {
+      if (typeof cb !== 'function') { return; }
+      try { cb(ok, errInfo || null); }
+      catch (e) { console.error('[dbSalonAddAppointmentPhoto] cb threw', e); }
+    }
     var sid = getCurrentSalonId();
     if (!sid || !aid || !photoObj) {
-      _safeCb(cb, false, { code: 'invalid-args', message: 'sid/aid/photoObj いずれか欠落' });
+      callCb(false, {
+        code: 'invalid-args',
+        message: 'sid=' + sid + ' aid=' + aid + ' photoObj=' + (!!photoObj)
+      });
       return;
     }
     var docPath = 'salons/' + sid + '/appointments/' + aid;
     // Step1: 既存ドキュメントを読む
     dbReadDoc(docPath, function (doc) {
       if (!doc) {
-        _safeCb(cb, false, { code: 'doc-not-found', message: '予約ドキュメント不在: ' + aid });
+        callCb(false, {
+          code: 'doc-not-found',
+          message: '予約ドキュメントが読めない: ' + docPath +
+                   ' (権限不足/不在/Auth未確定の可能性)'
+        });
         return;
       }
       var photos = Array.isArray(doc.photos) ? doc.photos.slice() : [];
@@ -1498,20 +1507,20 @@
           photos: photos,
           updatedAt: _serverTimestamp()
         })
-        .then(function () { _safeCb(cb, true, null); })
+        .then(function () { callCb(true, null); })
         .catch(function (err) {
-          console.error('[dbSalonAddAppointmentPhoto] FAIL', {
+          console.error('[dbSalonAddAppointmentPhoto] update FAIL', {
             sid: sid, aid: aid, photoObj: photoObj,
             errorCode: err && err.code,
             errorMessage: err && err.message,
             errorName: err && err.name,
             existingPhotos: doc.photos,
-            newPhotos: photos
+            newPhotosCount: photos.length
           });
-          _logErr('dbSalonAddAppointmentPhoto(' + aid + ')', err);
-          _safeCb(cb, false, {
-            code: (err && err.code) || 'unknown',
-            message: (err && err.message) || '不明なエラー'
+          _logErr('dbSalonAddAppointmentPhoto update(' + aid + ')', err);
+          callCb(false, {
+            code: (err && err.code) || 'update-failed-no-code',
+            message: (err && err.message) || (err && String(err)) || '不明'
           });
         });
       });
