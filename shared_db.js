@@ -1427,15 +1427,29 @@
   // 写真を Storage にアップロード（blob 受け取り。リサイズは画面側責務）
   // 戻り値 cb(err, { id, path, url, time })
   // path: salons/{sid}/appointmentPhotos/{aid}/{photoId}.jpg
+  // 戻り値 cb(err, photoObj)
+  //   成功時: cb(null, { id, path, url, time })
+  //   失敗時: cb(Error)
+  //
+  // ★ 2026/5/24 修正: _safeCb は引数1つしか渡せない仕様だったため、
+  //   2引数を返すこの関数で第2引数 photoObj が捨てられていた。
+  //   結果、呼び出し側に null/undefined が渡り、次の
+  //   dbSalonAddAppointmentPhoto が invalid-args で失敗していた。
+  //   ローカル callCb で 2引数を確実に渡すよう変更。
   function dbSalonUploadAppointmentPhoto(aid, blob, cb) {
+    function callCb(err, photoObj) {
+      if (typeof cb !== 'function') { return; }
+      try { cb(err || null, photoObj || null); }
+      catch (e) { console.error('[dbSalonUploadAppointmentPhoto] cb threw', e); }
+    }
     var sid = getCurrentSalonId();
     if (!sid || !aid || !blob) {
-      _safeCb(cb, new Error('invalid args'));
+      callCb(new Error('invalid args sid=' + sid + ' aid=' + aid + ' blob=' + (!!blob)), null);
       return;
     }
     var st = _storage();
     if (!st) {
-      _safeCb(cb, new Error('firebase.storage 未ロード'));
+      callCb(new Error('firebase.storage 未ロード'), null);
       return;
     }
     // 写真ID = 時刻 + ランダム（衝突回避）
@@ -1450,7 +1464,7 @@
         return snapshot.ref.getDownloadURL();
       })
       .then(function (url) {
-        _safeCb(cb, null, {
+        callCb(null, {
           id: photoId,
           path: path,
           url: url,
@@ -1459,7 +1473,7 @@
       })
       .catch(function (err) {
         _logErr('dbSalonUploadAppointmentPhoto(' + path + ')', err);
-        _safeCb(cb, err);
+        callCb(err, null);
       });
   }
   window.dbSalonUploadAppointmentPhoto = dbSalonUploadAppointmentPhoto;
