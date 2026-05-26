@@ -1,0 +1,379 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>D-step1 デバッグ - claim Function テスト</title>
+
+<!-- Firebase SDK 9.23.0 compat（既存ページと同じバージョン） -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
+<script src="firebase-init.js"></script>
+
+<style>
+  body { font-family: sans-serif; padding: 16px; line-height: 1.7; font-size: 14px; max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 18px; }
+  h2 { font-size: 15px; color: #b5845a; margin-top: 24px; border-top: 1px solid #ddd; padding-top: 12px; }
+  .box { border: 1px solid #ccc; border-radius: 8px; padding: 12px; margin: 10px 0; background: #f9f9f9; }
+  .label { font-weight: bold; color: #666; font-size: 12px; }
+  .value { font-family: monospace; background: #fff; padding: 4px 8px; border-radius: 4px; word-break: break-all; display: inline-block; margin: 2px 0; }
+  .ok { color: #1a8b1a; font-weight: bold; }
+  .ng { color: #c00; font-weight: bold; }
+  .warn { color: #c80; font-weight: bold; }
+  pre { background: #fff; padding: 10px; border-radius: 4px; overflow-x: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all; }
+  input, button { padding: 8px 12px; font-size: 14px; margin: 4px 2px; border-radius: 4px; border: 1px solid #999; }
+  input { width: 95%; }
+  button { background: #b5845a; color: #fff; border: none; cursor: pointer; }
+  button:hover { background: #9c6f4a; }
+  button.secondary { background: #888; }
+  button.danger { background: #c44; }
+  .row { margin: 8px 0; }
+  .small { font-size: 11px; color: #888; }
+</style>
+</head>
+<body>
+
+<h1>🔧 D-step1 テスト：resolveOrClaimCustomer</h1>
+<p class="small">設計書 DESIGN_v8_1_customer_identity.md 2-4 に対応するテストページ</p>
+
+<div class="box">
+  <h2>1. 環境確認</h2>
+  <div id="envStatus">確認中...</div>
+</div>
+
+<div class="box">
+  <h2>2. ログイン（顧客側として）</h2>
+  <div class="row">
+    <div class="label">メール</div>
+    <input type="email" id="loginEmail" placeholder="test-claim-a@example.com">
+  </div>
+  <div class="row">
+    <div class="label">パスワード（6文字以上）</div>
+    <input type="password" id="loginPass" placeholder="password123">
+  </div>
+  <div class="row">
+    <button onclick="doSignUp()">新規登録（確認メール送信）</button>
+    <button onclick="doSignIn()">ログイン</button>
+    <button onclick="doSignOut()" class="secondary">ログアウト</button>
+    <button onclick="doSendVerification()" class="secondary">確認メール再送</button>
+  </div>
+  <div class="row">
+    <button onclick="doReloadUser()" class="secondary">ユーザー情報を再読込（emailVerified 反映）</button>
+  </div>
+  <div id="loginStatus" class="row"></div>
+</div>
+
+<div class="box">
+  <h2>3. claim Function 呼び出し</h2>
+  <div class="row">
+    <div class="label">salonId（URL の ?salon=xxx から自動取得 / 手動上書き可）</div>
+    <input type="text" id="salonIdInput" placeholder="例: hTWPrkP1nPebpmGcb6iguviLmEl2">
+  </div>
+  <div class="row">
+    <div class="label">name（新カルテ作成時の名前）</div>
+    <input type="text" id="nameInput" placeholder="テスト 太郎">
+  </div>
+  <div class="row">
+    <div class="label">phone（新カルテ作成時の電話）</div>
+    <input type="text" id="phoneInput" placeholder="090-1234-5678">
+  </div>
+  <div class="row">
+    <button onclick="doClaim()">claim 実行（通常）</button>
+    <button onclick="doClaimNoSalonId()" class="danger">salonId なしで claim 実行（TEST-7 用）</button>
+  </div>
+  <div id="claimResult" class="row"></div>
+</div>
+
+<div class="box">
+  <h2>4. Firestore 直接書込テスト（TEST-9, TEST-10 用）</h2>
+  <div class="row">
+    <div class="label">対象 customerDocId（自分が直書きを試みるカルテID）</div>
+    <input type="text" id="targetCustomerDocId" placeholder="cus_xxx">
+  </div>
+  <div class="row">
+    <button onclick="testWriteNeedsMergeReview()" class="danger">needsMergeReview を直書換（拒否されるはず）</button>
+    <button onclick="testWriteAuthIndex()" class="danger">authIndex を直書込（拒否されるはず）</button>
+  </div>
+  <div id="writeTestResult" class="row"></div>
+</div>
+
+<div class="box">
+  <h2>5. ログ</h2>
+  <pre id="logArea">（ここに各操作のログが出ます）</pre>
+  <button onclick="clearLog()" class="secondary">ログクリア</button>
+</div>
+
+<script>
+// ES5 互換コードで書く（メモリ規約準拠）
+
+var auth, db, functions;
+var currentUser = null;
+var resolveOrClaimCustomerFn;
+
+function log(msg, obj) {
+  var area = document.getElementById('logArea');
+  var time = new Date().toLocaleTimeString();
+  var line = '[' + time + '] ' + msg;
+  if (obj !== undefined) {
+    try {
+      line += ' ' + JSON.stringify(obj, null, 2);
+    } catch (e) {
+      line += ' (循環参照のためログ省略)';
+    }
+  }
+  area.textContent = line + '\n' + area.textContent;
+}
+
+function clearLog() {
+  document.getElementById('logArea').textContent = '';
+}
+
+function setEnvStatus(html) {
+  document.getElementById('envStatus').innerHTML = html;
+}
+
+function setLoginStatus(html) {
+  document.getElementById('loginStatus').innerHTML = html;
+}
+
+function setClaimResult(html) {
+  document.getElementById('claimResult').innerHTML = html;
+}
+
+function setWriteTestResult(html) {
+  document.getElementById('writeTestResult').innerHTML = html;
+}
+
+// 初期化
+function init() {
+  if (!window.firebase || !firebase.apps || firebase.apps.length === 0) {
+    setEnvStatus('<span class="ng">❌ Firebase 初期化に失敗しています</span>');
+    return;
+  }
+
+  try {
+    auth = firebase.auth();
+    db = firebase.firestore();
+    functions = firebase.app().functions('asia-northeast1');
+    resolveOrClaimCustomerFn = functions.httpsCallable('resolveOrClaimCustomer');
+  } catch (e) {
+    setEnvStatus('<span class="ng">❌ Firebase SDK 初期化エラー: ' + e.message + '</span>');
+    log('Firebase init error', e.message);
+    return;
+  }
+
+  // URL から salonId を自動取得
+  var params = new URLSearchParams(window.location.search);
+  var salonIdFromUrl = params.get('salon');
+  if (salonIdFromUrl) {
+    document.getElementById('salonIdInput').value = salonIdFromUrl;
+  }
+
+  setEnvStatus(
+    '<span class="ok">✅ 初期化 OK</span><br>' +
+    '<span class="label">projectId:</span> <span class="value">' + firebase.app().options.projectId + '</span><br>' +
+    '<span class="label">region:</span> <span class="value">asia-northeast1</span><br>' +
+    '<span class="label">URL の ?salon:</span> <span class="value">' + (salonIdFromUrl || '(なし)') + '</span>'
+  );
+
+  // 認証状態監視
+  auth.onAuthStateChanged(function(user) {
+    currentUser = user;
+    updateLoginStatus();
+  });
+}
+
+function updateLoginStatus() {
+  if (!currentUser) {
+    setLoginStatus('<span class="ng">❌ 未ログイン</span>');
+    return;
+  }
+  setLoginStatus(
+    '<span class="ok">✅ ログイン中</span><br>' +
+    '<span class="label">uid:</span> <span class="value">' + currentUser.uid + '</span><br>' +
+    '<span class="label">email:</span> <span class="value">' + (currentUser.email || '(なし)') + '</span><br>' +
+    '<span class="label">emailVerified:</span> ' +
+      (currentUser.emailVerified
+        ? '<span class="ok">✅ true</span>'
+        : '<span class="warn">⚠️ false（メール確認まだ）</span>')
+  );
+}
+
+function doSignUp() {
+  var em = document.getElementById('loginEmail').value.trim();
+  var pw = document.getElementById('loginPass').value;
+  if (!em || !pw) { alert('メールとパスワードを入力'); return; }
+  log('signUp 開始', { email: em });
+  auth.createUserWithEmailAndPassword(em, pw).then(function(cred) {
+    log('signUp 成功 → 確認メール送信中', { uid: cred.user.uid });
+    return cred.user.sendEmailVerification();
+  }).then(function() {
+    log('確認メール送信完了。メールのリンクをタップしてください');
+    alert('確認メールを送信しました。\nメールのリンクをタップしてから「ユーザー情報を再読込」ボタンを押してください。');
+  }).catch(function(err) {
+    log('signUp 失敗', { code: err.code, message: err.message });
+    alert('登録失敗: ' + err.message);
+  });
+}
+
+function doSignIn() {
+  var em = document.getElementById('loginEmail').value.trim();
+  var pw = document.getElementById('loginPass').value;
+  if (!em || !pw) { alert('メールとパスワードを入力'); return; }
+  log('signIn 開始', { email: em });
+  auth.signInWithEmailAndPassword(em, pw).then(function(cred) {
+    log('signIn 成功', { uid: cred.user.uid, emailVerified: cred.user.emailVerified });
+  }).catch(function(err) {
+    log('signIn 失敗', { code: err.code, message: err.message });
+    alert('ログイン失敗: ' + err.message);
+  });
+}
+
+function doSignOut() {
+  auth.signOut().then(function() {
+    log('signOut 完了');
+  });
+}
+
+function doSendVerification() {
+  if (!currentUser) { alert('先にログインしてください'); return; }
+  currentUser.sendEmailVerification().then(function() {
+    log('確認メール再送完了');
+    alert('確認メールを再送しました');
+  }).catch(function(err) {
+    log('確認メール再送失敗', { code: err.code });
+    alert('再送失敗: ' + err.message);
+  });
+}
+
+function doReloadUser() {
+  if (!currentUser) { alert('先にログインしてください'); return; }
+  currentUser.reload().then(function() {
+    log('ユーザー情報再読込完了', { emailVerified: auth.currentUser.emailVerified });
+    updateLoginStatus();
+  });
+}
+
+function doClaim() {
+  if (!currentUser) {
+    setClaimResult('<span class="ng">❌ 先にログインしてください</span>');
+    return;
+  }
+  var salonId = document.getElementById('salonIdInput').value.trim();
+  var name = document.getElementById('nameInput').value.trim();
+  var phone = document.getElementById('phoneInput').value.trim();
+  var payload = { salonId: salonId, name: name, phone: phone };
+  log('claim 呼び出し', payload);
+  setClaimResult('<span class="warn">⏳ 呼び出し中...</span>');
+
+  resolveOrClaimCustomerFn(payload).then(function(result) {
+    log('claim 成功', result.data);
+    var d = result.data || {};
+    var color = 'ok';
+    var icon = '✅';
+    if (d.result === 'needs_merge_review') { color = 'warn'; icon = '⚠️'; }
+    setClaimResult(
+      '<span class="' + color + '">' + icon + ' 成功</span><br>' +
+      '<pre>' + JSON.stringify(d, null, 2) + '</pre>'
+    );
+  }).catch(function(err) {
+    log('claim 失敗', { code: err.code, message: err.message, details: err.details });
+    setClaimResult(
+      '<span class="ng">❌ エラー</span><br>' +
+      '<span class="label">code:</span> <span class="value">' + (err.code || '(不明)') + '</span><br>' +
+      '<span class="label">message:</span> <span class="value">' + err.message + '</span>'
+    );
+  });
+}
+
+function doClaimNoSalonId() {
+  // TEST-7: salonId 未指定で claim を呼ぶ
+  if (!currentUser) {
+    setClaimResult('<span class="ng">❌ 先にログインしてください</span>');
+    return;
+  }
+  var payload = { name: 'test', phone: '090-0000-0000' }; // salonId なし
+  log('claim 呼び出し（salonId なし）', payload);
+  setClaimResult('<span class="warn">⏳ 呼び出し中...</span>');
+
+  resolveOrClaimCustomerFn(payload).then(function(result) {
+    log('claim 成功（想定外）', result.data);
+    setClaimResult(
+      '<span class="ng">❌ 想定外：エラーになるはずがレスポンスが返った</span><br>' +
+      '<pre>' + JSON.stringify(result.data, null, 2) + '</pre>'
+    );
+  }).catch(function(err) {
+    log('claim 失敗（想定通り）', { code: err.code, message: err.message });
+    setClaimResult(
+      '<span class="ok">✅ 想定通りエラー</span><br>' +
+      '<span class="label">code:</span> <span class="value">' + err.code + '</span><br>' +
+      '<span class="label">message:</span> <span class="value">' + err.message + '</span>'
+    );
+  });
+}
+
+function testWriteNeedsMergeReview() {
+  // TEST-9: needsMergeReview をクライアントから直書換しようとする → 拒否されるはず
+  if (!currentUser) { alert('先にログインしてください'); return; }
+  var salonId = document.getElementById('salonIdInput').value.trim();
+  var customerDocId = document.getElementById('targetCustomerDocId').value.trim();
+  if (!salonId || !customerDocId) { alert('salonId と customerDocId を入力'); return; }
+  log('needsMergeReview 直書換テスト開始', { salonId: salonId, customerDocId: customerDocId });
+  setWriteTestResult('<span class="warn">⏳ 試行中...</span>');
+
+  db.collection('salons').doc(salonId)
+    .collection('customers').doc(customerDocId)
+    .update({ needsMergeReview: true })
+    .then(function() {
+      log('needsMergeReview 直書換が通った（想定外・ルール失敗）');
+      setWriteTestResult(
+        '<span class="ng">❌ 想定外：書き込みが通ってしまった（ルールが効いていない！）</span>'
+      );
+    })
+    .catch(function(err) {
+      log('needsMergeReview 直書換が拒否された（想定通り）', { code: err.code });
+      setWriteTestResult(
+        '<span class="ok">✅ 想定通り拒否</span><br>' +
+        '<span class="label">code:</span> <span class="value">' + err.code + '</span><br>' +
+        '<span class="label">message:</span> <span class="value">' + err.message + '</span>'
+      );
+    });
+}
+
+function testWriteAuthIndex() {
+  // TEST-10: authIndex を直書込しようとする → 拒否されるはず
+  if (!currentUser) { alert('先にログインしてください'); return; }
+  var salonId = document.getElementById('salonIdInput').value.trim();
+  if (!salonId) { alert('salonId を入力'); return; }
+  log('authIndex 直書込テスト開始', { salonId: salonId, authUid: currentUser.uid });
+  setWriteTestResult('<span class="warn">⏳ 試行中...</span>');
+
+  db.collection('salons').doc(salonId)
+    .collection('authIndex').doc(currentUser.uid)
+    .set({ customerDocId: 'fake_id_from_client' })
+    .then(function() {
+      log('authIndex 直書込が通った（想定外・ルール失敗）');
+      setWriteTestResult(
+        '<span class="ng">❌ 想定外：書き込みが通ってしまった（ルールが効いていない！）</span>'
+      );
+    })
+    .catch(function(err) {
+      log('authIndex 直書込が拒否された（想定通り）', { code: err.code });
+      setWriteTestResult(
+        '<span class="ok">✅ 想定通り拒否</span><br>' +
+        '<span class="label">code:</span> <span class="value">' + err.code + '</span><br>' +
+        '<span class="label">message:</span> <span class="value">' + err.message + '</span>'
+      );
+    });
+}
+
+// 初期化（DOM 読み込み完了後 / firebase-init.js 完了後）
+window.addEventListener('load', function() {
+  setTimeout(init, 200);
+});
+</script>
+
+</body>
+</html>

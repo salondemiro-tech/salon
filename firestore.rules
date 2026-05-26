@@ -220,8 +220,10 @@ service cloud.firestore {
 
         // 更新: 顧客本人は name/phone/notifyChannels のみ。
         //   サロンは memo/stampCount 等可。ただし authUid/merge系/
-        //   createdSource/lockedByJob/lineUserId はクライアント不可
-        //   （Function=admin のみ。source of truth と排他制御の要）
+        //   createdSource/lockedByJob/lineUserId/needsMergeReview は
+        //   クライアント不可（Function=admin のみ。
+        //   source of truth・排他制御・重複検知ロジックの要）
+        //   ★ v6.1（2026/5/25）：needsMergeReview を禁止リストに追加
         allow update: if
           ( isSignedIn() &&
             resource.data.authUid == request.auth.uid &&
@@ -232,7 +234,7 @@ service cloud.firestore {
             !request.resource.data.diff(resource.data).affectedKeys()
               .hasAny(['lineUserId','authUid','isMerged','mergedInto',
                        'mergedAt','mergedAliases','createdSource',
-                       'lockedByJob']) );
+                       'lockedByJob','needsMergeReview']) );
 
         // 削除: 物理削除はオーナーのみ（通常運用は soft delete）
         allow delete: if isSalonOwner(salonId);
