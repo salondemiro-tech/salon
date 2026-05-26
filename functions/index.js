@@ -11,7 +11,7 @@
 //      - 将来削除予定
 // ========================================
 
-const { onRequest } = require('firebase-functions/v2/https');
+const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https');
 const { onDocumentCreated } = require('firebase-functions/v2/firestore');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { logger } = require('firebase-functions');
@@ -488,3 +488,360 @@ exports.sendBookingEmail = onRequest(
     }
   }
 );
+
+// ========================================
+// resolveOrClaimCustomer (callable Function)
+// 設計書 DESIGN_v8_1_customer_identity.md 2-4 に1対1照合
+//
+// 用途:
+//   顧客アプリ登録後の初回ログイン時に呼び出される。
+//   顧客の identity（authUid）を customerDocId に解決する。
+//   - 既に authIndex に登録済みなら冪等に返す
+//   - 同一サロン内の email 一致カルテが
+//       * 0件 → 新カルテ作成
+//       * 1件 → 既存カルテに claim
+//       * 2件以上 → 新カルテ作成 + 候補に needsMergeReview=true
+//
+// 呼び出し方（クライアント側 JS）:
+//   const fn = firebase.functions('asia-northeast1')
+//                .httpsCallable('resolveOrClaimCustomer');
+//   const result = await fn({ salonId, name, phone });
+//   // result.data: { result: '...', customerDocId, ... }
+//
+// 認証コンテキストは Firebase SDK が自動付与（uid, token.email,
+// token.email_verified）。
+//
+// 必須要件（v8.1 2-4）:
+//   1. トランザクション必須（authIndex 作成と customers.authUid 付与の不可分性）
+//   2. 冪等性（同じユーザーが2回呼んでも安全）
+//   3. emailVerified=false 拒否
+//   4. claim 成立時の過去予約 authUid 後埋め（分割バッチ）
+//   5. エラー時の挙動：トランザクション失敗時はクライアントにエラーを返す
+// ========================================
+
+exports.resolveOrClaimCustomer = onCall(
+  { region: 'asia-northeast1' },
+  async (request) => {
+    // ============================================================
+    // 1. 認証チェック
+    // ============================================================
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'ログインが必要です');
+    }
+    const uid = request.auth.uid;
+    const email = (request.auth.token && request.auth.token.email) || '';
+    const emailVerified = !!(request.auth.token && request.auth.token.email_verified);
+
+    if (!emailVerified) {
+      throw new HttpsError(
+        'failed-precondition',
+        'メール確認が完了していません。メールのリンクをタップしてから再度お試しください。'
+      );
+    }
+    if (!email) {
+      throw new HttpsError(
+        'failed-precondition',
+        'メールアドレスが取得できませんでした'
+      );
+    }
+
+    // ============================================================
+    // 2. 入力バリデーション
+    // ============================================================
+    const data = request.data || {};
+    const salonId = data.salonId;
+    const name = (data.name || '').trim();
+    const phone = (data.phone || '').trim();
+
+    if (!salonId || typeof salonId !== 'string') {
+      throw new HttpsError('invalid-argument', 'salonId が指定されていません');
+    }
+
+    logger.info('resolveOrClaimCustomer called', { uid, email, salonId });
+
+    // ============================================================
+    // 3. 冪等性チェック: 既に authIndex にあれば即返却
+    // ============================================================
+    const authIndexRef = db.collection('salons').doc(salonId)
+      .collection('authIndex').doc(uid);
+    const existingIndex = await authIndexRef.get();
+    if (existingIndex.exists) {
+      const existingCustomerDocId = existingIndex.data().customerDocId;
+      logger.info('Already resolved', { uid, salonId, customerDocId: existingCustomerDocId });
+      return {
+        result: 'already_resolved',
+        customerDocId: existingCustomerDocId
+      };
+    }
+
+    // ============================================================
+    // 4. メール一致候補検索
+    //    （未 claim = authUid==null かつ isMerged==false）
+    // ============================================================
+    const customersRef = db.collection('salons').doc(salonId).collection('customers');
+    const emailMatchSnap = await customersRef.where('email', '==', email).get();
+
+    const unclaimedCandidates = [];
+    emailMatchSnap.forEach((doc) => {
+      const c = doc.data();
+      if (c.authUid == null && c.isMerged !== true) {
+        unclaimedCandidates.push({ id: doc.id, data: c });
+      }
+    });
+
+    logger.info('Candidate search result', {
+      uid, salonId, email,
+      totalMatch: emailMatchSnap.size,
+      unclaimedCount: unclaimedCandidates.length
+    });
+
+    // ============================================================
+    // 5. 件数判定 → トランザクション実行
+    // ============================================================
+
+    // -------- 4-A: 候補=1件 → claim 成立 --------
+    if (unclaimedCandidates.length === 1) {
+      const candidateId = unclaimedCandidates[0].id;
+      const candidateRef = customersRef.doc(candidateId);
+
+      try {
+        await db.runTransaction(async (tx) => {
+          // トランザクション内で再 get（楽観ロック）
+          const freshDoc = await tx.get(candidateRef);
+          if (!freshDoc.exists) {
+            throw new HttpsError('not-found', '候補カルテが見つかりません');
+          }
+          const fresh = freshDoc.data();
+          if (fresh.authUid != null || fresh.isMerged === true) {
+            // 直前で他者が claim した / merge された
+            // → 候補なし扱いで新カルテ作成に切り替え（後続処理に委ねる）
+            throw new HttpsError('aborted', 'CANDIDATE_STATE_CHANGED');
+          }
+
+          // claim 実行
+          tx.update(candidateRef, {
+            authUid: uid,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+          tx.set(authIndexRef, {
+            customerDocId: candidateId,
+            createdAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+        });
+      } catch (txErr) {
+        if (txErr.code === 'aborted' && txErr.message === 'CANDIDATE_STATE_CHANGED') {
+          // リトライ: 4-B / 4-C の経路に流し直す（簡易リトライ）
+          logger.warn('Candidate state changed during tx, retrying as new', { uid, salonId });
+          return await createNewCustomerAndReturn(
+            db, salonId, customersRef, authIndexRef, uid, email, name, phone, false, []
+          );
+        }
+        logger.error('claim transaction failed', { uid, salonId, error: txErr.message });
+        throw new HttpsError('internal', 'claim 処理に失敗しました: ' + txErr.message);
+      }
+
+      // 過去予約の authUid 後埋め（トランザクション外・分割バッチ）
+      let claimedCount = 0;
+      try {
+        claimedCount = await backfillAuthUidOnPastAppointments(
+          db, salonId, candidateId, uid
+        );
+      } catch (backfillErr) {
+        // 後埋め失敗は claim 自体は成立しているのでログのみ
+        logger.error('backfillAuthUidOnPastAppointments failed', {
+          uid, salonId, candidateId, error: backfillErr.message
+        });
+      }
+
+      logger.info('claim succeeded', { uid, salonId, candidateId, claimedCount });
+      return {
+        result: 'claimed',
+        customerDocId: candidateId,
+        claimedAppointmentCount: claimedCount
+      };
+    }
+
+    // -------- 4-B: 候補=0件 → 新カルテ作成 --------
+    if (unclaimedCandidates.length === 0) {
+      return await createNewCustomerAndReturn(
+        db, salonId, customersRef, authIndexRef,
+        uid, email, name, phone,
+        /* needsMergeReview */ false,
+        /* candidateIdsToFlag */ []
+      );
+    }
+
+    // -------- 4-C: 候補=2件以上 → 新カルテ作成 + 候補に needsMergeReview --------
+    const candidateIds = unclaimedCandidates.map((c) => c.id);
+    return await createNewCustomerAndReturn(
+      db, salonId, customersRef, authIndexRef,
+      uid, email, name, phone,
+      /* needsMergeReview */ true,
+      /* candidateIdsToFlag */ candidateIds
+    );
+  }
+);
+
+// ========================================
+// 新カルテ作成共通処理（4-B/4-C で使う）
+// 4-C の場合: needsMergeReview=true で新カルテ作成 +
+//             候補カルテ全件に needsMergeReview=true を立てる
+// ========================================
+async function createNewCustomerAndReturn(
+  db, salonId, customersRef, authIndexRef,
+  uid, email, name, phone,
+  needsMergeReview, candidateIdsToFlag
+) {
+  const newDocRef = customersRef.doc(); // 自動採番
+  const newDocId = newDocRef.id;
+
+  try {
+    await db.runTransaction(async (tx) => {
+      // authIndex の二重チェック（4-A から落ちてきた場合の保険）
+      const freshIndex = await tx.get(authIndexRef);
+      if (freshIndex.exists) {
+        // 既に他のパスで作られた → 既存値を返す（後続で読み直す）
+        throw new HttpsError('aborted', 'INDEX_ALREADY_EXISTS');
+      }
+
+      // 候補カルテ全件を再 get（4-C 経路）
+      const candidateRefs = candidateIdsToFlag.map((id) => customersRef.doc(id));
+      const candidateDocs = [];
+      for (let i = 0; i < candidateRefs.length; i++) {
+        const d = await tx.get(candidateRefs[i]);
+        candidateDocs.push(d);
+      }
+
+      // 新カルテ作成
+      tx.set(newDocRef, {
+        name: name,
+        phone: phone,
+        email: email,
+        authUid: uid,
+        createdSource: 'self',
+        notifyChannels: { email: true, line: false },
+        memo: '',
+        karteNote: '',
+        stampCount: 0,
+        lastVisit: null,
+        totalSpent: 0,
+        isMerged: false,
+        mergedInto: null,
+        mergedAt: null,
+        mergedAliases: [],
+        lockedByJob: null,
+        needsMergeReview: needsMergeReview,
+        lineUserId: null,
+        createdAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      // authIndex 作成
+      tx.set(authIndexRef, {
+        customerDocId: newDocId,
+        createdAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      // 4-C: 候補カルテ全件に needsMergeReview=true を立てる
+      for (let i = 0; i < candidateDocs.length; i++) {
+        const d = candidateDocs[i];
+        if (d.exists && d.data().isMerged !== true) {
+          tx.update(candidateRefs[i], {
+            needsMergeReview: true,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+        }
+      }
+    });
+  } catch (txErr) {
+    if (txErr.code === 'aborted' && txErr.message === 'INDEX_ALREADY_EXISTS') {
+      // 他のパスで authIndex が作られた → 既存を返す
+      const re = await authIndexRef.get();
+      if (re.exists) {
+        return {
+          result: 'already_resolved',
+          customerDocId: re.data().customerDocId
+        };
+      }
+    }
+    logger.error('createNewCustomer transaction failed', {
+      uid, salonId, error: txErr.message
+    });
+    throw new HttpsError('internal', 'カルテ作成に失敗しました: ' + txErr.message);
+  }
+
+  if (needsMergeReview) {
+    logger.info('created_new with needs_merge_review', {
+      uid, salonId, newDocId, candidateCount: candidateIdsToFlag.length
+    });
+    return {
+      result: 'needs_merge_review',
+      customerDocId: newDocId,
+      candidateCount: candidateIdsToFlag.length
+    };
+  } else {
+    logger.info('created_new', { uid, salonId, newDocId });
+    return {
+      result: 'created_new',
+      customerDocId: newDocId
+    };
+  }
+}
+
+// ========================================
+// 過去予約の authUid 後埋め（claim 成立時）
+// 設計書 v8.1 2-4 必須要件 4
+//
+// 分割バッチで appointments / appointments_archive 両方を処理
+// 1バッチ ≤ 500件（Firestore バッチ上限対策）
+// 失敗時は logger に記録、claim 自体の成立は維持
+// ========================================
+async function backfillAuthUidOnPastAppointments(db, salonId, customerDocId, uid) {
+  const collectionsToProcess = ['appointments', 'appointments_archive'];
+  let totalUpdated = 0;
+
+  for (let ci = 0; ci < collectionsToProcess.length; ci++) {
+    const colName = collectionsToProcess[ci];
+    const colRef = db.collection('salons').doc(salonId).collection(colName);
+
+    // customerDocId 一致 かつ authUid==null のものを取得
+    // ※ Firestore は != null クエリができないので、
+    //   customerDocId 一致を取り → クライアント側で authUid==null をフィルタ
+    //   件数が多いサロンでは複合インデックス（customerDocId, authUid）で
+    //   将来最適化するが、フェーズ1では十分
+    const snap = await colRef.where('customerDocId', '==', customerDocId).get();
+
+    let batch = db.batch();
+    let opsInBatch = 0;
+
+    for (const doc of snap.docs) {
+      const a = doc.data();
+      if (a.authUid != null) continue; // 既に埋まっている
+
+      batch.update(doc.ref, {
+        authUid: uid,
+        updatedAt: admin.firestore.FieldValue.serverTimestamp()
+      });
+      opsInBatch++;
+      totalUpdated++;
+
+      // 500件ごとにコミット（Firestore バッチ上限 500）
+      if (opsInBatch >= 450) {
+        await batch.commit();
+        batch = db.batch();
+        opsInBatch = 0;
+      }
+    }
+
+    if (opsInBatch > 0) {
+      await batch.commit();
+    }
+
+    logger.info('backfill collection done', {
+      salonId, customerDocId, collection: colName,
+      scanned: snap.size, updated: totalUpdated
+    });
+  }
+
+  return totalUpdated;
+}
