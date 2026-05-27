@@ -558,6 +558,20 @@ exports.resolveOrClaimCustomer = onCall(
     }
 
     logger.info('resolveOrClaimCustomer called', { uid, email, salonId });
+    
+    // ================================================================
+    // 2-5. salon 本体ドキュメント存在チェック（再発防止・O/0事故対策）
+    // ================================================================
+    const salonDocRef = db.collection('salons').doc(salonId);
+    const salonDocSnap = await salonDocRef.get();
+    if (!salonDocSnap.exists) {
+      logger.warn('salon document does not exist', { salonId, uid });
+      throw new HttpsError(
+        'invalid-argument',
+        '指定されたサロンが存在しません。URLを確認してください。'
+      );
+    }
+
 
     // ============================================================
     // 3. 冪等性チェック: 既に authIndex にあれば即返却
