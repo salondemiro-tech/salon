@@ -1,0 +1,1231 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ご予約 - TORITA</title>
+
+<!-- Firebase SDK 9.23.0 compat -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<!-- ★ claim Function 呼び出しに必須（D-step3 dbCustomerClaimMyCard が利用） -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
+<script src="firebase-init.js"></script>
+
+<style>
+  :root{
+    --ac:#b5845a;--al:#f5ede4;--ad:#7a5535;
+    --bg:#fff;--sf:#f8f7f4;--s2:#f0ede8;
+    --bd:rgba(0,0,0,.10);--tx:#1a1a18;--mu:#73726c;--hi:#b0afa9;
+    --gn:#7b9e87;--gl:#e8f2eb;--gt:#1e4d2b;
+    --rd:#c47b7b;--rl:#faeaea;--rt:#6b1f1f;
+    --go:#c9a84c;--gol:#fdf6e3;
+  }
+  *{box-sizing:border-box;}
+  body{
+    font-family:Georgia,"Hiragino Mincho ProN",serif;
+    background:var(--s2);color:var(--tx);
+    margin:0;padding:0;min-height:100vh;
+    -webkit-text-size-adjust:100%;
+  }
+  .wrap{max-width:480px;margin:0 auto;min-height:100vh;background:var(--bg);
+        box-shadow:0 0 40px rgba(0,0,0,.06);display:flex;flex-direction:column;}
+
+  /* ヘッダー */
+  .hdr{background:var(--al);padding:18px 20px;border-bottom:1px solid var(--bd);
+       position:sticky;top:0;z-index:10;}
+  .hdr-salon{font-size:17px;font-weight:600;color:var(--ad);}
+  .hdr-sub{font-size:11px;color:var(--mu);margin-top:2px;letter-spacing:.04em;}
+
+  /* ステップインジケータ */
+  .steps{display:flex;gap:6px;padding:14px 20px 0;}
+  .step-dot{flex:1;height:4px;border-radius:2px;background:var(--s2);transition:background .3s;}
+  .step-dot.active{background:var(--ac);}
+  .step-dot.done{background:var(--gn);}
+
+  /* 本体 */
+  .body{flex:1;padding:20px;}
+  .step-title{font-size:19px;font-weight:600;color:var(--tx);margin:4px 0 4px;}
+  .step-desc{font-size:13px;color:var(--mu);margin-bottom:18px;line-height:1.6;}
+
+  /* メニューカード */
+  .menu-card{border:1.5px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:12px;
+             cursor:pointer;transition:all .15s;background:var(--bg);}
+  .menu-card:active{transform:scale(.99);}
+  .menu-card.selected{border-color:var(--ac);background:var(--al);box-shadow:0 2px 12px rgba(181,132,90,.15);}
+  .menu-name{font-size:16px;font-weight:600;color:var(--tx);}
+  .menu-meta{font-size:12px;color:var(--mu);margin-top:6px;display:flex;gap:14px;}
+  .menu-price{font-size:15px;font-weight:600;color:var(--ad);}
+  .menu-desc{font-size:12px;color:var(--mu);margin-top:8px;line-height:1.5;}
+
+  /* オプション */
+  .opt-row{display:flex;align-items:center;gap:12px;padding:12px;border:1.5px solid var(--bd);
+           border-radius:10px;margin-bottom:8px;cursor:pointer;background:var(--bg);}
+  .opt-row.selected{border-color:var(--ac);background:var(--al);}
+  .opt-check{width:22px;height:22px;border-radius:6px;border:2px solid var(--bd);
+             flex-shrink:0;display:flex;align-items:center;justify-content:center;
+             font-size:14px;color:#fff;}
+  .opt-row.selected .opt-check{background:var(--ac);border-color:var(--ac);}
+  .opt-info{flex:1;}
+  .opt-name{font-size:14px;font-weight:600;}
+  .opt-meta{font-size:11px;color:var(--mu);margin-top:2px;}
+
+  /* カレンダー */
+  .cal-nav{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;}
+  .cal-month{font-size:15px;font-weight:600;}
+  .cal-btn{background:none;border:1.5px solid var(--bd);border-radius:8px;width:36px;height:36px;
+           cursor:pointer;font-size:15px;font-family:inherit;color:var(--tx);}
+  .cal-btn:disabled{opacity:.3;cursor:default;}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px;}
+  .cal-dow{text-align:center;font-size:11px;color:var(--mu);padding:4px 0;font-weight:600;}
+  .cal-dow.sun{color:var(--rd);}.cal-dow.sat{color:#7a8fbf;}
+  .cal-day{aspect-ratio:1;display:flex;align-items:center;justify-content:center;
+           border-radius:9px;font-size:14px;cursor:pointer;border:1.5px solid transparent;
+           background:var(--sf);}
+  .cal-day.empty{background:none;cursor:default;}
+  .cal-day.closed{color:var(--hi);background:none;cursor:default;text-decoration:line-through;}
+  .cal-day.past{color:var(--hi);background:none;cursor:default;}
+  .cal-day.selected{background:var(--ac);color:#fff;border-color:var(--ac);}
+  .cal-day.today{border-color:var(--ac);}
+
+  /* スロット */
+  .slot-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px;}
+  .slot{padding:12px 4px;text-align:center;border:1.5px solid var(--bd);border-radius:10px;
+        cursor:pointer;font-size:14px;background:var(--bg);}
+  .slot.selected{background:var(--ac);color:#fff;border-color:var(--ac);}
+  .slot.disabled{opacity:.3;cursor:default;background:var(--s2);}
+
+  /* フォーム */
+  .field{margin-bottom:14px;}
+  .label{font-size:12px;color:var(--mu);font-weight:600;margin-bottom:6px;display:block;}
+  .input{width:100%;padding:13px 14px;border:1.5px solid var(--bd);border-radius:10px;
+         font-size:16px;font-family:inherit;background:var(--bg);color:var(--tx);}
+  .input:focus{outline:none;border-color:var(--ac);}
+
+  /* ボタン */
+  .pbtn{width:100%;padding:15px;background:var(--ac);color:#fff;border:none;border-radius:12px;
+        font-size:15px;font-weight:600;cursor:pointer;font-family:inherit;}
+  .pbtn:disabled{opacity:.4;cursor:default;}
+  .sbtn{width:100%;padding:13px;background:none;color:var(--ac);border:2px solid var(--ac);
+        border-radius:12px;font-size:14px;cursor:pointer;font-family:inherit;margin-top:10px;font-weight:600;}
+  .gbtn{width:100%;padding:12px;background:none;color:var(--mu);border:1.5px solid var(--bd);
+        border-radius:12px;font-size:13px;cursor:pointer;font-family:inherit;margin-top:8px;}
+
+  /* フッターバー（次へ） */
+  .footer{padding:16px 20px;border-top:1px solid var(--bd);background:var(--bg);
+          position:sticky;bottom:0;}
+  .footer-summary{font-size:12px;color:var(--mu);margin-bottom:10px;text-align:center;}
+
+  /* 確認サマリ */
+  .sum-row{display:flex;justify-content:space-between;padding:12px 0;border-bottom:1px solid var(--bd);}
+  .sum-label{font-size:13px;color:var(--mu);}
+  .sum-value{font-size:14px;font-weight:600;text-align:right;}
+  .sum-total{display:flex;justify-content:space-between;padding:16px 0 4px;}
+  .sum-total .sum-value{font-size:20px;color:var(--ad);}
+
+  /* 完了 */
+  .complete{text-align:center;padding:40px 20px;}
+  .complete-icon{width:72px;height:72px;border-radius:50%;background:var(--gl);
+                 display:flex;align-items:center;justify-content:center;margin:0 auto 20px;
+                 font-size:36px;color:var(--gt);}
+  .complete-title{font-size:20px;font-weight:600;margin-bottom:10px;}
+  .complete-desc{font-size:13px;color:var(--mu);line-height:1.7;}
+
+  /* 状態表示 */
+  .loading{text-align:center;padding:50px 20px;color:var(--mu);font-size:14px;}
+  .spinner{width:32px;height:32px;border:3px solid var(--s2);border-top-color:var(--ac);
+           border-radius:50%;margin:0 auto 16px;animation:spin .8s linear infinite;}
+  @keyframes spin{to{transform:rotate(360deg);}}
+  .error-box{background:var(--rl);color:var(--rt);padding:14px;border-radius:10px;
+             font-size:13px;line-height:1.6;margin-bottom:14px;border-left:3px solid var(--rd);}
+  .info-box{background:var(--gol);color:#7a5800;padding:14px;border-radius:10px;
+            font-size:13px;line-height:1.6;margin-bottom:14px;}
+  .empty-msg{text-align:center;color:var(--mu);padding:30px 20px;font-size:14px;}
+
+  /* メール確認バナー */
+  .verify-banner{background:var(--gol);border:1px solid var(--go);border-radius:10px;
+                 padding:14px;font-size:13px;color:#7a5800;line-height:1.6;margin-bottom:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hdr">
+    <div class="hdr-salon" id="hdrSalon">読み込み中...</div>
+    <div class="hdr-sub" id="hdrSub">ご予約</div>
+  </div>
+  <div class="steps" id="stepsBar" style="display:none;">
+    <div class="step-dot" data-step="menu"></div>
+    <div class="step-dot" data-step="date"></div>
+    <div class="step-dot" data-step="identity"></div>
+    <div class="step-dot" data-step="confirm"></div>
+  </div>
+  <div class="body" id="appBody">
+    <div class="loading"><div class="spinner"></div>読み込んでいます...</div>
+  </div>
+  <div class="footer" id="appFooter" style="display:none;"></div>
+</div>
+
+<script>
+// ============================================================
+// customer_app_v2.html  -  TORITA 顧客予約アプリ（Phase D-step4）
+//
+// 設計書 DESIGN.md Phase D（D-1〜D-8）準拠。今回は D-2〜D-6（予約成立まで）。
+//
+// 構成方針（2026/5/28 確定）:
+//   - 1ファイル SPA 風（画面切替・リロードなし）
+//   - 状態は appState 単一オブジェクトに集約
+//   - 画面ごとに renderMenuStep / renderDateStep / renderIdentityStep /
+//     renderConfirmStep / renderCompleteStep に分割
+//   - salonId は起動時 URL ?salon=xxx から1回だけ確定、以後手入力させない
+//   - claim は「初回予約確定の直前」に dbCustomerClaimMyCard を呼ぶ
+//   - 予約は dbCustomerCreateAppointment 直呼び（reservation.js は経由しない）
+//   - ES5 互換（var/function/Promise.then のみ）
+//
+// 依存:
+//   shared_db.js（D-step3版）, shared_db_calendar.js, firebase-*-compat.js
+// ============================================================
+
+// ------------------------------------------------------------
+// 状態管理：単一オブジェクト
+// ------------------------------------------------------------
+var appState = {
+  salonId: null,          // 起動時1回確定、以後変更不可
+  salonInfo: null,        // { name, ... }
+  settings: null,         // 営業時間など
+
+  menus: null,            // 公開メニュー一覧
+  selectedMenu: null,     // 選択したメニュー（オブジェクト）
+  selectedOptions: [],    // 選択したオプションメニュー（配列）
+
+  calYear: null,          // カレンダー表示中の年
+  calMonth: null,         // カレンダー表示中の月（1-12）
+  selectedDate: null,     // "2026-06-01"
+  dayData: null,          // dbLoadCustomerBooking の結果
+  availableSlots: null,   // computeAvailableSlots の結果
+  selectedSlot: null,     // "14:00"
+
+  user: null,             // Firebase Auth currentUser
+  customerDocId: null,    // claim 後に確定
+
+  step: 'loading',        // loading / menu / option / date / identity / confirm / complete
+  busy: false             // 二重送信防止
+};
+
+// グローバル参照
+var auth = null;
+
+// ------------------------------------------------------------
+// ユーティリティ
+// ------------------------------------------------------------
+function $(id){ return document.getElementById(id); }
+
+function esc(s){
+  if (s == null) return '';
+  return String(s)
+    .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function setBody(html){ $('appBody').innerHTML = html; }
+function setFooter(html){
+  var f = $('appFooter');
+  if (!html) { f.style.display='none'; f.innerHTML=''; return; }
+  f.style.display='block'; f.innerHTML = html;
+}
+
+function showLoading(msg){
+  setBody('<div class="loading"><div class="spinner"></div>' + esc(msg || '読み込んでいます...') + '</div>');
+  setFooter('');
+}
+
+function yen(n){
+  var v = parseInt(n, 10);
+  if (isNaN(v)) return '—';
+  return '¥' + v.toLocaleString('ja-JP');
+}
+
+// 円の手動フォーマット（toLocaleString が不安な環境の保険）
+function yenSafe(n){
+  var v = parseInt(n, 10);
+  if (isNaN(v)) return '—';
+  var s = String(v);
+  var out = '';
+  var c = 0;
+  var i;
+  for (i = s.length - 1; i >= 0; i--){
+    out = s.charAt(i) + out;
+    c++;
+    if (c % 3 === 0 && i > 0) out = ',' + out;
+  }
+  return '¥' + out;
+}
+
+// ステップバーの更新
+function updateStepsBar(){
+  var order = ['menu','date','identity','confirm'];
+  var curIdx = order.indexOf(appState.step);
+  // option は menu 扱い、complete は全部 done
+  if (appState.step === 'option') curIdx = 0;
+  if (appState.step === 'complete') curIdx = order.length;
+
+  var bar = $('stepsBar');
+  if (appState.step === 'loading') { bar.style.display='none'; return; }
+  bar.style.display='flex';
+
+  var dots = bar.querySelectorAll('.step-dot');
+  var i;
+  for (i = 0; i < dots.length; i++){
+    dots[i].className = 'step-dot';
+    if (i < curIdx) dots[i].className = 'step-dot done';
+    else if (i === curIdx) dots[i].className = 'step-dot active';
+  }
+}
+
+// 画面遷移の中心：step を変えて再描画
+function goStep(step){
+  appState.step = step;
+  appState.busy = false;
+  window.scrollTo(0, 0);
+  render();
+}
+
+function render(){
+  updateStepsBar();
+  switch (appState.step){
+    case 'menu':     renderMenuStep(); break;
+    case 'option':   renderOptionStep(); break;
+    case 'date':     renderDateStep(); break;
+    case 'identity': renderIdentityStep(); break;
+    case 'confirm':  renderConfirmStep(); break;
+    case 'complete': renderCompleteStep(); break;
+    default:         showLoading();
+  }
+}
+
+// ------------------------------------------------------------
+// 起動（D-2）
+// ------------------------------------------------------------
+function init(){
+  if (!window.firebase || !firebase.apps || firebase.apps.length === 0){
+    setBody('<div class="error-box">アプリの初期化に失敗しました。ページを再読み込みしてください。</div>');
+    return;
+  }
+  try {
+    auth = firebase.auth();
+  } catch(e){
+    setBody('<div class="error-box">認証システムの初期化に失敗しました。</div>');
+    return;
+  }
+
+  // salonId を URL から1回だけ確定（shared_db.js が getCurrentSalonId で吸収）
+  var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
+  if (!sid){
+    var params = new URLSearchParams(window.location.search);
+    sid = params.get('salon');
+  }
+  if (!sid){
+    setBody('<div class="error-box">予約用のURLが正しくありません。<br>'
+          + 'サロンからご案内されたリンクから再度アクセスしてください。</div>');
+    $('hdrSalon').textContent = 'ご予約';
+    return;
+  }
+  appState.salonId = sid;
+
+  // 認証状態を監視（ログイン状態の変化に追従）
+  // 初回発火で「ログイン済みか」を判定し、フローを分岐する。
+  var firstAuthHandled = false;
+  auth.onAuthStateChanged(function(user){
+    appState.user = user || null;
+    if (firstAuthHandled) { return; }
+    firstAuthHandled = true;
+
+    if (user && user.emailVerified){
+      // 既にログイン済み（メール確認済み）→ サロン情報取得へ
+      loadSalonInfo();
+    } else {
+      // 未ログイン or メール未確認 → ログイン画面（D-4）から開始
+      // ここではサロン名はまだ出せない（rules上 info read もログイン必須）
+      $('hdrSalon').textContent = 'ご予約';
+      $('hdrSub').textContent = 'ログイン / 新規登録';
+      goStep('identity');
+    }
+  });
+}
+
+function loadSalonInfo(){
+  showLoading('サロン情報を読み込んでいます...');
+
+  if (typeof dbCustomerGetSalonInfo !== 'function'){
+    setBody('<div class="error-box">システムの読み込みに失敗しました（shared_db.js）。</div>');
+    return;
+  }
+
+  dbCustomerGetSalonInfo(function(info){
+    appState.salonInfo = info || null;
+    var name = (info && info.name) ? info.name : 'サロン';
+    $('hdrSalon').textContent = name;
+    $('hdrSub').textContent = 'ご予約';
+
+    // settings も取得（営業時間。スロット計算で使う）
+    if (typeof dbSalonGetConfig === 'function'){
+      dbSalonGetConfig('settings', function(s){
+        appState.settings = s || null;
+        goStep('menu');
+      });
+    } else {
+      goStep('menu');
+    }
+  });
+}
+
+// ============================================================
+// D-3: メニュー選択（type:'main'）
+// ============================================================
+function renderMenuStep(){
+  // メニュー未取得なら取得
+  if (!appState.menus){
+    showLoading('メニューを読み込んでいます...');
+    if (typeof dbCustomerGetPublicMenus !== 'function'){
+      setBody('<div class="error-box">メニューの読み込みに失敗しました。</div>');
+      return;
+    }
+    dbCustomerGetPublicMenus(function(list){
+      appState.menus = list || [];
+      renderMenuStep();
+    });
+    return;
+  }
+
+  // main メニューを抽出（sortOrder 昇順）
+  var mains = [];
+  var i;
+  for (i = 0; i < appState.menus.length; i++){
+    var m = appState.menus[i];
+    if (m && m.type === 'main'){ mains.push(m); }
+  }
+  mains.sort(function(a, b){
+    var sa = (typeof a.sortOrder === 'number') ? a.sortOrder : 9999;
+    var sb = (typeof b.sortOrder === 'number') ? b.sortOrder : 9999;
+    return sa - sb;
+  });
+
+  if (mains.length === 0){
+    setBody(
+      '<div class="step-title">メニュー</div>' +
+      '<div class="empty-msg">現在ご予約いただけるメニューがありません。<br>サロンにお問い合わせください。</div>'
+    );
+    setFooter('');
+    return;
+  }
+
+  var html = '<div class="step-title">メニューを選ぶ</div>' +
+             '<div class="step-desc">ご希望のメニューをお選びください。</div>';
+  for (i = 0; i < mains.length; i++){
+    var menu = mains[i];
+    var sel = (appState.selectedMenu && appState.selectedMenu._id === menu._id) ? ' selected' : '';
+    html += '<div class="menu-card' + sel + '" data-mid="' + esc(menu._id) + '">' +
+              '<div class="menu-name">' + esc(menu.name) + '</div>' +
+              '<div class="menu-meta">' +
+                '<span class="menu-price">' + yenSafe(menu.price) + '</span>' +
+                '<span>約' + esc(menu.duration) + '分</span>' +
+              '</div>' +
+              (menu.description ? '<div class="menu-desc">' + esc(menu.description) + '</div>' : '') +
+            '</div>';
+  }
+  setBody(html);
+
+  // カード選択
+  var cards = $('appBody').querySelectorAll('.menu-card');
+  for (i = 0; i < cards.length; i++){
+    cards[i].addEventListener('click', function(){
+      var mid = this.getAttribute('data-mid');
+      var j;
+      for (j = 0; j < mains.length; j++){
+        if (mains[j]._id === mid){ appState.selectedMenu = mains[j]; break; }
+      }
+      // オプションがあるか確認して遷移先を決める
+      var hasOptions = false;
+      for (j = 0; j < appState.menus.length; j++){
+        if (appState.menus[j] && appState.menus[j].type === 'option'){ hasOptions = true; break; }
+      }
+      if (hasOptions){ goStep('option'); }
+      else { appState.selectedOptions = []; goStep('date'); }
+    });
+  }
+  setFooter('');
+}
+
+// オプション選択（type:'option'）。任意。
+function renderOptionStep(){
+  var opts = [];
+  var i;
+  for (i = 0; i < appState.menus.length; i++){
+    if (appState.menus[i] && appState.menus[i].type === 'option'){ opts.push(appState.menus[i]); }
+  }
+  opts.sort(function(a, b){
+    var sa = (typeof a.sortOrder === 'number') ? a.sortOrder : 9999;
+    var sb = (typeof b.sortOrder === 'number') ? b.sortOrder : 9999;
+    return sa - sb;
+  });
+
+  var html = '<div class="step-title">オプション</div>' +
+             '<div class="step-desc">追加のオプションがあればお選びください（任意・複数可）。</div>';
+  for (i = 0; i < opts.length; i++){
+    var o = opts[i];
+    var sel = isOptionSelected(o._id) ? ' selected' : '';
+    html += '<div class="opt-row' + sel + '" data-oid="' + esc(o._id) + '">' +
+              '<div class="opt-check">' + (sel ? '\u2713' : '') + '</div>' +
+              '<div class="opt-info">' +
+                '<div class="opt-name">' + esc(o.name) + '</div>' +
+                '<div class="opt-meta">' + yenSafe(o.price) + ' / 約' + esc(o.duration) + '分</div>' +
+              '</div>' +
+            '</div>';
+  }
+  setBody(html);
+
+  var rows = $('appBody').querySelectorAll('.opt-row');
+  for (i = 0; i < rows.length; i++){
+    rows[i].addEventListener('click', function(){
+      var oid = this.getAttribute('data-oid');
+      toggleOption(oid);
+      renderOptionStep(); // 再描画でチェック反映
+    });
+  }
+
+  setFooter(
+    '<button class="pbtn" id="optNextBtn">日時を選ぶ</button>' +
+    '<button class="gbtn" id="optBackBtn">メニュー選択に戻る</button>'
+  );
+  $('optNextBtn').addEventListener('click', function(){ goStep('date'); });
+  $('optBackBtn').addEventListener('click', function(){ goStep('menu'); });
+}
+
+function isOptionSelected(oid){
+  var i;
+  for (i = 0; i < appState.selectedOptions.length; i++){
+    if (appState.selectedOptions[i]._id === oid){ return true; }
+  }
+  return false;
+}
+
+function toggleOption(oid){
+  var i;
+  for (i = 0; i < appState.selectedOptions.length; i++){
+    if (appState.selectedOptions[i]._id === oid){
+      appState.selectedOptions.splice(i, 1);
+      return;
+    }
+  }
+  // 追加
+  for (i = 0; i < appState.menus.length; i++){
+    if (appState.menus[i]._id === oid){
+      appState.selectedOptions.push(appState.menus[i]);
+      return;
+    }
+  }
+}
+
+// 合計時間・合計金額
+function totalDuration(){
+  var d = (appState.selectedMenu && appState.selectedMenu.duration) ? appState.selectedMenu.duration : 0;
+  var i;
+  for (i = 0; i < appState.selectedOptions.length; i++){
+    d += (appState.selectedOptions[i].duration || 0);
+  }
+  return d;
+}
+function totalPrice(){
+  var p = (appState.selectedMenu && appState.selectedMenu.price) ? appState.selectedMenu.price : 0;
+  var i;
+  for (i = 0; i < appState.selectedOptions.length; i++){
+    p += (appState.selectedOptions[i].price || 0);
+  }
+  return p;
+}
+
+// ============================================================
+// D-5: 日時選択（カレンダー + 空きスロット）
+// ============================================================
+var DOW_LABELS = ['日','月','火','水','木','金','土'];
+
+function renderDateStep(){
+  if (appState.calYear == null){
+    var now = new Date();
+    appState.calYear = now.getFullYear();
+    appState.calMonth = now.getMonth() + 1;
+  }
+  drawCalendar();
+}
+
+function drawCalendar(){
+  var y = appState.calYear;
+  var mo = appState.calMonth;
+  var settings = appState.settings || {};
+  var closedDows = settings.closedDows || [];
+
+  var bookingWeeks = (typeof settings.bookingWeeks === 'number') ? settings.bookingWeeks : 8;
+  var today = new Date();
+  today.setHours(0,0,0,0);
+  var maxDate = new Date(today.getTime());
+  maxDate.setDate(maxDate.getDate() + bookingWeeks * 7);
+
+  var firstDow = new Date(y, mo - 1, 1).getDay();
+  var daysInMonth = new Date(y, mo, 0).getDate();
+
+  var curMonthFirst = new Date(y, mo - 1, 1);
+  var thisMonthFirst = new Date(today.getFullYear(), today.getMonth(), 1);
+  var prevDisabled = (curMonthFirst.getTime() <= thisMonthFirst.getTime());
+
+  var html = '<div class="step-title">日時を選ぶ</div>' +
+             '<div class="step-desc">ご希望の日付を選んでください。</div>' +
+             '<div class="cal-nav">' +
+               '<button class="cal-btn" id="calPrev"' + (prevDisabled ? ' disabled' : '') + '>\u2039</button>' +
+               '<div class="cal-month">' + y + '年 ' + mo + '月</div>' +
+               '<button class="cal-btn" id="calNext">\u203a</button>' +
+             '</div>' +
+             '<div class="cal-grid">';
+
+  var i;
+  for (i = 0; i < 7; i++){
+    var cls = (i === 0) ? ' sun' : (i === 6 ? ' sat' : '');
+    html += '<div class="cal-dow' + cls + '">' + DOW_LABELS[i] + '</div>';
+  }
+  for (i = 0; i < firstDow; i++){ html += '<div class="cal-day empty"></div>'; }
+
+  for (i = 1; i <= daysInMonth; i++){
+    var d = new Date(y, mo - 1, i);
+    d.setHours(0,0,0,0);
+    var dow = d.getDay();
+    var dateKey = y + '-' + pad2(mo) + '-' + pad2(i);
+    var isPast = (d.getTime() < today.getTime());
+    var isFuture = (d.getTime() > maxDate.getTime());
+    var isClosedDow = (closedDows.indexOf(dow) >= 0);
+    var isToday = (d.getTime() === today.getTime());
+    var isSelected = (appState.selectedDate === dateKey);
+
+    var dcls = 'cal-day';
+    var clickable = true;
+    if (isPast || isFuture){ dcls += ' past'; clickable = false; }
+    else if (isClosedDow){ dcls += ' closed'; clickable = false; }
+    if (isToday) dcls += ' today';
+    if (isSelected) dcls += ' selected';
+
+    html += '<div class="' + dcls + '"' +
+            (clickable ? ' data-date="' + dateKey + '"' : '') +
+            '>' + i + '</div>';
+  }
+  html += '</div><div id="slotArea"></div>';
+
+  setBody(html);
+  setFooter('<button class="gbtn" id="dateBackBtn">メニュー選択に戻る</button>');
+  $('dateBackBtn').addEventListener('click', function(){
+    var hasOptions = false;
+    var k;
+    for (k = 0; k < appState.menus.length; k++){
+      if (appState.menus[k] && appState.menus[k].type === 'option'){ hasOptions = true; break; }
+    }
+    goStep(hasOptions ? 'option' : 'menu');
+  });
+
+  if (!prevDisabled){
+    $('calPrev').addEventListener('click', function(){
+      appState.calMonth--;
+      if (appState.calMonth < 1){ appState.calMonth = 12; appState.calYear--; }
+      appState.selectedSlot = null;
+      drawCalendar();
+    });
+  }
+  $('calNext').addEventListener('click', function(){
+    appState.calMonth++;
+    if (appState.calMonth > 12){ appState.calMonth = 1; appState.calYear++; }
+    appState.selectedSlot = null;
+    drawCalendar();
+  });
+
+  var dayEls = $('appBody').querySelectorAll('.cal-day[data-date]');
+  for (i = 0; i < dayEls.length; i++){
+    dayEls[i].addEventListener('click', function(){
+      var dk = this.getAttribute('data-date');
+      appState.selectedDate = dk;
+      appState.selectedSlot = null;
+      drawCalendar();
+      loadAndDrawSlots(dk);
+    });
+  }
+
+  if (appState.selectedDate){
+    loadAndDrawSlots(appState.selectedDate);
+  }
+}
+
+function pad2(n){ return (n < 10 ? '0' : '') + n; }
+
+function loadAndDrawSlots(dateKey){
+  var area = $('slotArea');
+  if (!area) return;
+  area.innerHTML = '<div class="loading" style="padding:24px;"><div class="spinner"></div>空き状況を確認中...</div>';
+
+  if (typeof dbLoadCustomerBooking !== 'function'){
+    area.innerHTML = '<div class="error-box">空き状況の取得に失敗しました。</div>';
+    return;
+  }
+
+  dbLoadCustomerBooking(dateKey, function(dayData){
+    if (!dayData){
+      area.innerHTML = '<div class="error-box">空き状況の取得に失敗しました。時間をおいて再度お試しください。</div>';
+      return;
+    }
+    appState.dayData = dayData;
+    var slots = computeAvailableSlots(dayData, dateKey);
+    appState.availableSlots = slots;
+    drawSlots(slots);
+  });
+}
+
+// 空きスロット計算
+function computeAvailableSlots(dayData, dateKey){
+  var settings = dayData.settings || appState.settings || {};
+  var openMin = hhmmToMin(settings.openTime || '10:00');
+  var closeMin = hhmmToMin(settings.closeTime || '19:00');
+  var slotMin = (typeof settings.slotMin === 'number' && settings.slotMin > 0) ? settings.slotMin : 30;
+  var intervalMin = (typeof settings.intervalMin === 'number') ? settings.intervalMin : 0;
+
+  var needMin = totalDuration();
+  if (needMin <= 0) needMin = slotMin;
+
+  var latestStart = closeMin - needMin;
+
+  var busy = [];
+  var appts = dayData.appointments || [];
+  var i;
+  for (i = 0; i < appts.length; i++){
+    var ap = appts[i];
+    if (!ap) continue;
+    if (ap.status === 'cancelled') continue;
+    var s = hhmmToMin(ap.start);
+    var e = ap.end ? hhmmToMin(ap.end) : (s + (ap.durationMin || slotMin));
+    if (isNaN(s)) continue;
+    busy.push({ start: s - intervalMin, end: e + intervalMin });
+  }
+
+  var blocks = dayData.closeBlocks || [];
+  for (i = 0; i < blocks.length; i++){
+    var b = blocks[i];
+    if (!b) continue;
+    if (b.dateKey && b.dateKey !== dateKey) continue;
+    var bs = b.start ? hhmmToMin(b.start) : openMin;
+    var be = b.end ? hhmmToMin(b.end) : closeMin;
+    busy.push({ start: bs, end: be });
+  }
+
+  var dObj = new Date(dateKey + 'T00:00:00');
+  var dow = dObj.getDay();
+  var weeklyClose = settings.weeklyClose || [];
+  for (i = 0; i < weeklyClose.length; i++){
+    var wc = weeklyClose[i];
+    if (wc && wc.dow === dow){
+      busy.push({ start: hhmmToMin(wc.start), end: hhmmToMin(wc.end) });
+    }
+  }
+
+  var nowMin = -1;
+  var today = new Date();
+  var todayKey = today.getFullYear() + '-' + pad2(today.getMonth()+1) + '-' + pad2(today.getDate());
+  if (dateKey === todayKey){
+    nowMin = today.getHours() * 60 + today.getMinutes();
+  }
+
+  var slots = [];
+  var t;
+  for (t = openMin; t <= latestStart; t += slotMin){
+    var slotStart = t;
+    var slotEnd = t + needMin;
+    var ok = true;
+    if (nowMin >= 0 && slotStart <= nowMin){ ok = false; }
+    if (ok){
+      var j;
+      for (j = 0; j < busy.length; j++){
+        if (slotStart < busy[j].end && slotEnd > busy[j].start){ ok = false; break; }
+      }
+    }
+    slots.push({ start: minToHHMM(slotStart), available: ok });
+  }
+  return slots;
+}
+
+function drawSlots(slots){
+  var area = $('slotArea');
+  if (!area) return;
+
+  if (!slots || slots.length === 0){
+    area.innerHTML = '<div class="empty-msg">この日はご予約いただけません。</div>';
+    return;
+  }
+  var anyAvail = false;
+  var i;
+  for (i = 0; i < slots.length; i++){ if (slots[i].available){ anyAvail = true; break; } }
+  if (!anyAvail){
+    area.innerHTML = '<div class="empty-msg">この日は空きがありません。<br>別の日をお選びください。</div>';
+    return;
+  }
+
+  var html = '<div style="margin-top:18px;font-size:13px;color:var(--mu);font-weight:600;">時間を選ぶ</div>'
+           + '<div class="slot-grid">';
+  for (i = 0; i < slots.length; i++){
+    var s = slots[i];
+    var sel = (appState.selectedSlot === s.start) ? ' selected' : '';
+    if (s.available){
+      html += '<div class="slot' + sel + '" data-slot="' + esc(s.start) + '">' + esc(s.start) + '</div>';
+    } else {
+      html += '<div class="slot disabled">' + esc(s.start) + '</div>';
+    }
+  }
+  html += '</div>';
+  area.innerHTML = html;
+
+  var slotEls = area.querySelectorAll('.slot[data-slot]');
+  for (i = 0; i < slotEls.length; i++){
+    slotEls[i].addEventListener('click', function(){
+      appState.selectedSlot = this.getAttribute('data-slot');
+      drawSlots(slots);
+      setFooter(
+        '<div class="footer-summary">' +
+          esc(formatDateJp(appState.selectedDate)) + ' ' + esc(appState.selectedSlot) + '〜　' +
+          esc(appState.selectedMenu ? appState.selectedMenu.name : '') +
+        '</div>' +
+        '<button class="pbtn" id="toConfirmBtn">予約内容を確認する</button>'
+      );
+      $('toConfirmBtn').addEventListener('click', function(){ goStep('confirm'); });
+    });
+  }
+}
+
+function hhmmToMin(s){
+  if (!s) return NaN;
+  var parts = String(s).split(':');
+  if (parts.length < 2) return NaN;
+  return parseInt(parts[0],10) * 60 + parseInt(parts[1],10);
+}
+function minToHHMM(m){
+  var h = Math.floor(m / 60);
+  var mi = m % 60;
+  return pad2(h) + ':' + pad2(mi);
+}
+function formatDateJp(dateKey){
+  if (!dateKey) return '';
+  var p = dateKey.split('-');
+  if (p.length < 3) return dateKey;
+  var d = new Date(parseInt(p[0],10), parseInt(p[1],10)-1, parseInt(p[2],10));
+  return parseInt(p[1],10) + '月' + parseInt(p[2],10) + '日(' + DOW_LABELS[d.getDay()] + ')';
+}
+
+// ============================================================
+// D-4: ログイン / 新規登録 / メール確認
+//   identityMode: 'login'(既存ログイン) / 'signup'(新規登録) / 'verify'(メール確認待ち)
+// ============================================================
+var identityMode = 'login';
+
+function renderIdentityStep(){
+  // 既にログイン & メール確認済みなら、ここに来るべきでない（保険）
+  if (appState.user && appState.user.emailVerified){
+    loadSalonInfo();
+    return;
+  }
+  // ログイン済みだがメール未確認 → 確認待ち画面
+  if (appState.user && !appState.user.emailVerified){
+    identityMode = 'verify';
+  }
+
+  if (identityMode === 'verify'){ renderVerifyView(); return; }
+  if (identityMode === 'signup'){ renderSignupView(); return; }
+  renderLoginView();
+}
+
+function renderLoginView(){
+  setFooter('');
+  setBody(
+    '<div class="step-title">ログイン</div>' +
+    '<div class="step-desc">ご登録のメールアドレスとパスワードを入力してください。</div>' +
+    '<div id="identityErr"></div>' +
+    '<div class="field">' +
+      '<label class="label">メールアドレス</label>' +
+      '<input type="email" id="emailInput" class="input" autocomplete="email" inputmode="email" placeholder="you@example.com">' +
+    '</div>' +
+    '<div class="field">' +
+      '<label class="label">パスワード</label>' +
+      '<input type="password" id="passInput" class="input" autocomplete="current-password" placeholder="パスワード">' +
+    '</div>' +
+    '<button class="pbtn" id="loginBtn">ログイン</button>' +
+    '<button class="sbtn" id="toSignupBtn">はじめての方（新規登録）</button>'
+  );
+  $('loginBtn').addEventListener('click', doLogin);
+  $('toSignupBtn').addEventListener('click', function(){
+    identityMode = 'signup'; render();
+  });
+}
+
+function renderSignupView(){
+  setFooter('');
+  setBody(
+    '<div class="step-title">新規登録</div>' +
+    '<div class="step-desc">お名前・メールアドレス・パスワードをご登録ください。<br>' +
+      'ご登録後、確認メールをお送りします。</div>' +
+    '<div id="identityErr"></div>' +
+    '<div class="field">' +
+      '<label class="label">お名前</label>' +
+      '<input type="text" id="nameInput" class="input" autocomplete="name" placeholder="山田 花子">' +
+    '</div>' +
+    '<div class="field">' +
+      '<label class="label">メールアドレス</label>' +
+      '<input type="email" id="emailInput" class="input" autocomplete="email" inputmode="email" placeholder="you@example.com">' +
+    '</div>' +
+    '<div class="field">' +
+      '<label class="label">電話番号（任意）</label>' +
+      '<input type="tel" id="phoneInput" class="input" autocomplete="tel" inputmode="tel" placeholder="090-1234-5678">' +
+    '</div>' +
+    '<div class="field">' +
+      '<label class="label">パスワード（6文字以上）</label>' +
+      '<input type="password" id="passInput" class="input" autocomplete="new-password" placeholder="6文字以上">' +
+    '</div>' +
+    '<button class="pbtn" id="signupBtn">登録して確認メールを送る</button>' +
+    '<button class="gbtn" id="toLoginBtn">すでに登録済みの方はこちら</button>'
+  );
+  $('signupBtn').addEventListener('click', doSignup);
+  $('toLoginBtn').addEventListener('click', function(){
+    identityMode = 'login'; render();
+  });
+}
+
+function renderVerifyView(){
+  setFooter('');
+  var email = (appState.user && appState.user.email) ? appState.user.email : '';
+  setBody(
+    '<div class="step-title">メールをご確認ください</div>' +
+    '<div class="verify-banner">' +
+      esc(email) + ' 宛に確認メールをお送りしました。<br>' +
+      'メール内のリンクをタップして登録を完了してください。<br><br>' +
+      'リンクをタップしたら、下のボタンを押してください。' +
+    '</div>' +
+    '<div id="identityErr"></div>' +
+    '<button class="pbtn" id="verifyCheckBtn">確認できたので次へ</button>' +
+    '<button class="sbtn" id="resendBtn">確認メールを再送する</button>' +
+    '<button class="gbtn" id="logoutBtn">別のアカウントでやり直す</button>'
+  );
+  $('verifyCheckBtn').addEventListener('click', doVerifyCheck);
+  $('resendBtn').addEventListener('click', doResendVerify);
+  $('logoutBtn').addEventListener('click', doLogout);
+}
+
+function identityErr(msg){
+  var el = $('identityErr');
+  if (el) el.innerHTML = '<div class="error-box">' + esc(msg) + '</div>';
+}
+
+function doLogin(){
+  if (appState.busy) return;
+  var email = ($('emailInput').value || '').trim();
+  var pass = $('passInput').value || '';
+  if (!email || !pass){ identityErr('メールアドレスとパスワードを入力してください。'); return; }
+
+  appState.busy = true;
+  $('loginBtn').disabled = true;
+  $('loginBtn').textContent = 'ログイン中...';
+
+  auth.signInWithEmailAndPassword(email, pass).then(function(cred){
+    appState.user = cred.user;
+    appState.busy = false;
+    if (!cred.user.emailVerified){
+      identityMode = 'verify'; render();
+      return;
+    }
+    // ログイン成功 → サロン情報取得して予約フローへ
+    loadSalonInfo();
+  }).catch(function(err){
+    appState.busy = false;
+    if ($('loginBtn')){ $('loginBtn').disabled = false; $('loginBtn').textContent = 'ログイン'; }
+    identityErr(authErrorMsg(err));
+  });
+}
+
+function doSignup(){
+  if (appState.busy) return;
+  var name = ($('nameInput').value || '').trim();
+  var email = ($('emailInput').value || '').trim();
+  var phone = ($('phoneInput').value || '').trim();
+  var pass = $('passInput').value || '';
+
+  if (!name){ identityErr('お名前を入力してください。'); return; }
+  if (!email){ identityErr('メールアドレスを入力してください。'); return; }
+  if (pass.length < 6){ identityErr('パスワードは6文字以上で入力してください。'); return; }
+
+  appState.busy = true;
+  $('signupBtn').disabled = true;
+  $('signupBtn').textContent = '登録中...';
+
+  // 新規登録時に入力された name/phone は、claim 時に Function へ渡すため保持
+  appState.pendingName = name;
+  appState.pendingPhone = phone;
+
+  auth.createUserWithEmailAndPassword(email, pass).then(function(cred){
+    appState.user = cred.user;
+    // 確認メール送信
+    return cred.user.sendEmailVerification();
+  }).then(function(){
+    appState.busy = false;
+    identityMode = 'verify';
+    render();
+  }).catch(function(err){
+    appState.busy = false;
+    if ($('signupBtn')){ $('signupBtn').disabled = false; $('signupBtn').textContent = '登録して確認メールを送る'; }
+    identityErr(authErrorMsg(err));
+  });
+}
+
+function doVerifyCheck(){
+  if (appState.busy) return;
+  if (!appState.user){ identityMode = 'login'; render(); return; }
+
+  appState.busy = true;
+  $('verifyCheckBtn').disabled = true;
+  $('verifyCheckBtn').textContent = '確認中...';
+
+  // 最新の emailVerified を取りにいく
+  appState.user.reload().then(function(){
+    appState.busy = false;
+    var u = auth.currentUser;
+    appState.user = u;
+    if (u && u.emailVerified){
+      loadSalonInfo();
+    } else {
+      if ($('verifyCheckBtn')){ $('verifyCheckBtn').disabled = false; $('verifyCheckBtn').textContent = '確認できたので次へ'; }
+      identityErr('まだ確認が完了していないようです。メール内のリンクをタップしてから、もう一度お試しください。');
+    }
+  }).catch(function(err){
+    appState.busy = false;
+    if ($('verifyCheckBtn')){ $('verifyCheckBtn').disabled = false; $('verifyCheckBtn').textContent = '確認できたので次へ'; }
+    identityErr(authErrorMsg(err));
+  });
+}
+
+function doResendVerify(){
+  if (appState.busy || !appState.user) return;
+  appState.busy = true;
+  $('resendBtn').disabled = true;
+  $('resendBtn').textContent = '送信中...';
+  appState.user.sendEmailVerification().then(function(){
+    appState.busy = false;
+    if ($('resendBtn')){ $('resendBtn').disabled = false; $('resendBtn').textContent = '確認メールを再送する'; }
+    identityErr('');
+    var el = $('identityErr');
+    if (el) el.innerHTML = '<div class="info-box">確認メールを再送しました。</div>';
+  }).catch(function(err){
+    appState.busy = false;
+    if ($('resendBtn')){ $('resendBtn').disabled = false; $('resendBtn').textContent = '確認メールを再送する'; }
+    identityErr(authErrorMsg(err));
+  });
+}
+
+function doLogout(){
+  auth.signOut().then(function(){
+    appState.user = null;
+    appState.customerDocId = null;
+    identityMode = 'login';
+    render();
+  });
+}
+
+function authErrorMsg(err){
+  var code = (err && err.code) ? err.code : '';
+  switch (code){
+    case 'auth/invalid-email': return 'メールアドレスの形式が正しくありません。';
+    case 'auth/user-not-found': return 'このメールアドレスは登録されていません。新規登録をお試しください。';
+    case 'auth/wrong-password': return 'パスワードが正しくありません。';
+    case 'auth/invalid-credential': return 'メールアドレスまたはパスワードが正しくありません。';
+    case 'auth/email-already-in-use': return 'このメールアドレスは既に登録されています。ログインをお試しください。';
+    case 'auth/weak-password': return 'パスワードは6文字以上で設定してください。';
+    case 'auth/too-many-requests': return '試行回数が多すぎます。しばらく待ってからお試しください。';
+    case 'auth/network-request-failed': return '通信エラーが発生しました。電波状況をご確認ください。';
+    default: return 'エラーが発生しました（' + esc(code || 'unknown') + '）。もう一度お試しください。';
+  }
+}
+
+// ============================================================
+// D-6: 予約内容の確認 → claim → 予約確定
+//   claim（dbCustomerClaimMyCard）は「予約確定ボタン押下時」だけ実行する。
+//   ログイン（認証）と claim（カルテ紐付け）は別物。
+// ============================================================
+function renderConfirmStep(){
+  if (!appState.user || !appState.user.emailVerified){
+    identityMode = 'login';
+    goStep('identity');
+    return;
+  }
+  if (!appState.selectedMenu || !appState.selectedDate || !appState.selectedSlot){
+    goStep('menu');
+    return;
+  }
+
+  var optNames = '';
+  var i;
+  for (i = 0; i < appState.selectedOptions.length; i++){
+    optNames += (optNames ? '、' : '') + appState.selectedOptions[i].name;
+  }
+
+  var html = '<div class="step-title">ご予約内容の確認</div>' +
+             '<div class="step-desc">内容をご確認のうえ、予約を確定してください。</div>' +
+             '<div id="confirmErr"></div>' +
+             '<div class="sum-row"><div class="sum-label">日時</div>' +
+               '<div class="sum-value">' + esc(formatDateJp(appState.selectedDate)) +
+               '<br>' + esc(appState.selectedSlot) + '〜</div></div>' +
+             '<div class="sum-row"><div class="sum-label">メニュー</div>' +
+               '<div class="sum-value">' + esc(appState.selectedMenu.name) + '</div></div>';
+  if (optNames){
+    html += '<div class="sum-row"><div class="sum-label">オプション</div>' +
+            '<div class="sum-value">' + esc(optNames) + '</div></div>';
+  }
+  html += '<div class="sum-row"><div class="sum-label">所要時間（目安）</div>' +
+            '<div class="sum-value">約' + totalDuration() + '分</div></div>' +
+          '<div class="sum-total"><div class="sum-label">合計料金</div>' +
+            '<div class="sum-value">' + yenSafe(totalPrice()) + '</div></div>' +
+          '<div class="info-box" style="margin-top:18px;">' +
+            'こちらは仮予約のリクエストです。サロンの確認後に確定します。' +
+          '</div>';
+
+  setBody(html);
+  setFooter(
+    '<button class="pbtn" id="bookBtn">この内容で予約する</button>' +
+    '<button class="gbtn" id="confirmBackBtn">日時を選び直す</button>'
+  );
+  $('bookBtn').addEventListener('click', doBooking);
+  $('confirmBackBtn').addEventListener('click', function(){ goStep('date'); });
+}
+
+// 予約確定処理：claim → 予約作成
+function doBooking(){
+  if (appState.busy) return;
+  appState.busy = true;
+  var btn = $('bookBtn');
+  if (btn){ btn.disabled = true; btn.textContent = '予約を送信中...'; }
+
+  confirmErr('');
+
+  if (typeof dbCustomerClaimMyCard !== 'function'){
+    bookingFail('システムエラー（claim 関数が見つかりません）。');
+    return;
+  }
+
+  var claimData = {
+    name: appState.pendingName || (appState.user.displayName || ''),
+    phone: appState.pendingPhone || ''
+  };
+
+  // Step 1: claim（初回予約確定の直前）
+  dbCustomerClaimMyCard(claimData, function(err, res){
+    if (err || !res || !res.customerDocId){
+      if (res && res.result === 'needs_merge_review'){
+        bookingFail('お客様の情報が複数登録されている可能性があるため、'
+                  + 'サロンでの確認が必要です。お手数ですがサロンへ直接ご連絡ください。');
+        return;
+      }
+      var msg = (err && err.message) ? err.message : 'カルテの紐付けに失敗しました。';
+      bookingFail('予約処理でエラーが発生しました（' + esc(msg) + '）。時間をおいて再度お試しください。');
+      return;
+    }
+
+    appState.customerDocId = res.customerDocId;
+
+    // Step 2: 予約作成
+    if (typeof dbCustomerCreateAppointment !== 'function'){
+      bookingFail('システムエラー（予約関数が見つかりません）。');
+      return;
+    }
+
+    var apptData = {
+      dateKey: appState.selectedDate,
+      start: appState.selectedSlot,
+      menuId: appState.selectedMenu._id,
+      optionMenuIds: optionIds()
+    };
+
+    dbCustomerCreateAppointment(apptData, function(err2, addRes){
+      if (err2 || !addRes){
+        var m2 = (err2 && err2.message) ? err2.message : '予約の作成に失敗しました。';
+        bookingFail('予約の確定に失敗しました（' + esc(m2) + '）。'
+                  + 'その時間帯が埋まった可能性があります。日時を選び直してください。');
+        return;
+      }
+      appState.busy = false;
+      appState.lastAppointmentId = addRes._id || null;
+      goStep('complete');
+    });
+  });
+}
+
+function optionIds(){
+  var ids = [];
+  var i;
+  for (i = 0; i < appState.selectedOptions.length; i++){
+    ids.push(appState.selectedOptions[i]._id);
+  }
+  return ids;
+}
+
+function confirmErr(msg){
+  var el = $('confirmErr');
+  if (!el) return;
+  el.innerHTML = msg ? ('<div class="error-box">' + esc(msg) + '</div>') : '';
+}
+
+function bookingFail(msg){
+  appState.busy = false;
+  var btn = $('bookBtn');
+  if (btn){ btn.disabled = false; btn.textContent = 'この内容で予約する'; }
+  confirmErr(msg);
+  window.scrollTo(0, 0);
+}
+
+// ============================================================
+// D-6 完了画面
+// ============================================================
+function renderCompleteStep(){
+  setFooter('');
+  var optNames = '';
+  var i;
+  for (i = 0; i < appState.selectedOptions.length; i++){
+    optNames += (optNames ? '、' : '') + appState.selectedOptions[i].name;
+  }
+
+  setBody(
+    '<div class="complete">' +
+      '<div class="complete-icon">\u2713</div>' +
+      '<div class="complete-title">ご予約を受け付けました</div>' +
+      '<div class="complete-desc">' +
+        esc(formatDateJp(appState.selectedDate)) + ' ' + esc(appState.selectedSlot) + '〜<br>' +
+        esc(appState.selectedMenu ? appState.selectedMenu.name : '') +
+        (optNames ? '<br>（' + esc(optNames) + '）' : '') +
+        '<br><br>サロンの確認後、予約が確定します。' +
+      '</div>' +
+    '</div>' +
+    '<button class="sbtn" id="newBookingBtn">続けて予約する</button>'
+  );
+  $('newBookingBtn').addEventListener('click', function(){
+    appState.selectedMenu = null;
+    appState.selectedOptions = [];
+    appState.selectedDate = null;
+    appState.selectedSlot = null;
+    appState.dayData = null;
+    appState.availableSlots = null;
+    appState.calYear = null;
+    appState.calMonth = null;
+    goStep('menu');
+  });
+}
+
+// 起動
+window.addEventListener('load', init);
+
+
+</script>
+</body>
+</html>
