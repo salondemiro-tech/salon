@@ -179,6 +179,20 @@
     return firebase.firestore.FieldValue.serverTimestamp();
   }
 
+  // ★ Cloud Functions ヘルパー（v8.1+ D-step3）
+  //   使用画面は <script src="firebase-functions-compat.js"> の追加が必要。
+  //   firebase.functions が無ければ null を返す（呼び出し側でエラー扱い）。
+  //   リージョンは asia-northeast1 固定（メモリ#環境情報）。
+  //   resolveOrClaimCustomer など callable Function を呼ぶために使う。
+  function _functions() {
+    if (!firebase.functions) {
+      console.warn('[shared_db] firebase.functions が未ロード。'
+                 + 'firebase-functions-compat.js を <script> に追加してください');
+      return null;
+    }
+    return firebase.app().functions('asia-northeast1');
+  }
+
   function _deleteField() {
     return firebase.firestore.FieldValue.delete();
   }
@@ -191,10 +205,32 @@
     return _db().collection('salons').doc(sid);
   }
 
-  function _safeCb(cb, value) {
+  // ------------------------------------------------------------
+  // _safeCb : コールバックを安全に呼ぶ共通ヘルパー（可変長対応）
+  //
+  // 【2026/5/28 D-step3 で可変長化】
+  //   旧実装は function _safeCb(cb, value) で「1引数しか運べない」
+  //   設計だった。C-9 写真機能事故（2026/5/24）の根本原因は、
+  //   cb(err, photoObj) のように2引数返したい箇所で第2引数が
+  //   捨てられていたこと。
+  //   ここを可変長対応にすることで、
+  //     _safeCb(cb)              -> cb()
+  //     _safeCb(cb, value)       -> cb(value)          ←既存呼び出しは後方互換
+  //     _safeCb(cb, err, photo)  -> cb(err, photo)     ←2引数以上も透過
+  //   が全て正しく動く。既存125箇所はノータッチで動作する。
+  //
+  //   【方針（GPTレビュー反映）】
+  //   ・新規 dbCustomer* など新しいコードは Node 流儀 cb(err, value) に寄せる
+  //   ・既存の1引数API（cb(data) / cb(null)）はそのまま維持
+  //   ・upload/auth/transaction 等の重要関数は、必要に応じて
+  //     関数内ローカル callCb を併用してよい（ログや補助処理を挟むため）
+  //   ・_safeCb はインフラ、ローカル callCb は業務ロジック専用、という住み分け
+  // ------------------------------------------------------------
+  function _safeCb(cb /*, ...args */) {
     if (typeof cb === 'function') {
+      var args = Array.prototype.slice.call(arguments, 1);
       try {
-        cb(value);
+        cb.apply(null, args);
       } catch (e) {
         console.error('[shared_db] cb error', e);
       }
@@ -1594,33 +1630,33 @@
   // ============================================================
   // 顧客側 CRUD  (dbCustomer*)
   //
-  // 顧客アプリ (customer_app.html) から呼ばれる想定。
+  // 顧客アプリ (customer_app.html v2) から呼ばれる想定。
   // URL に ?salon=xxx を持っている前提で getCurrentSalonId() が値を返す。
   //
-  // ⚠⚠⚠ 重要：以下のセクションは Phase D で全面書き換え予定 ⚠⚠⚠
   // ============================================================
-  // 【現状】このセクションの関数は旧 customerId 設計のまま残っている。
-  //         サロン側 (Phase C) は全て v8.1 化済み（customerDocId+authUid 分離）だが、
-  //         顧客側はまだ v8.1 化されていない。
+  // 【2026/5/28 D-step3 で v8.1 化完了】
+  //   このセクションは旧 customerId 設計から v8.1（customerDocId+authUid 分離）へ
+  //   書き換え済み。主な変更:
+  //     - dbCustomerResolveMyCard : authIndex/{uid} → customerDocId 解決（既存）
+  //     - dbCustomerClaimMyCard    : 新設。resolveOrClaimCustomer Function 呼び出し
+  //                                  （カルテ作成/claim の唯一の正規ルート）
+  //     - dbCustomerCreateMyProfile: 廃止（呼ばれたらエラー返却。地雷不発化）
+  //     - dbCustomerGetMyProfile   : resolveMyCard 経由に変更
+  //     - dbCustomerUpdateMyProfile: resolveMyCard で customerDocId 解決→update
+  //     - dbCustomerListMyAppointments / dbLoadCustomerHistory :
+  //                                  where('customerId') → where('authUid')
+  //     - dbCustomerCreateAppointment: customerId:uid → customerDocId + authUid:uid
+  //   新規/書換関数のコールバックは Node 流儀 cb(err, value) に統一
+  //   （既存の dbReadDoc 等インフラ層は従来通り cb(value) 1引数のまま）。
   //
-  // 【理由】顧客側を v8.1 化するには以下を同時に実装する必要があり、
-  //         Phase D で一括で行うのが論理的に正しい:
-  //           1. claim Function (resolveOrClaimCustomer)
-  //              - 同一メールの仮カルテを auth UID にひも付ける
-  //           2. merge Function (mergeCustomers)
-  //              - 重複した顧客カルテを統合する
-  //           3. authIndex/{authUid} → customerDocId のインデックス
-  //           4. 顧客アプリ画面の全面書き換え (customer_app_v8 とは別ファイル)
+  // 【依存】dbCustomerClaimMyCard は Cloud Functions を呼ぶため、
+  //   呼び出し画面に <script src="firebase-functions-compat.js"> が必要。
   //
-  // 【現時点で動作する画面】
-  //         サロン側の Phase C 画面のみ。
-  //         顧客側の customer_app_v8.html (旧版) は customerId 設計のまま動いている。
-  //
-  // 【DESIGN.md 9-2 / メモリ #21 への遵守】
-  //         この警告コメントは「設計書とコードを揃える」原則を守るため。
-  //         Phase D 着手時に、このセクション全体を新しい claim/merge 仕様で
-  //         書き直すこと。場当たり的に customerId → customerDocId に
-  //         置換するだけでは claim/merge が機能しないので NG。
+  // 【未実施・後続】
+  //   - merge Function (mergeCustomers) と needs_merge_review 解消 UI は Phase F
+  //   - customer_app.html v2（実画面）は D-step4
+  //   - dbLoadCustomerHistory / dbCustomerListMyAppointments の
+  //     authUid + dateKey 複合インデックス作成（販売前必須チェックリスト）
   // ============================================================
 
   // 予約画面の最初に表示するサロン情報 (info ドキュメント)
@@ -1678,151 +1714,254 @@
   }
   window.dbCustomerResolveMyCard = dbCustomerResolveMyCard;
 
-  // 自分の顧客プロフィール (customers/{Auth UID})
+  // 自分の顧客プロフィール
+  //
+  // 【2026/5/28 D-step3 v8.1化】
+  //   旧: customers/{Auth UID} を直 get（uid == docId 前提）
+  //   新: authIndex 経由で customerDocId を解決してから取得
+  //       （dbCustomerResolveMyCard を利用）
+  //
+  //   コールバック（Node 流儀）:
+  //     cb(err, { customerDocId, customer })
+  //     ・未claim（カルテ未紐付け）の場合は err=null, customerDocId=null, customer=null
+  //     ・customer は { name, phone, email, ... } のドキュメント本体
   function dbCustomerGetMyProfile(cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
-    if (!sid || !uid) { _safeCb(cb, null); return; }
-    dbReadDoc('salons/' + sid + '/customers/' + uid, cb);
+    if (!sid || !uid) { _safeCb(cb, new Error('not authenticated'), null); return; }
+
+    dbCustomerResolveMyCard(function (res) {
+      // dbCustomerResolveMyCard は { customerDocId, customer } を返す
+      if (!res) {
+        _safeCb(cb, new Error('resolve failed'), null);
+        return;
+      }
+      _safeCb(cb, null, {
+        customerDocId: res.customerDocId || null,
+        customer: res.customer || null
+      });
+    });
   }
   window.dbCustomerGetMyProfile = dbCustomerGetMyProfile;
 
-  // 初回ログイン後の自分のプロフィール作成
-  // ルール 169-181 行のホワイトリスト:
-  //   許可: name, phone, email, notifyChannels, createdAt
-  //   必須: name, email, notifyChannels
-  //   notifyChannels: { email: bool, line: bool } のみ
-  function dbCustomerCreateMyProfile(data, cb) {
+  // dbCustomerClaimMyCard : 顧客本人のカルテ解決 / 作成（v8.1 正規ルート）
+  //
+  // 【2026/5/28 D-step3 新設】
+  //   v8.1 では「顧客が初めてアプリ登録する」処理は、クライアントから
+  //   customers に直接書き込むのではなく、必ず Cloud Function
+  //   resolveOrClaimCustomer を経由する。Function 内で:
+  //     - 同 email の未claimカルテ探索
+  //     - claim 成立 / 新規カルテ作成 / needsMergeReview 判定
+  //     - 過去予約の authUid 後埋め
+  //   を atomic に行う（DESIGN_v8_1 2-3, 2-4, 4-A/B/C）。
+  //
+  //   data: { name, phone }
+  //     salonId は内部で getCurrentSalonId() を使うので渡さなくてよい。
+  //     email は Function 側で request.auth.token.email を見るため渡さない。
+  //
+  //   コールバック（Node 流儀）:
+  //     cb(err, resultData)
+  //       resultData = {
+  //         result: 'claimed' | 'created_new' | 'already_resolved'
+  //                 | 'needs_merge_review',
+  //         customerDocId: string,
+  //         claimedAppointmentCount?: number,
+  //         ...
+  //       }
+  //   失敗時は cb(err, null)。err は Function の HttpsError。
+  function dbCustomerClaimMyCard(data, cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
-    if (!sid || !uid) { _safeCb(cb, null); return; }
-
-    if (!data || !data.name || !data.email) {
-      console.error('[shared_db] dbCustomerCreateMyProfile: name and email are required');
-      _safeCb(cb, null);
+    if (!sid || !uid) {
+      _safeCb(cb, new Error('not authenticated'), null);
       return;
     }
 
-    // notifyChannels のデフォルト
-    var notifyChannels;
-    if (data.notifyChannels && typeof data.notifyChannels === 'object') {
-      notifyChannels = {
-        email: (data.notifyChannels.email !== false),
-        line: (data.notifyChannels.line === true)
-      };
-    } else {
-      notifyChannels = { email: true, line: false };
+    var fns = _functions();
+    if (!fns) {
+      _safeCb(cb, new Error('firebase-functions-compat.js が未ロードです'), null);
+      return;
     }
 
-    // ホワイトリストに沿った形でドキュメント構築
-    var doc = {
-      name: String(data.name),
-      email: String(data.email),
-      notifyChannels: notifyChannels,
-      createdAt: _serverTimestamp()
-    };
-    if (data.phone) {
-      doc.phone = String(data.phone);
+    var payload = { salonId: sid };
+    if (data && data.name) { payload.name = String(data.name); }
+    if (data && data.phone) { payload.phone = String(data.phone); }
+
+    var callable;
+    try {
+      callable = fns.httpsCallable('resolveOrClaimCustomer');
+    } catch (e) {
+      _logErr('dbCustomerClaimMyCard httpsCallable', e);
+      _safeCb(cb, e, null);
+      return;
     }
 
-    dbWriteDoc('salons/' + sid + '/customers/' + uid, doc, false, cb);
+    callable(payload).then(function (res) {
+      _safeCb(cb, null, (res && res.data) ? res.data : null);
+    }).catch(function (err) {
+      _logErr('dbCustomerClaimMyCard', err);
+      _safeCb(cb, err, null);
+    });
+  }
+  window.dbCustomerClaimMyCard = dbCustomerClaimMyCard;
+
+  // dbCustomerCreateMyProfile : 【廃止・地雷不発化】
+  //
+  // 【2026/5/28 D-step3】
+  //   旧実装は customers/{Auth UID} に直接書き込む方式だったが、
+  //   v8.1 では customerDocId は Firestore 採番・claim は Function 経由が
+  //   唯一の正規ルートになったため廃止。
+  //   間違って呼ばれても直書きしないよう、エラーを返すだけにする
+  //   （deprecated コメントだけでは「呼べてしまう地雷」が残るため）。
+  //   新規コードは dbCustomerClaimMyCard を使うこと。
+  function dbCustomerCreateMyProfile(data, cb) {
+    var msg = 'dbCustomerCreateMyProfile は廃止されました（v8.1）。'
+            + 'dbCustomerClaimMyCard を使ってください。';
+    console.error('[shared_db] ' + msg);
+    _safeCb(cb, new Error(msg), null);
   }
   window.dbCustomerCreateMyProfile = dbCustomerCreateMyProfile;
 
   // 自分のプロフィール更新 (顧客本人が編集可能なフィールドのみ)
-  // ルール 187-191 行:
+  // ルール 227-231 行（本人 update）:
   //   許可: name, phone, notifyChannels, updatedAt
+  //
+  // 【2026/5/28 D-step3 v8.1化】
+  //   旧: customers/{Auth UID} を直 update（uid == docId 前提）
+  //   新: authIndex 経由で customerDocId を解決してから update。
+  //       まだ claim されていない（カルテ未紐付け）場合はエラーを返す。
+  //   コールバック（Node 流儀）: cb(err, result)
   function dbCustomerUpdateMyProfile(patch, cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
-    if (!sid || !uid) { _safeCb(cb, null); return; }
-    if (!patch) { _safeCb(cb, null); return; }
+    if (!sid || !uid) { _safeCb(cb, new Error('not authenticated'), null); return; }
+    if (!patch) { _safeCb(cb, new Error('patch is empty'), null); return; }
 
-    // 許可フィールド以外を除去
-    var safe = {};
-    if (patch.hasOwnProperty('name')) { safe.name = String(patch.name); }
-    if (patch.hasOwnProperty('phone')) { safe.phone = String(patch.phone); }
-    if (patch.hasOwnProperty('notifyChannels')) {
-      var nc = patch.notifyChannels || {};
-      safe.notifyChannels = {
-        email: (nc.email !== false),
-        line: (nc.line === true)
-      };
-    }
-    safe.updatedAt = _serverTimestamp();
+    dbCustomerResolveMyCard(function (res) {
+      if (!res || !res.customerDocId) {
+        _safeCb(cb, new Error('カルテ未紐付け（先に dbCustomerClaimMyCard が必要）'), null);
+        return;
+      }
+      var docId = res.customerDocId;
 
-    dbUpdateDoc('salons/' + sid + '/customers/' + uid, safe, cb);
+      // 許可フィールド以外を除去
+      var safe = {};
+      if (patch.hasOwnProperty('name')) { safe.name = String(patch.name); }
+      if (patch.hasOwnProperty('phone')) { safe.phone = String(patch.phone); }
+      if (patch.hasOwnProperty('notifyChannels')) {
+        var nc = patch.notifyChannels || {};
+        safe.notifyChannels = {
+          email: (nc.email !== false),
+          line: (nc.line === true)
+        };
+      }
+      safe.updatedAt = _serverTimestamp();
+
+      dbUpdateDoc('salons/' + sid + '/customers/' + docId, safe, function (ok) {
+        // dbUpdateDoc は成功/失敗を 1 引数（結果 or null）で返す既存仕様。
+        // Node 流儀に変換して呼び出し元へ返す。
+        if (ok === null || ok === false) {
+          _safeCb(cb, new Error('update failed'), null);
+        } else {
+          _safeCb(cb, null, { customerDocId: docId });
+        }
+      });
+    });
   }
   window.dbCustomerUpdateMyProfile = dbCustomerUpdateMyProfile;
 
   // 自分の予約一覧
-  // ルール 209-210 行: 自分が customerId の予約は読める
+  // ルール 277-279 行: 予約本人（authUid 一致）は読める
+  //
+  // 【2026/5/28 D-step3 v8.1化】
+  //   旧: where('customerId', '==', uid)  ← customerId フィールドは廃止
+  //   新: where('authUid', '==', uid)
+  //       （DESIGN_v8_1：本人判定は authUid。customerId → customerDocId 改名済み）
   function dbCustomerListMyAppointments(cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
     if (!sid || !uid) { _safeCb(cb, null); return; }
     dbReadCollection('salons/' + sid + '/appointments', function (col) {
-      return col.where('customerId', '==', uid);
+      return col.where('authUid', '==', uid);
     }, cb);
   }
   window.dbCustomerListMyAppointments = dbCustomerListMyAppointments;
 
   // 予約作成 (pendingCreate=true 方式)
   //
-  // 設計書 3-4 + ルール 215-240 行:
-  //   送れるフィールド:    dateKey, start, customerId, menuId, optionMenuIds, pendingCreate, createdAt
-  //   必須フィールド:      dateKey, start, customerId, menuId, pendingCreate
-  //   pendingCreate は必ず true
+  // 設計書 3-4 + ルール 281-300 行（appointments create A経路）:
+  //   送れるフィールド: dateKey, start, customerDocId, authUid,
+  //                    menuId, optionMenuIds, pendingCreate, source, createdAt
+  //   必須フィールド:   dateKey, start, customerDocId, authUid, menuId, pendingCreate
+  //   pendingCreate は必ず true / authUid == 自分の uid / source は省略 or 'online'
   //
   // 注: end / staffId / resourceIds / status / priceSnapshot 等は Functions が確定する。
   //     クライアントからは絶対に送らない。
   //     createdAt も Functions の serverTimestamp で確定するため、ここでは送らない。
+  //
+  // 【2026/5/28 D-step3 v8.1化】
+  //   旧: customerId: uid を送信（customerId フィールドは廃止）
+  //   新: customerDocId（authIndex 経由で解決）+ authUid: uid を送信。
+  //       カルテ未紐付け（未 claim）の場合はエラーを返す。
+  //   コールバック（Node 流儀）: cb(err, { _id })
   //
   // data: { dateKey, start, menuId, optionMenuIds? }
   function dbCustomerCreateAppointment(data, cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
     if (!sid || !uid) {
-      console.error('[shared_db] dbCustomerCreateAppointment: not authenticated');
-      _safeCb(cb, null);
+      _safeCb(cb, new Error('not authenticated'), null);
       return;
     }
     if (!data || !data.dateKey || !data.start || !data.menuId) {
-      console.error('[shared_db] dbCustomerCreateAppointment: missing required fields');
-      _safeCb(cb, null);
+      _safeCb(cb, new Error('missing required fields'), null);
       return;
     }
 
     // 形式チェック (ルール側でも弾かれるが、ここで先に弾いて無駄なリクエストを防ぐ)
     if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(data.dateKey)) {
-      console.error('[shared_db] dbCustomerCreateAppointment: invalid dateKey');
-      _safeCb(cb, null);
+      _safeCb(cb, new Error('invalid dateKey'), null);
       return;
     }
     if (!/^[0-9]{2}:[0-9]{2}$/.test(data.start)) {
-      console.error('[shared_db] dbCustomerCreateAppointment: invalid start');
-      _safeCb(cb, null);
+      _safeCb(cb, new Error('invalid start'), null);
       return;
     }
 
-    var doc = {
-      dateKey: String(data.dateKey),
-      start: String(data.start),
-      customerId: uid,
-      menuId: String(data.menuId),
-      pendingCreate: true
-    };
-    if (data.optionMenuIds && data.optionMenuIds.length > 0) {
-      // 配列だけを通す
-      var opts = [];
-      var i;
-      for (i = 0; i < data.optionMenuIds.length; i++) {
-        opts.push(String(data.optionMenuIds[i]));
+    // 自分の customerDocId を解決してから予約を作る
+    dbCustomerResolveMyCard(function (res) {
+      if (!res || !res.customerDocId) {
+        _safeCb(cb, new Error('カルテ未紐付け（先に dbCustomerClaimMyCard が必要）'), null);
+        return;
       }
-      doc.optionMenuIds = opts;
-    }
+      var docId = res.customerDocId;
 
-    dbAddDoc('salons/' + sid + '/appointments', doc, cb);
+      var doc = {
+        dateKey: String(data.dateKey),
+        start: String(data.start),
+        customerDocId: docId,
+        authUid: uid,
+        menuId: String(data.menuId),
+        pendingCreate: true
+      };
+      if (data.optionMenuIds && data.optionMenuIds.length > 0) {
+        // 配列だけを通す
+        var opts = [];
+        var i;
+        for (i = 0; i < data.optionMenuIds.length; i++) {
+          opts.push(String(data.optionMenuIds[i]));
+        }
+        doc.optionMenuIds = opts;
+      }
+
+      dbAddDoc('salons/' + sid + '/appointments', doc, function (addRes) {
+        if (!addRes) {
+          _safeCb(cb, new Error('予約作成に失敗しました'), null);
+        } else {
+          _safeCb(cb, null, addRes); // { _id }
+        }
+      });
+    });
   }
   window.dbCustomerCreateAppointment = dbCustomerCreateAppointment;
 
@@ -2151,7 +2290,7 @@
   //   顧客の予約履歴画面用。
   //   設計書 B-1 / B-8: current (appointments) + archive
   //   (appointments_archive) の両方を読む。
-  //   B-6: 自分の予約のみ (customerId == 自分の Auth UID)。
+  //   B-6: 自分の予約のみ (authUid == 自分の Auth UID)。
   //        さらに最近分に絞るため dateKey 降順 + limit。
   //
   //   ★ B-8 補足 (DESIGN_NOTES 項目7):
@@ -2175,8 +2314,9 @@
     var HISTORY_LIMIT = 50; // current/archive 各 50 件まで
 
     function _queryMine(col) {
-      // customerId == 自分 / dateKey 降順 / limit
-      return col.where('customerId', '==', uid)
+      // 【2026/5/28 D-step3 v8.1化】authUid == 自分 / dateKey 降順 / limit
+      //   旧 customerId フィールドは廃止。本人判定は authUid。
+      return col.where('authUid', '==', uid)
                 .orderBy('dateKey', 'desc')
                 .limit(HISTORY_LIMIT);
     }
