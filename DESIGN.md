@@ -1413,13 +1413,38 @@ sendChangeNotification(customerDocId, oldAppointment, newAppointment, cb);
     - 同一メール未claimカルテ2件時、自動claimされず needsMergeReview
       が候補全件に立つこと
 
-  - D-step3. **shared_db.js の dbCustomer* を v8.1 化**
-    （+ _safeCb 全棚卸しを同時実施）
-    - 旧 customerId → customerDocId 命名統一
-    - dbCustomerResolveMyCard(cb) 追加（authIndex 経由）
-    - dbCustomerGetMyAppointments(cb) を authUid フィルタに
-    - _safeCb 全呼び出しを棚卸し、2引数以上返す箇所をローカル
-      callCb 方式に修正（C-9 写真機能事故の再発防止・2026/5/24 メモリ）
+  - D-step3. **shared_db.js の dbCustomer* を v8.1 化**【2026/5/28 完了】
+    - 旧 customerId → customerDocId / authUid 命名統一
+      （dbCustomerListMyAppointments・dbLoadCustomerHistory は
+       where('authUid','==',uid) に変更）
+    - dbCustomerResolveMyCard(cb) （authIndex 経由・既存を活用）
+    - dbCustomerClaimMyCard(data, cb) 新設
+      （resolveOrClaimCustomer Function 呼び出しラッパー。
+       カルテ作成 / claim の唯一の正規ルート）
+    - dbCustomerCreateMyProfile は廃止（呼ばれたらエラー返却＝地雷不発化。
+       deprecated コメントだけでは「呼べてしまう地雷」が残るため）
+    - dbCustomerCreateAppointment は customerDocId + authUid:uid を送る方式に
+      （rules appointments create A経路の必須/許可フィールドと 1対1 照合済み）
+    - **_safeCb は「全棚卸し」ではなく可変長引数対応に改修して解決**
+      （GPTレビュー 2026/5/28 採用。案A=125箇所棚卸しより
+       案B=_safeCb 1関数のみ改良が後戻り少なく再発防止力も高い）
+        function _safeCb(cb /*, ...args */) {
+          if (typeof cb === 'function') {
+            var args = Array.prototype.slice.call(arguments, 1);
+            try { cb.apply(null, args); }
+            catch (e) { console.error('[shared_db] cb error', e); }
+          }
+        }
+      ・既存の 1 引数呼び出しは後方互換で無傷
+      ・新規コードは Node 流儀 cb(err, value) に寄せる
+      ・upload/auth/transaction 等の重要関数は必要に応じ
+        ローカル callCb を併用可（_safeCb=インフラ、callCb=業務ロジック専用）
+      ・C-9 写真機能事故（2026/5/24）の根本原因（2引数以降の欠落）を構造的に解消
+    - 【依存】dbCustomerClaimMyCard は Functions を呼ぶため、呼び出し画面に
+      <script src="firebase-functions-compat.js"> が必要（D-step4 で対応）
+    - 【後続】authUid+dateKey 複合インデックス作成が新たに必要
+      （D-step4 顧客アプリ実動時に「index 必要」エラー→ Console リンクから作成。
+       販売前チェックリスト & A-step1-4 とセット実施）
 
   - D-step4. **customer_app.html v2 作成（D-1〜D-8）**
 
