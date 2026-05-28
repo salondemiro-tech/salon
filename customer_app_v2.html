@@ -12,6 +12,12 @@
 <!-- ★ claim Function 呼び出しに必須（D-step3 dbCustomerClaimMyCard が利用） -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
 <script src="firebase-init.js"></script>
+<!-- ★ DB抽象化層・顧客向け関数（dbCustomer*）。これが無いと「shared_db.js 読込失敗」になる -->
+<script src="shared_db.js"></script>
+<!-- ★ メニュー関連（menuList）。calendarLoadDay が所要時間参照に使う -->
+<script src="shared_db_menu.js"></script>
+<!-- ★ 空き状況計算（calendarLoadDay）。日時選択で使用 -->
+<script src="shared_db_calendar.js"></script>
 
 <style>
   :root{
