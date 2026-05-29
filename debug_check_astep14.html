@@ -1,0 +1,457 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>A-step1-4 悪意書き込み試験</title>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="firebase-init.js"></script>
+<style>
+  body{font-family:monospace;background:#111;color:#eee;margin:0;padding:16px;font-size:13px;}
+  h1{color:#f90;font-size:16px;margin:0 0 12px;}
+  .info-box{background:#222;border:1px solid #444;border-radius:6px;padding:12px;margin-bottom:16px;}
+  .info-row{display:flex;gap:8px;margin-bottom:4px;}
+  .info-label{color:#888;width:180px;flex-shrink:0;}
+  .info-val{color:#0f0;word-break:break-all;}
+  .info-val.warn{color:#f90;}
+  .btn{padding:10px 20px;border:none;border-radius:6px;cursor:pointer;font-family:monospace;font-size:13px;font-weight:bold;margin-right:8px;margin-bottom:8px;}
+  .btn-customer{background:#1a6b3a;color:#fff;}
+  .btn-salon{background:#6b3a1a;color:#fff;}
+  .btn-single{background:#333;color:#aaa;padding:4px 10px;font-size:11px;}
+  .btn:disabled{opacity:.4;cursor:default;}
+  table{width:100%;border-collapse:collapse;margin-top:12px;}
+  th{background:#333;padding:8px 6px;text-align:left;font-size:11px;color:#aaa;border-bottom:1px solid #555;}
+  td{padding:7px 6px;border-bottom:1px solid #2a2a2a;vertical-align:top;font-size:12px;}
+  .cat{color:#88f;font-size:11px;}
+  .result-pass{color:#0f0;font-weight:bold;}
+  .result-fail{color:#f44;font-weight:bold;}
+  .result-error{color:#f90;font-weight:bold;}
+  .result-pending{color:#555;}
+  .note{color:#888;font-size:11px;margin-bottom:12px;line-height:1.6;}
+  .section-title{color:#f90;font-size:13px;font-weight:bold;margin:16px 0 4px;}
+</style>
+</head>
+<body>
+<h1>&#x1F6E1; A-step1-4 悪意書き込み試験</h1>
+
+<div class="info-box">
+  <div class="info-row"><div class="info-label">ログイン中メール</div><div class="info-val" id="infoEmail">（未ログイン）</div></div>
+  <div class="info-row"><div class="info-label">ログイン中UID</div><div class="info-val" id="infoUid">—</div></div>
+  <div class="info-row"><div class="info-label">対象 salonId（TARGET）</div><div class="info-val" id="infoSalon">—</div></div>
+  <div class="info-row"><div class="info-label">顧客 customerDocId</div><div class="info-val" id="infoCdid">—</div></div>
+  <div class="info-row"><div class="info-label">別サロン用UID（OTHER）</div><div class="info-val warn" id="infoOther">—</div></div>
+</div>
+
+<div class="note">
+  #1〜#12：<b>顧客アカウント</b>でログインして実行してください。<br>
+  #13〜#15：<b>OTHER_SALON_OWNER_UID のアカウント</b>でログインして実行してください。<br>
+  判定：permission-denied = <span class="result-pass">PASS</span>　書き込み成功 = <span class="result-fail">FAIL</span>　その他エラー = <span class="result-error">ERROR</span>
+</div>
+
+<button class="btn btn-customer" id="btnCustomer" disabled>顧客権限テストを実行（#1〜#12）</button>
+<button class="btn btn-salon" id="btnSalon" disabled>サロン間分離テストを実行（#13〜#15）</button>
+
+<table>
+  <thead>
+    <tr>
+      <th>#</th>
+      <th>カテゴリ</th>
+      <th>試験内容</th>
+      <th>結果</th>
+      <th>詳細</th>
+      <th></th>
+    </tr>
+  </thead>
+  <tbody id="testTable"></tbody>
+</table>
+
+<script>
+// ============================================================
+// 定数
+// ============================================================
+var OTHER_SALON_OWNER_UID = 'JHz0ZYjrAqP99VfpX3eXfvSR7mg1';
+
+// URLパラメータ取得
+var params = new URLSearchParams(window.location.search);
+var TARGET_SALON_ID = (params.get('salon') || '').trim();
+var CUSTOMER_DOC_ID = (params.get('cdid') || '').trim();
+
+// ============================================================
+// 試験定義
+// ============================================================
+// 各試験: { id, cat, desc, run: function(db, auth, ctx) → Promise }
+// ctx = { targetSalonId, customerDocId, currentUid, otherUid }
+// ============================================================
+
+var TESTS = [
+  // ---- #1〜#5: appointments 不正作成 ----
+  {
+    id: 1, cat: 'appointments', group: 'customer',
+    desc: 'priceSnapshot を含めて作成',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('appointments').add({
+          dateKey: '2099-12-31', start: '10:00',
+          customerDocId: ctx.customerDocId,
+          authUid: ctx.currentUid,
+          menuId: 'test_menu',
+          pendingCreate: true,
+          priceSnapshot: 99999   // 不正フィールド
+        });
+    }
+  },
+  {
+    id: 2, cat: 'appointments', group: 'customer',
+    desc: 'staffId を含めて作成',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('appointments').add({
+          dateKey: '2099-12-31', start: '10:00',
+          customerDocId: ctx.customerDocId,
+          authUid: ctx.currentUid,
+          menuId: 'test_menu',
+          pendingCreate: true,
+          staffId: 'owner'   // 不正フィールド
+        });
+    }
+  },
+  {
+    id: 3, cat: 'appointments', group: 'customer',
+    desc: 'status:confirmed で作成',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('appointments').add({
+          dateKey: '2099-12-31', start: '10:00',
+          customerDocId: ctx.customerDocId,
+          authUid: ctx.currentUid,
+          menuId: 'test_menu',
+          pendingCreate: true,
+          status: 'confirmed'   // 不正フィールド
+        });
+    }
+  },
+  {
+    id: 4, cat: 'appointments', group: 'customer',
+    desc: 'pendingCreate:false で作成',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('appointments').add({
+          dateKey: '2099-12-31', start: '10:00',
+          customerDocId: ctx.customerDocId,
+          authUid: ctx.currentUid,
+          menuId: 'test_menu',
+          pendingCreate: false   // 不正値
+        });
+    }
+  },
+  {
+    id: 5, cat: 'appointments', group: 'customer',
+    desc: 'authUid に他人UIDを入れて作成',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('appointments').add({
+          dateKey: '2099-12-31', start: '10:00',
+          customerDocId: ctx.customerDocId,
+          authUid: ctx.otherUid,   // 他人のUID
+          menuId: 'test_menu',
+          pendingCreate: true
+        });
+    }
+  },
+  // ---- #6〜#9: customers 不正作成/更新 ----
+  {
+    id: 6, cat: 'customers', group: 'customer',
+    desc: 'authUid に他人UIDを入れて作成',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('customers').add({
+          name: 'hack', phone: '', email: 'hack@example.com',
+          authUid: ctx.otherUid,   // 他人のUID
+          createdSource: 'self',
+          notifyChannels: { email: true, line: false },
+          isMerged: false, mergedInto: null, mergedAt: null, mergedAliases: []
+        });
+    }
+  },
+  {
+    id: 7, cat: 'customers', group: 'customer',
+    desc: 'createdSource:salon で作成',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('customers').add({
+          name: 'hack', phone: '', email: 'hack@example.com',
+          authUid: ctx.currentUid,
+          createdSource: 'salon',   // 不正値
+          notifyChannels: { email: true, line: false },
+          isMerged: false, mergedInto: null, mergedAt: null, mergedAliases: []
+        });
+    }
+  },
+  {
+    id: 8, cat: 'customers', group: 'customer',
+    desc: 'needsMergeReview を更新',
+    run: function(db, auth, ctx){
+      if (!ctx.customerDocId) return Promise.reject(new Error('customerDocId 未指定（?cdid= が必要）'));
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('customers').doc(ctx.customerDocId)
+        .update({ needsMergeReview: true });   // 禁止フィールド
+    }
+  },
+  {
+    id: 9, cat: 'customers', group: 'customer',
+    desc: 'lockedByJob を更新',
+    run: function(db, auth, ctx){
+      if (!ctx.customerDocId) return Promise.reject(new Error('customerDocId 未指定（?cdid= が必要）'));
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('customers').doc(ctx.customerDocId)
+        .update({ lockedByJob: 'fake_job_id' });   // 禁止フィールド
+    }
+  },
+  // ---- #10: config 書き込み ----
+  {
+    id: 10, cat: 'config', group: 'customer',
+    desc: 'config/settings に set する',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('config').doc('settings')
+        .set({ isAdmin: true }, { merge: true });
+    }
+  },
+  // ---- #11〜#12: authIndex / mergeJobs ----
+  {
+    id: 11, cat: 'authIndex', group: 'customer',
+    desc: 'authIndex に set する',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('authIndex').doc(ctx.currentUid)
+        .set({ fake: true });
+    }
+  },
+  {
+    id: 12, cat: 'mergeJobs', group: 'customer',
+    desc: 'mergeJobs に set する',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('mergeJobs').doc('fake_job')
+        .set({ fake: true });
+    }
+  },
+  // ---- #13〜#15: サロン間分離 ----
+  {
+    id: 13, cat: 'サロン間分離', group: 'salon',
+    desc: '別オーナーUIDでTARGET_SALONのappointmentsに作成',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('appointments').add({
+          dateKey: '2099-12-31', start: '10:00',
+          customerDocId: 'fake', authUid: ctx.currentUid,
+          menuId: 'test_menu', pendingCreate: true
+        });
+    }
+  },
+  {
+    id: 14, cat: 'サロン間分離', group: 'salon',
+    desc: '別オーナーUIDでTARGET_SALONのcustomersに作成',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('customers').add({
+          name: 'intruder', phone: '', email: 'intruder@example.com',
+          authUid: ctx.currentUid, createdSource: 'self',
+          notifyChannels: { email: true, line: false },
+          isMerged: false, mergedInto: null, mergedAt: null, mergedAliases: []
+        });
+    }
+  },
+  {
+    id: 15, cat: 'サロン間分離', group: 'salon',
+    desc: '別オーナーUIDでTARGET_SALONのconfigに書く',
+    run: function(db, auth, ctx){
+      return db.collection('salons').doc(ctx.targetSalonId)
+        .collection('config').doc('settings')
+        .set({ intruder: true }, { merge: true });
+    }
+  }
+];
+
+// ============================================================
+// 結果管理
+// ============================================================
+var results = {};
+var i;
+for (i = 0; i < TESTS.length; i++){
+  results[TESTS[i].id] = { status: 'pending', detail: '' };
+}
+
+// ============================================================
+// テーブル描画
+// ============================================================
+function renderTable(){
+  var tbody = document.getElementById('testTable');
+  var html = '';
+  var t;
+  for (i = 0; i < TESTS.length; i++){
+    t = TESTS[i];
+    var r = results[t.id];
+    var statusHtml = '<span class="result-pending">未実行</span>';
+    if (r.status === 'pass')  statusHtml = '<span class="result-pass">PASS</span>';
+    if (r.status === 'fail')  statusHtml = '<span class="result-fail">FAIL ⚠️</span>';
+    if (r.status === 'error') statusHtml = '<span class="result-error">ERROR</span>';
+    if (r.status === 'running') statusHtml = '<span style="color:#ff0;">実行中...</span>';
+    html += '<tr>' +
+      '<td>' + t.id + '</td>' +
+      '<td><span class="cat">' + t.cat + '</span></td>' +
+      '<td>' + t.desc + '</td>' +
+      '<td>' + statusHtml + '</td>' +
+      '<td style="font-size:11px;color:#888;">' + (r.detail || '') + '</td>' +
+      '<td><button class="btn btn-single" onclick="runSingle(' + t.id + ')">単体</button></td>' +
+    '</tr>';
+  }
+  tbody.innerHTML = html;
+}
+
+// ============================================================
+// 単体実行
+// ============================================================
+function runSingle(testId){
+  var db = firebase.firestore();
+  var auth = firebase.auth();
+  var user = auth.currentUser;
+  if (!user){ alert('ログインしてください'); return; }
+  if (!TARGET_SALON_ID){ alert('URLに ?salon=xxx が必要です'); return; }
+
+  var t = null;
+  for (i = 0; i < TESTS.length; i++){
+    if (TESTS[i].id === testId){ t = TESTS[i]; break; }
+  }
+  if (!t) return;
+
+  var ctx = {
+    targetSalonId: TARGET_SALON_ID,
+    customerDocId: CUSTOMER_DOC_ID,
+    currentUid: user.uid,
+    otherUid: OTHER_SALON_OWNER_UID
+  };
+
+  results[testId] = { status: 'running', detail: '' };
+  renderTable();
+
+  t.run(db, auth, ctx).then(function(){
+    results[testId] = { status: 'fail', detail: '書き込み成功（ルール漏れ）' };
+    renderTable();
+  }).catch(function(err){
+    if (err.code === 'permission-denied'){
+      results[testId] = { status: 'pass', detail: 'permission-denied' };
+    } else {
+      results[testId] = { status: 'error', detail: err.code || err.message };
+    }
+    renderTable();
+  });
+}
+
+// ============================================================
+// グループ実行
+// ============================================================
+function runGroup(group, btnId){
+  var db = firebase.firestore();
+  var auth = firebase.auth();
+  var user = auth.currentUser;
+  if (!user){ alert('ログインしてください'); return; }
+  if (!TARGET_SALON_ID){ alert('URLに ?salon=xxx が必要です'); return; }
+
+  var btn = document.getElementById(btnId);
+  btn.disabled = true;
+
+  var ctx = {
+    targetSalonId: TARGET_SALON_ID,
+    customerDocId: CUSTOMER_DOC_ID,
+    currentUid: user.uid,
+    otherUid: OTHER_SALON_OWNER_UID
+  };
+
+  // 対象グループの試験を順次実行
+  var targets = [];
+  for (i = 0; i < TESTS.length; i++){
+    if (TESTS[i].group === group) targets.push(TESTS[i]);
+  }
+
+  var idx = 0;
+  function next(){
+    if (idx >= targets.length){
+      btn.disabled = false;
+      return;
+    }
+    var t = targets[idx];
+    idx++;
+    results[t.id] = { status: 'running', detail: '' };
+    renderTable();
+
+    t.run(db, auth, ctx).then(function(){
+      results[t.id] = { status: 'fail', detail: '書き込み成功（ルール漏れ）' };
+      renderTable();
+      next();
+    }).catch(function(err){
+      if (err.code === 'permission-denied'){
+        results[t.id] = { status: 'pass', detail: 'permission-denied' };
+      } else {
+        results[t.id] = { status: 'error', detail: err.code || err.message };
+      }
+      renderTable();
+      next();
+    });
+  }
+  next();
+}
+
+// ============================================================
+// 起動
+// ============================================================
+window.addEventListener('load', function(){
+  document.getElementById('infoOther').textContent = OTHER_SALON_OWNER_UID;
+
+  if (!TARGET_SALON_ID){
+    document.getElementById('infoSalon').textContent = '未指定（?salon=xxx が必要）';
+    document.getElementById('infoSalon').style.color = '#f44';
+  } else {
+    document.getElementById('infoSalon').textContent = TARGET_SALON_ID;
+  }
+
+  if (!CUSTOMER_DOC_ID){
+    document.getElementById('infoCdid').textContent = '未指定（?cdid=xxx が必要、#8/#9で使用）';
+    document.getElementById('infoCdid').style.color = '#f90';
+  } else {
+    document.getElementById('infoCdid').textContent = CUSTOMER_DOC_ID;
+  }
+
+  if (!window.firebase || !firebase.apps || firebase.apps.length === 0){
+    document.getElementById('infoEmail').textContent = 'Firebase 初期化失敗';
+    renderTable();
+    return;
+  }
+
+  var auth = firebase.auth();
+  auth.onAuthStateChanged(function(user){
+    if (user){
+      document.getElementById('infoEmail').textContent = user.email || '（メールなし）';
+      document.getElementById('infoUid').textContent = user.uid;
+    } else {
+      document.getElementById('infoEmail').textContent = '（未ログイン）';
+      document.getElementById('infoUid').textContent = '—';
+    }
+    document.getElementById('btnCustomer').disabled = !user || !TARGET_SALON_ID;
+    document.getElementById('btnSalon').disabled = !user || !TARGET_SALON_ID;
+  });
+
+  document.getElementById('btnCustomer').addEventListener('click', function(){
+    runGroup('customer', 'btnCustomer');
+  });
+  document.getElementById('btnSalon').addEventListener('click', function(){
+    runGroup('salon', 'btnSalon');
+  });
+
+  renderTable();
+});
+</script>
+</body>
+</html>
