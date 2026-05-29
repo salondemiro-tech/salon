@@ -197,21 +197,14 @@ service cloud.firestore {
                     || (isSignedIn() &&
                         resource.data.authUid == request.auth.uid);
 
-        // 作成: (a) サロンが仮登録（authUid=null 必須）/
-        //       (b) 顧客本人がアプリ登録（authUid==自分の uid 必須）
+        // 作成: サロンスタッフによる仮登録のみ許可。
+        //   顧客self経路は廃止（2026/5/30）。
+        //   正規ルートは resolveOrClaimCustomer Function（Admin SDK）経由。
+        //   Admin SDK は Rules をバイパスするため claim には影響しない。
         allow create: if
           ( isSalonStaff(salonId) &&
             request.resource.data.authUid == null &&
             request.resource.data.createdSource == 'salon' &&
-            request.resource.data.keys().hasOnly([
-              'name','phone','email','authUid','createdSource',
-              'notifyChannels','isMerged','mergedInto','mergedAt',
-              'mergedAliases','createdAt'
-            ]) )
-          ||
-          ( isSignedIn() &&
-            request.resource.data.authUid == request.auth.uid &&
-            request.resource.data.createdSource == 'self' &&
             request.resource.data.keys().hasOnly([
               'name','phone','email','authUid','createdSource',
               'notifyChannels','isMerged','mergedInto','mergedAt',
@@ -281,6 +274,7 @@ service cloud.firestore {
         allow create: if (
           // ── (A) 顧客アプリ予約（pendingCreate=true）──
           (isSignedIn() &&
+           exists(/databases/$(database)/documents/salons/$(salonId)) &&
            request.resource.data.authUid == request.auth.uid &&
            request.resource.data.keys().hasOnly([
              'dateKey', 'start', 'customerDocId', 'authUid',
