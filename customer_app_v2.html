@@ -226,7 +226,8 @@ var appState = {
   customerDocId: null,    // claim 後に確定
 
   step: 'loading',        // loading / menu / option / date / identity / confirm / complete
-  busy: false             // 二重送信防止
+  busy: false,            // 二重送信防止
+  slotConflictMsg: null   // 空き再チェックで埋まっていた場合のメッセージ
 };
 
 // グローバル参照
@@ -592,6 +593,18 @@ function renderDateStep(){
     appState.calMonth = now.getMonth() + 1;
   }
   drawCalendar();
+  // 直前の予約確定で time_conflict が発生した場合のメッセージを表示
+  if (appState.slotConflictMsg){
+    var body = $('appBody');
+    if (body){
+      var msg = document.createElement('div');
+      msg.className = 'error-box';
+      msg.style.margin = '0 0 12px';
+      msg.textContent = appState.slotConflictMsg;
+      body.insertBefore(msg, body.firstChild);
+    }
+    appState.slotConflictMsg = null;
+  }
 }
 
 function drawCalendar(){
@@ -1178,19 +1191,56 @@ function renderConfirmStep(){
   $('confirmBackBtn').addEventListener('click', function(){ goStep('date'); });
 }
 
-// 予約確定処理：claim → 予約作成
+// 予約確定処理：空き再チェック → claim → 予約作成
 function doBooking(){
   if (appState.busy) return;
   appState.busy = true;
   var btn = $('bookBtn');
-  if (btn){ btn.disabled = true; btn.textContent = '予約を送信中...'; }
+  if (btn){ btn.disabled = true; btn.textContent = '空き状況を確認中...'; }
 
   confirmErr('');
 
-  if (typeof dbCustomerClaimMyCard !== 'function'){
-    bookingFail('システムエラー（claim 関数が見つかりません）。');
+  // Step 0: 予約確定直前に空き状況を再取得して再判定
+  if (typeof dbLoadCustomerBooking !== 'function'){
+    bookingFail('システムエラー（空き確認関数が見つかりません）。');
     return;
   }
+
+  dbLoadCustomerBooking(appState.selectedDate, function(freshDayData){
+    if (!freshDayData){
+      bookingFail('空き状況の確認に失敗しました。時間をおいて再度お試しください。');
+      return;
+    }
+
+    // 最新データで再判定
+    var freshSlots = computeAvailableSlots(freshDayData, appState.selectedDate);
+    var stillAvailable = false;
+    var i;
+    for (i = 0; i < freshSlots.length; i++){
+      if (freshSlots[i].start === appState.selectedSlot && freshSlots[i].available){
+        stillAvailable = true;
+        break;
+      }
+    }
+
+    if (!stillAvailable){
+      // 埋まっていた → stateを最新に更新して日時選択へ戻す
+      appState.busy = false;
+      appState.dayData = freshDayData;
+      appState.availableSlots = freshSlots;
+      appState.selectedSlot = null;
+      appState.slotConflictMsg = 'その時間は先に埋まりました。別の時間をお選びください。';
+      goStep('date');
+      return;
+    }
+
+    // 空きあり → 以降の処理へ
+    if (btn){ btn.textContent = '予約を送信中...'; }
+
+    if (typeof dbCustomerClaimMyCard !== 'function'){
+      bookingFail('システムエラー（claim 関数が見つかりません）。');
+      return;
+    }
 
   var claimData = {
     name: appState.pendingName || (appState.user.displayName || ''),
@@ -1237,6 +1287,7 @@ function doBooking(){
       goStep('complete');
     });
   });
+  }); // dbLoadCustomerBooking（空き再チェック）の閉じ
 }
 
 function optionIds(){
