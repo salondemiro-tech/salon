@@ -152,6 +152,13 @@
   /* メール確認バナー */
   .verify-banner{background:var(--gol);border:1px solid var(--go);border-radius:10px;
                  padding:14px;font-size:13px;color:#7a5800;line-height:1.6;margin-bottom:14px;}
+
+  /* auth-bar：ヘッダー下に常時表示 */
+  .auth-bar{background:var(--sf);border-bottom:1px solid var(--bd);
+            padding:6px 20px;display:flex;align-items:center;justify-content:space-between;}
+  .auth-bar-email{font-size:11px;color:var(--mu);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%;}
+  .auth-bar-btn{font-size:11px;color:var(--ac);background:none;border:none;cursor:pointer;
+                font-family:inherit;padding:4px 0;white-space:nowrap;flex-shrink:0;}
 </style>
 </head>
 <body>
@@ -159,6 +166,10 @@
   <div class="hdr">
     <div class="hdr-salon" id="hdrSalon">読み込み中...</div>
     <div class="hdr-sub" id="hdrSub">ご予約</div>
+  </div>
+  <div class="auth-bar" id="authBar" style="display:none;">
+    <div class="auth-bar-email" id="authBarEmail"></div>
+    <button class="auth-bar-btn" id="authBarLogoutBtn">ログアウト</button>
   </div>
   <div class="steps" id="stepsBar" style="display:none;">
     <div class="step-dot" data-step="menu"></div>
@@ -267,6 +278,22 @@ function yenSafe(n){
   return '¥' + out;
 }
 
+// auth-bar の表示更新
+function updateAuthBar(){
+  var bar = $('authBar');
+  if (!bar) return;
+  var user = appState.user;
+  // ログイン済み＆メール確認済みのときだけ表示（identity/loading/accountCheck画面では非表示）
+  var hideSteps = ['loading','identity','accountCheck'];
+  if (user && user.emailVerified && hideSteps.indexOf(appState.step) < 0){
+    bar.style.display = 'flex';
+    $('authBarEmail').textContent = user.email || '';
+    $('authBarLogoutBtn').onclick = doLogout;
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
 // ステップバーの更新
 function updateStepsBar(){
   var order = ['menu','date','identity','confirm'];
@@ -297,8 +324,10 @@ function goStep(step){
 }
 
 function render(){
+  updateAuthBar();
   updateStepsBar();
   switch (appState.step){
+    case 'accountCheck': renderAccountCheckStep(); break;
     case 'menu':     renderMenuStep(); break;
     case 'option':   renderOptionStep(); break;
     case 'date':     renderDateStep(); break;
@@ -347,11 +376,12 @@ function init(){
     firstAuthHandled = true;
 
     if (user && user.emailVerified){
-      // 既にログイン済み（メール確認済み）→ サロン情報取得へ
-      loadSalonInfo();
+      // 既にログイン済み（メール確認済み）→ 必ずaccountCheck画面を経由する
+      $('hdrSalon').textContent = 'ご予約';
+      $('hdrSub').textContent = 'アカウント確認';
+      goStep('accountCheck');
     } else {
       // 未ログイン or メール未確認 → ログイン画面（D-4）から開始
-      // ここではサロン名はまだ出せない（rules上 info read もログイン必須）
       $('hdrSalon').textContent = 'ご予約';
       $('hdrSub').textContent = 'ログイン / 新規登録';
       goStep('identity');
@@ -827,6 +857,36 @@ function formatDateJp(dateKey){
 }
 
 // ============================================================
+// accountCheck: 起動時アカウント確認画面
+//   ログイン済みの場合に必ず1回表示する。
+//   「このまま予約する」→ loadSalonInfo() → menu
+//   「別のアカウントでログインしなおす」→ ログアウト → identity
+// ============================================================
+function renderAccountCheckStep(){
+  var email = (appState.user && appState.user.email) ? appState.user.email : '';
+  setFooter('');
+  setBody(
+    '<div class="step-title">アカウントの確認</div>' +
+    '<div class="step-desc">以下のアカウントでログインしています。</div>' +
+    '<div class="info-box" style="word-break:break-all;">' + esc(email) + '</div>' +
+    '<button class="pbtn" id="acContinueBtn">このアカウントで予約する</button>' +
+    '<button class="gbtn" id="acSwitchBtn">別のアカウントでログインしなおす</button>'
+  );
+  $('acContinueBtn').addEventListener('click', function(){
+    loadSalonInfo();
+  });
+  $('acSwitchBtn').addEventListener('click', function(){
+    auth.signOut().then(function(){
+      appState.user = null;
+      appState.customerDocId = null;
+      identityMode = 'login';
+      $('hdrSub').textContent = 'ログイン / 新規登録';
+      goStep('identity');
+    });
+  });
+}
+
+// ============================================================
 // D-4: ログイン / 新規登録 / メール確認
 //   identityMode: 'login'(既存ログイン) / 'signup'(新規登録) / 'verify'(メール確認待ち)
 // ============================================================
@@ -1081,6 +1141,10 @@ function renderConfirmStep(){
   var html = '<div class="step-title">ご予約内容の確認</div>' +
              '<div class="step-desc">内容をご確認のうえ、予約を確定してください。</div>' +
              '<div id="confirmErr"></div>' +
+             '<div class="sum-row"><div class="sum-label">予約者</div>' +
+               '<div class="sum-value" style="font-size:13px;word-break:break-all;">' +
+               esc((appState.user && appState.user.email) ? appState.user.email : '') +
+               '</div></div>' +
              '<div class="sum-row"><div class="sum-label">日時</div>' +
                '<div class="sum-value">' + esc(formatDateJp(appState.selectedDate)) +
                '<br>' + esc(appState.selectedSlot) + '〜</div></div>' +
