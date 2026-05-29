@@ -1103,7 +1103,8 @@ function doLogout(){
     appState.user = null;
     appState.customerDocId = null;
     identityMode = 'login';
-    render();
+    $('hdrSub').textContent = 'ログイン / 新規登録';
+    goStep('identity');
   });
 }
 
