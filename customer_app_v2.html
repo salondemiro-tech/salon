@@ -1053,8 +1053,11 @@ function doSignup(){
 
   auth.createUserWithEmailAndPassword(email, pass).then(function(cred){
     appState.user = cred.user;
+    // displayName に名前を保存（次回ログイン済みフローでも name が取れるように）
+    return cred.user.updateProfile({ displayName: name });
+  }).then(function(){
     // 確認メール送信
-    return cred.user.sendEmailVerification();
+    return auth.currentUser.sendEmailVerification();
   }).then(function(){
     appState.busy = false;
     identityMode = 'verify';
