@@ -1058,15 +1058,21 @@ function doVerifyCheck(){
 
   // 最新の emailVerified を取りにいく
   appState.user.reload().then(function(){
-    appState.busy = false;
     var u = auth.currentUser;
     appState.user = u;
     if (u && u.emailVerified){
-      loadSalonInfo();
-    } else {
-      if ($('verifyCheckBtn')){ $('verifyCheckBtn').disabled = false; $('verifyCheckBtn').textContent = '確認できたので次へ'; }
-      identityErr('まだ確認が完了していないようです。メール内のリンクをタップしてから、もう一度お試しください。');
+      // IDトークンを強制再発行（Functions側の email_verified を確実に true にする）
+      return u.getIdToken(true);
     }
+    // メール未確認
+    appState.busy = false;
+    if ($('verifyCheckBtn')){ $('verifyCheckBtn').disabled = false; $('verifyCheckBtn').textContent = '確認できたので次へ'; }
+    identityErr('まだ確認が完了していないようです。メール内のリンクをタップしてから、もう一度お試しください。');
+    return null;
+  }).then(function(token){
+    if (!token) return;
+    appState.busy = false;
+    loadSalonInfo();
   }).catch(function(err){
     appState.busy = false;
     if ($('verifyCheckBtn')){ $('verifyCheckBtn').disabled = false; $('verifyCheckBtn').textContent = '確認できたので次へ'; }
