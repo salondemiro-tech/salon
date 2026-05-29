@@ -715,20 +715,25 @@ function loadAndDrawSlots(dateKey){
   if (!area) return;
   area.innerHTML = '<div class="loading" style="padding:24px;"><div class="spinner"></div>空き状況を確認中...</div>';
 
-  if (typeof dbLoadCustomerBooking !== 'function'){
+  if (typeof dbCustomerGetAvailableSlots !== 'function'){
     area.innerHTML = '<div class="error-box">空き状況の取得に失敗しました。</div>';
     return;
   }
 
-  dbLoadCustomerBooking(dateKey, function(dayData){
-    if (!dayData){
+  var menuId = appState.selectedMenu ? appState.selectedMenu._id : '';
+  var optIds = [];
+  var i;
+  for (i = 0; i < appState.selectedOptions.length; i++){
+    optIds.push(appState.selectedOptions[i]._id);
+  }
+
+  dbCustomerGetAvailableSlots(dateKey, menuId, optIds, function(err, result){
+    if (err || !result || !result.slots){
       area.innerHTML = '<div class="error-box">空き状況の取得に失敗しました。時間をおいて再度お試しください。</div>';
       return;
     }
-    appState.dayData = dayData;
-    var slots = computeAvailableSlots(dayData, dateKey);
-    appState.availableSlots = slots;
-    drawSlots(slots);
+    appState.availableSlots = result.slots;
+    drawSlots(result.slots);
   });
 }
 
@@ -1200,20 +1205,27 @@ function doBooking(){
 
   confirmErr('');
 
-  // Step 0: 予約確定直前に空き状況を再取得して再判定
-  if (typeof dbLoadCustomerBooking !== 'function'){
+  // Step 0: 予約確定直前に空き状況を再取得して再判定（getAvailableSlots Function 経由）
+  if (typeof dbCustomerGetAvailableSlots !== 'function'){
     bookingFail('システムエラー（空き確認関数が見つかりません）。');
     return;
   }
 
-  dbLoadCustomerBooking(appState.selectedDate, function(freshDayData){
-    if (!freshDayData){
+  var preCheckMenuId = appState.selectedMenu ? appState.selectedMenu._id : '';
+  var preCheckOptIds = [];
+  var j;
+  for (j = 0; j < appState.selectedOptions.length; j++){
+    preCheckOptIds.push(appState.selectedOptions[j]._id);
+  }
+
+  dbCustomerGetAvailableSlots(appState.selectedDate, preCheckMenuId, preCheckOptIds, function(err0, result0){
+    if (err0 || !result0 || !result0.slots){
       bookingFail('空き状況の確認に失敗しました。時間をおいて再度お試しください。');
       return;
     }
 
-    // 最新データで再判定
-    var freshSlots = computeAvailableSlots(freshDayData, appState.selectedDate);
+    // 最新スロットで再判定
+    var freshSlots = result0.slots;
     var stillAvailable = false;
     var i;
     for (i = 0; i < freshSlots.length; i++){

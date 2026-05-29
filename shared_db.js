@@ -1805,6 +1805,39 @@
   }
   window.dbCustomerClaimMyCard = dbCustomerClaimMyCard;
 
+  // dbCustomerGetAvailableSlots(dateKey, menuId, optionMenuIds, cb)
+  //   getAvailableSlots callable Function を呼び出す。
+  //   空き枠情報のみ返す（個人情報なし）。
+  //   cb(err, { dateKey, slots: [{ start, available }] })
+  function dbCustomerGetAvailableSlots(dateKey, menuId, optionMenuIds, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) {
+      _safeCb(cb, new Error('salonId が取得できません。'), null);
+      return;
+    }
+    var callable;
+    try {
+      callable = _functions().httpsCallable('getAvailableSlots');
+    } catch (e) {
+      _logErr('dbCustomerGetAvailableSlots httpsCallable', e);
+      _safeCb(cb, e, null);
+      return;
+    }
+    callable({
+      salonId: sid,
+      dateKey: dateKey,
+      menuId: menuId,
+      optionMenuIds: optionMenuIds || []
+    }).then(function (res) {
+      _safeCb(cb, null, (res && res.data) ? res.data : null);
+    }).catch(function (err) {
+      _logErr('dbCustomerGetAvailableSlots', err);
+      _safeCb(cb, err, null);
+    });
+  }
+  window.dbCustomerGetAvailableSlots = dbCustomerGetAvailableSlots;
+
+
   // dbCustomerCreateMyProfile : 【廃止・地雷不発化】
   //
   // 【2026/5/28 D-step3】
