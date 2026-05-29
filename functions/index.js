@@ -496,6 +496,185 @@ exports.sendBookingEmail = onRequest(
 );
 
 // ========================================
+// ========================================
+// getAvailableSlots (callable Function)
+//   顧客アプリ用：指定日の空き枠を返す。
+//   個人情報は一切返さない。
+//   入力: { salonId, dateKey, menuId, optionMenuIds }
+//   出力: { dateKey, slots: [{ start, available }] }
+// ========================================
+exports.getAvailableSlots = onCall(
+  { region: 'asia-northeast1' },
+  async (request) => {
+    // 認証チェック
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'ログインが必要です。');
+    }
+
+    const { salonId, dateKey, menuId, optionMenuIds } = request.data || {};
+
+    // 入力バリデーション
+    if (!salonId || typeof salonId !== 'string') {
+      throw new HttpsError('invalid-argument', 'salonId が不正です。');
+    }
+    if (!dateKey || typeof dateKey !== 'string' || !/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(dateKey)) {
+      throw new HttpsError('invalid-argument', 'dateKey が不正です。');
+    }
+    if (!menuId || typeof menuId !== 'string') {
+      throw new HttpsError('invalid-argument', 'menuId が不正です。');
+    }
+    const optIds = Array.isArray(optionMenuIds) ? optionMenuIds : [];
+
+    // ---- 並列取得 ----
+    const salonRef = db.collection('salons').doc(salonId);
+
+    const [settingsDoc, menuDoc, apptSnap, closeBlockSnap] = await Promise.all([
+      salonRef.collection('config').doc('settings').get(),
+      salonRef.collection('menus').doc(menuId).get(),
+      salonRef.collection('appointments').where('dateKey', '==', dateKey).get(),
+      salonRef.collection('closeBlocks').get()
+    ]);
+
+    // オプションメニューを並列取得
+    const optDocs = await Promise.all(
+      optIds.map(id => salonRef.collection('menus').doc(id).get())
+    );
+
+    // ---- 所要時間計算 ----
+    if (!menuDoc.exists) {
+      throw new HttpsError('not-found', 'メニューが見つかりません。');
+    }
+    const menu = menuDoc.data();
+    let totalDuration = menu.duration || 0;
+    for (const optDoc of optDocs) {
+      if (optDoc.exists) totalDuration += (optDoc.data().duration || 0);
+    }
+    const intervalAfter = menu.intervalAfter || 0;
+
+    // ---- settings ----
+    const settings = settingsDoc.exists ? settingsDoc.data() : {};
+    const openMin  = hhmmToMin(settings.openTime  || '10:00');
+    const closeMin = hhmmToMin(settings.closeTime || '19:00');
+    const slotMin  = (typeof settings.slotMin === 'number' && settings.slotMin > 0) ? settings.slotMin : 30;
+    const intervalMin = (typeof settings.intervalMin === 'number') ? settings.intervalMin : 0;
+    const needMin  = totalDuration > 0 ? totalDuration : slotMin;
+    const latestStart = closeMin - needMin;
+
+    // ---- ブロック済み区間を収集 ----
+    // ブロック対象: status==='confirmed' または pendingCreate===true
+    // ブロックしない: cancelled / no_show / time_conflict / failed
+    const busy = [];
+
+    apptSnap.forEach(doc => {
+      const a = doc.data();
+      const isConfirmed  = a.status === 'confirmed';
+      const isPending    = a.pendingCreate === true;
+      if (!isConfirmed && !isPending) return; // キャンセル等は除外
+
+      // startAt/endAt (Timestamp) が使えればそちら優先、なければ start/end 文字列
+      let s, e;
+      if (a.startAt && a.startAt.toMillis) {
+        s = a.startAt.toMillis();
+        // blockedUntil があればインターバル込みの終了時刻として使う
+        const endTs = a.blockedUntil || a.endAt;
+        e = endTs && endTs.toMillis ? endTs.toMillis() : (s + needMin * 60000);
+      } else {
+        // フォールバック: start/end 文字列
+        const sMin = hhmmToMin(a.start);
+        if (isNaN(sMin)) return;
+        const eMin = a.end ? hhmmToMin(a.end) : (sMin + (a.durationSnapshot || slotMin));
+        s = sMin;
+        e = eMin + intervalMin; // ミリ秒ではなく分単位で揃える（後で判定時に統一）
+        // 分単位フラグ
+        busy.push({ startMin: sMin - intervalMin, endMin: eMin + intervalMin, isMin: true });
+        return;
+      }
+      busy.push({ startMs: s, endMs: e, isMin: false });
+    });
+
+    // closeBlocks
+    closeBlockSnap.forEach(doc => {
+      const b = doc.data();
+      if (b.dateKey && b.dateKey !== dateKey) return;
+      const bs = hhmmToMin(b.start || settings.openTime  || '10:00');
+      const be = hhmmToMin(b.end   || settings.closeTime || '19:00');
+      busy.push({ startMin: bs, endMin: be, isMin: true });
+    });
+
+    // 定休日（曜日）
+    const dObj = new Date(dateKey + 'T12:00:00+09:00');
+    const dow = dObj.getDay();
+    const weeklyClose = settings.weeklyClose || [];
+    for (const wc of weeklyClose) {
+      if (wc && wc.dow === dow) {
+        busy.push({ startMin: hhmmToMin(wc.start), endMin: hhmmToMin(wc.end), isMin: true });
+      }
+    }
+
+    // 定休曜日チェック
+    const closedDows = settings.closedDows || [];
+    if (closedDows.indexOf(dow) >= 0) {
+      // 終日クローズ
+      return { dateKey, slots: [] };
+    }
+
+    // ---- スロット生成 ----
+    // 現在時刻（当日のみ過去スロット除外）
+    const now = new Date();
+    const todayKey = [
+      now.getFullYear(),
+      String(now.getMonth() + 1).padStart(2, '0'),
+      String(now.getDate()).padStart(2, '0')
+    ].join('-');
+    const nowMin = (dateKey === todayKey) ? (now.getHours() * 60 + now.getMinutes()) : -1;
+
+    const slots = [];
+    for (let t = openMin; t <= latestStart; t += slotMin) {
+      const slotStart = t;
+      const slotEnd   = t + needMin + intervalAfter;
+      let available = true;
+
+      // 過去スロット除外
+      if (nowMin >= 0 && slotStart <= nowMin) { available = false; }
+
+      if (available) {
+        // startAt/endAt (ms) で記録されたブロックとの衝突チェック
+        // ミリ秒系は dateKey+時刻→ms に変換して比較
+        const slotStartMs = new Date(dateKey + 'T' + minToHHMM(slotStart) + ':00+09:00').getTime();
+        const slotEndMs   = new Date(dateKey + 'T' + minToHHMM(slotEnd)   + ':00+09:00').getTime();
+
+        for (const b of busy) {
+          if (b.isMin) {
+            // 分単位比較
+            if (slotStart < b.endMin && slotEnd > b.startMin) { available = false; break; }
+          } else {
+            // ms単位比較
+            if (slotStartMs < b.endMs && slotEndMs > b.startMs) { available = false; break; }
+          }
+        }
+      }
+
+      slots.push({ start: minToHHMM(slotStart), available });
+    }
+
+    return { dateKey, slots };
+  }
+);
+
+// hhmm→分 変換（Functions内ユーティリティ）
+function hhmmToMin(s) {
+  if (!s) return NaN;
+  const parts = String(s).split(':');
+  if (parts.length < 2) return NaN;
+  return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+}
+// 分→hhmm変換
+function minToHHMM(m) {
+  const h  = Math.floor(m / 60);
+  const mi = m % 60;
+  return String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
+}
+
 // resolveOrClaimCustomer (callable Function)
 // 設計書 DESIGN_v8_1_customer_identity.md 2-4 に1対1照合
 //
