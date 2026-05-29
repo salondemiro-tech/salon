@@ -172,12 +172,17 @@ exports.onAppointmentCreate = onDocumentCreated(
     try {
       // ============================================================
       // 1. 必須フィールドチェック
+      //   【2026/5/29 v8.1化】customerId → customerDocId + authUid 分離
+      //     クライアント側（shared_db.js D-step3版）は customerDocId と
+      //     authUid を送るようになったため、ここも整合させる。
+      //     authUid は B 経路（サロン手動登録）で null のことがあるので、
+      //     必須からは外す（rules で空文字や型は検証済み）。
       // ============================================================
-      const { dateKey, start, customerId, menuId } = data;
+      const { dateKey, start, customerDocId, menuId } = data;
       const optionMenuIds = data.optionMenuIds || [];
 
-      if (!dateKey || !start || !customerId || !menuId) {
-        await failAppointment(ref, salonId, 'missing_required_fields', { dateKey, start, customerId, menuId });
+      if (!dateKey || !start || !customerDocId || !menuId) {
+        await failAppointment(ref, salonId, 'missing_required_fields', { dateKey, start, customerDocId, menuId });
         return;
       }
 
@@ -298,10 +303,11 @@ exports.onAppointmentCreate = onDocumentCreated(
 
       // ============================================================
       // 8. 顧客情報取得（メール用）
+      //   【2026/5/29 v8.1化】customers/{customerDocId} を引く
       // ============================================================
-      const customerDoc = await db.collection('salons').doc(salonId).collection('customers').doc(customerId).get();
+      const customerDoc = await db.collection('salons').doc(salonId).collection('customers').doc(customerDocId).get();
       if (!customerDoc.exists) {
-        await failAppointment(ref, salonId, 'customer_not_found', { customerId });
+        await failAppointment(ref, salonId, 'customer_not_found', { customerDocId });
         return;
       }
       const customer = customerDoc.data();
