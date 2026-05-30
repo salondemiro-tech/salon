@@ -1444,6 +1444,19 @@ function renderMypageStep(){
     var user = appState.user;
     var currentEmail = (user && user.email) ? user.email : (customer.email || '');
 
+    // Auth.email と Firestore.email が違う場合は自動同期（メール確認リンクタップ後）
+    if (user && user.email && customer.email && user.email !== customer.email){
+      var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
+      if (sid && res.customerDocId){
+        firebase.firestore()
+          .collection('salons').doc(sid).collection('customers').doc(res.customerDocId)
+          .update({ email: user.email, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+          .then(function(){
+            customer.email = user.email;
+          }).catch(function(){});
+      }
+    }
+
     var html =
       '<div class="step-title">マイページ</div>' +
 
@@ -1561,37 +1574,16 @@ function renderMypageStep(){
       // 再認証 → Auth メール変更 → Firestore メール変更（順番厳守）
       var credential = firebase.auth.EmailAuthProvider.credential(user.email, password);
       user.reauthenticateWithCredential(credential).then(function(){
-        return user.updateEmail(newEmail);
+        return user.verifyBeforeUpdateEmail(newEmail);
       }).then(function(){
-        // Auth成功 → Firestore更新（email直接update）
-        var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
-        var uid = (typeof getCurrentUserUid === 'function') ? getCurrentUserUid() : null;
-        if (!sid || !uid){ return Promise.reject(new Error('not authenticated')); }
-        return new Promise(function(resolve, reject){
-          if (typeof dbCustomerResolveMyCard !== 'function'){ reject(new Error('no resolver')); return; }
-          dbCustomerResolveMyCard(function(res){
-            if (!res || !res.customerDocId){ reject(new Error('no customerDocId')); return; }
-            var db = firebase.firestore();
-            db.collection('salons').doc(sid).collection('customers').doc(res.customerDocId)
-              .update({ email: newEmail, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
-              .then(resolve).catch(reject);
-          });
-        });
-      }).then(function(){
-        showMypageMsg(msgEl, 'ok', 'メールアドレスを変更しました。');
-        // auth-barのメール表示も更新
-        var emailEl = document.getElementById('authBarEmail');
-        if (emailEl) emailEl.textContent = newEmail;
-        // 現在のメール表示欄も更新
-        var curEl = document.querySelector('#mpEmailSaveBtn').closest('.mypage-section').querySelector('input[readonly]');
-        if (curEl) curEl.value = newEmail;
+        // 確認メール送信成功 → Firestoreはまだ更新しない（リンクタップ後に自動反映）
+        showMypageMsg(msgEl, 'ok', '確認メールを送信しました。メール内のリンクを開くと変更が完了します。');
         document.getElementById('mpNewEmail').value = '';
         document.getElementById('mpEmailPassword').value = '';
         btn.disabled = false;
         btn.textContent = 'メールアドレスを変更';
       }).catch(function(e){
         var msg = 'メールアドレスの変更に失敗しました。';
-        alert('DEBUG: code=' + e.code + ' msg=' + e.message); // DEBUG
         if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') msg = 'パスワードが正しくありません。';
         if (e.code === 'auth/email-already-in-use') msg = 'そのメールアドレスはすでに使用されています。';
         if (e.code === 'auth/invalid-email') msg = 'メールアドレスの形式が正しくありません。';
