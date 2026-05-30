@@ -153,6 +153,17 @@
   .verify-banner{background:var(--gol);border:1px solid var(--go);border-radius:10px;
                  padding:14px;font-size:13px;color:#7a5800;line-height:1.6;margin-bottom:14px;}
 
+  /* 予約履歴 */
+  .hist-card{border:1.5px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:12px;background:var(--bg);}
+  .hist-date{font-size:15px;font-weight:600;color:var(--tx);margin-bottom:6px;}
+  .hist-menu{font-size:14px;color:var(--tx);margin-bottom:4px;}
+  .hist-meta{font-size:12px;color:var(--mu);display:flex;gap:12px;align-items:center;}
+  .hist-status{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;border-radius:20px;}
+  .hist-status.pending{background:var(--gol);color:#7a5800;}
+  .hist-status.confirmed{background:var(--gl);color:var(--gt);}
+  .hist-status.cancelled{background:var(--rl);color:var(--rt);}
+  .hist-status.other{background:var(--s2);color:var(--mu);}
+
   /* auth-bar：ヘッダー下に常時表示 */
   .auth-bar{background:var(--sf);border-bottom:1px solid var(--bd);
             padding:6px 20px;display:flex;align-items:center;justify-content:space-between;}
@@ -169,7 +180,10 @@
   </div>
   <div class="auth-bar" id="authBar" style="display:none;">
     <div class="auth-bar-email" id="authBarEmail"></div>
-    <button class="auth-bar-btn" id="authBarLogoutBtn">ログアウト</button>
+    <div style="display:flex;gap:12px;flex-shrink:0;">
+      <button class="auth-bar-btn" id="authBarHistoryBtn">予約履歴</button>
+      <button class="auth-bar-btn" id="authBarLogoutBtn">ログアウト</button>
+    </div>
   </div>
   <div class="steps" id="stepsBar" style="display:none;">
     <div class="step-dot" data-step="menu"></div>
@@ -290,6 +304,7 @@ function updateAuthBar(){
     bar.style.display = 'flex';
     $('authBarEmail').textContent = user.email || '';
     $('authBarLogoutBtn').onclick = doLogout;
+    $('authBarHistoryBtn').onclick = function(){ goStep('history'); };
   } else {
     bar.style.display = 'none';
   }
@@ -335,6 +350,7 @@ function render(){
     case 'identity': renderIdentityStep(); break;
     case 'confirm':  renderConfirmStep(); break;
     case 'complete': renderCompleteStep(); break;
+    case 'history':  renderHistoryStep(); break;
     default:         showLoading();
   }
 }
@@ -1347,8 +1363,10 @@ function renderCompleteStep(){
         '<br><br>サロンの確認後、予約が確定します。' +
       '</div>' +
     '</div>' +
-    '<button class="sbtn" id="newBookingBtn">続けて予約する</button>'
+    '<button class="sbtn" id="newBookingBtn">続けて予約する</button>' +
+    '<button class="gbtn" id="toHistoryBtn">予約履歴を見る</button>'
   );
+  $('toHistoryBtn').addEventListener('click', function(){ goStep('history'); });
   $('newBookingBtn').addEventListener('click', function(){
     appState.selectedMenu = null;
     appState.selectedOptions = [];
@@ -1359,6 +1377,78 @@ function renderCompleteStep(){
     appState.calYear = null;
     appState.calMonth = null;
     goStep('menu');
+  });
+}
+
+
+// ============================================================
+// D-7 予約履歴画面
+// ============================================================
+function renderHistoryStep(){
+  setFooter('');
+  showLoading('予約履歴を読み込んでいます...');
+
+  if (typeof dbLoadCustomerHistory !== 'function'){
+    setBody('<div class="error-box">予約履歴を読み込めませんでした（shared_db.js）。</div>');
+    return;
+  }
+
+  dbLoadCustomerHistory(function(result){
+    if (!result){
+      setBody('<div class="error-box">予約履歴の取得に失敗しました。</div>');
+      return;
+    }
+
+    var items = result.merged || [];
+
+    // ステータス表示ヘルパー
+    function statusBadge(st){
+      if (st === 'confirmed')  return '<span class="hist-status confirmed">確定</span>';
+      if (st === 'pending')    return '<span class="hist-status pending">確認中</span>';
+      if (st === 'cancelled')  return '<span class="hist-status cancelled">キャンセル</span>';
+      return '<span class="hist-status other">' + esc(st || '—') + '</span>';
+    }
+
+    // メニュー名解決：スナップショット優先
+    function resolveMenuName(item){
+      if (item.menuNameSnapshot) return item.menuNameSnapshot;
+      // appStateのメニュー一覧から検索
+      var menus = appState.menus || [];
+      var i;
+      for (i = 0; i < menus.length; i++){
+        if (menus[i]._id === item.menuId) return menus[i].name;
+      }
+      return '削除済みメニュー';
+    }
+
+    var html = '<div class="step-title">予約履歴</div>';
+
+    if (items.length === 0){
+      html += '<div class="empty-msg">予約履歴はありません。</div>';
+    } else {
+      var i;
+      for (i = 0; i < items.length; i++){
+        var item = items[i];
+        var menuName = resolveMenuName(item);
+        var price = (item.priceSnapshot != null) ? yenSafe(item.priceSnapshot) : '';
+        var duration = item.durationSnapshot ? (item.durationSnapshot + '分') : '';
+
+        html += '<div class="hist-card">' +
+          '<div class="hist-date">' + esc(formatDateJp(item.dateKey)) + ' ' + esc(item.start || '') + '〜</div>' +
+          '<div class="hist-menu">' + esc(menuName) + '</div>' +
+          '<div class="hist-meta">' +
+            statusBadge(item.status) +
+            (price ? '<span>' + esc(price) + '</span>' : '') +
+            (duration ? '<span>' + esc(duration) + '</span>' : '') +
+          '</div>' +
+        '</div>';
+      }
+    }
+
+    html += '<button class="gbtn" id="histBackBtn">予約画面に戻る</button>';
+
+    setBody(html);
+    $('histBackBtn').addEventListener('click', function(){ goStep('menu'); });
   });
 }
 
