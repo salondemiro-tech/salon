@@ -423,15 +423,78 @@ function init(){
     firstAuthHandled = true;
 
     if (user && user.emailVerified){
-      // 既にログイン済み（メール確認済み）→ 必ずaccountCheck画面を経由する
-      $('hdrSalon').textContent = 'ご予約';
-      $('hdrSub').textContent = 'アカウント確認';
-      goStep('accountCheck');
+      // ログイン時にAuth.emailとFirestore.emailの同期チェック（onFbReady内で実行）
+      syncEmailIfChanged(user, function(){
+        // emailChanged=1&next=mypage の場合はマイページへ直接遷移
+        var urlParams = new URLSearchParams(location.search);
+        var next = urlParams.get('next');
+        if (next === 'mypage'){
+          // URLパラメータをクリア（再遷移防止）
+          history.replaceState(null, '', location.pathname + '?salon=' + encodeURIComponent(appState.salonId || ''));
+          loadSalonInfo_then('mypage');
+          return;
+        }
+        $('hdrSalon').textContent = 'ご予約';
+        $('hdrSub').textContent = 'アカウント確認';
+        goStep('accountCheck');
+      });
     } else {
       // 未ログイン or メール未確認 → ログイン画面（D-4）から開始
       $('hdrSalon').textContent = 'ご予約';
       $('hdrSub').textContent = 'ログイン / 新規登録';
       goStep('identity');
+    }
+  });
+}
+
+// ログイン時にAuth.emailとFirestore customer.emailを自動同期
+function syncEmailIfChanged(user, cb){
+  var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
+  if (!sid || !user || !user.email){ cb(); return; }
+
+  // onFbReady でラップして _fbReady 競合を回避
+  if (typeof onFbReady !== 'function'){ cb(); return; }
+
+  onFbReady(function(){
+    if (typeof dbCustomerResolveMyCard !== 'function'){ cb(); return; }
+
+    dbCustomerResolveMyCard(function(res){
+      if (!res || !res.customerDocId || !res.customer){ cb(); return; }
+      var fsEmail = res.customer.email || '';
+      if (fsEmail === user.email){ cb(); return; } // 一致していればスキップ
+
+      // 不一致 → Firestoreを新メールで更新してから次へ
+      firebase.firestore()
+        .collection('salons').doc(sid).collection('customers').doc(res.customerDocId)
+        .update({ email: user.email, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+        .then(function(){ cb(); })
+        .catch(function(e){
+          console.warn('[syncEmailIfChanged] Firestore更新失敗:', e && e.message);
+          cb(); // 失敗してもcbは呼ぶ（画面遷移は止めない）
+        });
+    });
+  });
+}
+
+
+// 指定stepへ遷移するloadSalonInfo亜種
+function loadSalonInfo_then(nextStep){
+  showLoading('読み込んでいます...');
+  if (typeof dbCustomerGetSalonInfo !== 'function'){
+    goStep(nextStep); return;
+  }
+  dbCustomerGetSalonInfo(function(info){
+    appState.salonInfo = info || null;
+    var name = (info && info.name) ? info.name : 'サロン';
+    $('hdrSalon').textContent = name;
+    $('hdrSub').textContent = 'ご予約';
+    if (typeof dbSalonGetConfig === 'function'){
+      var loaded = { settings: false, cancel: false };
+      function checkDone(){ if (loaded.settings && loaded.cancel) goStep(nextStep); }
+      dbSalonGetConfig('settings', function(s){ appState.settings = s || null; loaded.settings = true; checkDone(); });
+      dbSalonGetConfig('cancelPolicy', function(p){ appState.cancelPolicy = p || null; loaded.cancel = true; checkDone(); });
+    } else {
+      goStep(nextStep);
     }
   });
 }
@@ -1453,18 +1516,15 @@ function renderMypageStep(){
     var currentEmail = (user && user.email) ? user.email : (customer.email || '');
 
     // Auth.email と Firestore.email が違う場合は自動同期（メール確認リンクタップ後）
-    alert('DEBUG sync: auth=' + (user && user.email) + ' fs=' + customer.email);
     if (user && user.email && customer.email && user.email !== customer.email){
       var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
-      alert('DEBUG: 同期実行 sid=' + sid + ' docId=' + res.customerDocId);
       if (sid && res.customerDocId){
         firebase.firestore()
           .collection('salons').doc(sid).collection('customers').doc(res.customerDocId)
           .update({ email: user.email, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
           .then(function(){
             customer.email = user.email;
-            alert('DEBUG: Firestore同期成功 → ' + user.email);
-          }).catch(function(e){ alert('DEBUG: Firestore同期失敗 ' + e.message); });
+          }).catch(function(){ });
       }
     }
 
@@ -1585,10 +1645,9 @@ function renderMypageStep(){
       // 再認証 → Auth メール変更 → Firestore メール変更（順番厳守）
       var credential = firebase.auth.EmailAuthProvider.credential(user.email, password);
       var actionCodeSettings = {
-        url: location.origin + location.pathname + '?salon=' + encodeURIComponent(appState.salonId || '') + '&emailChanged=1',
+        url: location.origin + location.pathname + '?salon=' + encodeURIComponent(appState.salonId || '') + '&emailChanged=1&next=mypage',
         handleCodeInApp: false
       };
-      alert('送信先確認: ' + newEmail); // DEBUG
       user.reauthenticateWithCredential(credential).then(function(){
         return user.verifyBeforeUpdateEmail(newEmail, actionCodeSettings);
       }).then(function(){
@@ -1600,7 +1659,6 @@ function renderMypageStep(){
         btn.textContent = 'メールアドレスを変更';
       }).catch(function(e){
         var msg = 'メールアドレスの変更に失敗しました。';
-        alert('DEBUG error: code=' + e.code + ' msg=' + e.message); // DEBUG
         if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') msg = 'パスワードが正しくありません。';
         if (e.code === 'auth/email-already-in-use') msg = 'そのメールアドレスはすでに使用されています。';
         if (e.code === 'auth/invalid-email') msg = 'メールアドレスの形式が正しくありません。';
