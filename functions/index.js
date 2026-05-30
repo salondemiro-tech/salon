@@ -12,7 +12,7 @@
 // ========================================
 
 const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https');
-const { onDocumentCreated } = require('firebase-functions/v2/firestore');
+const { onDocumentCreated, onDocumentUpdated } = require('firebase-functions/v2/firestore');
 const { setGlobalOptions } = require('firebase-functions/v2');
 const { logger } = require('firebase-functions');
 const admin = require('firebase-admin');
@@ -500,11 +500,138 @@ exports.sendBookingEmail = onRequest(
 // getAvailableSlots (callable Function)
 //   顧客アプリ用：指定日の空き枠を返す。
 //   個人情報は一切返さない。
-//   入力: { salonId, dateKey, menuId, optionMenuIds }
-//   出力: { dateKey, slots: [{ start, available }] }
+// ========================================
+// onAppointmentUpdate トリガー
+// 顧客アプリからのキャンセル（status → 'cancelled_by_customer'）を検知し
+// 顧客・サロン両方にキャンセルメール送信
+// ========================================
+exports.onAppointmentUpdate = onDocumentUpdated(
+  {
+    document: 'salons/{salonId}/appointments/{appointmentId}',
+    secrets: ['RESEND_API_KEY']
+  },
+  async (event) => {
+    const before = event.data.before.data();
+    const after  = event.data.after.data();
+    const salonId = event.params.salonId;
+    const appointmentId = event.params.appointmentId;
+
+    // cancelled_by_customer への遷移のみ対象
+    if (after.status !== 'cancelled_by_customer') return;
+    if (before.status === 'cancelled_by_customer') return; // 冪等
+
+    logger.info('onAppointmentUpdate: cancel detected', { salonId, appointmentId });
+
+    try {
+      const { dateKey, start, end, customerDocId, menuNameSnapshot, priceSnapshot } = after;
+
+      // 顧客情報取得
+      const customerDoc = await db.collection('salons').doc(salonId)
+        .collection('customers').doc(customerDocId).get();
+      const customer = customerDoc.exists ? customerDoc.data() : {};
+
+      // サロン情報取得
+      const salonDoc = await db.collection('salons').doc(salonId).get();
+      const salon = salonDoc.exists ? salonDoc.data() : {};
+      const salonName = salon.name || 'サロン';
+
+      // キャンセル料計算（cancelPolicy取得）
+      const policyDoc = await db.collection('salons').doc(salonId)
+        .collection('config').doc('cancelPolicy').get();
+      const pol = policyDoc.exists ? policyDoc.data() : {};
+      const rates = pol.rates || [];
+      let cancelFee = 0;
+      let cancelPercent = 0;
+      if (rates.length && priceSnapshot) {
+        const now = new Date();
+        const apptDate = new Date(dateKey + 'T' + (start || '00:00') + ':00+09:00');
+        const diffDays = (apptDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+        for (let i = 0; i < rates.length; i++) {
+          const r = rates[i];
+          const lbl = r.label || '';
+          const m = lbl.match(/(\d+)日前/);
+          if (m) {
+            if (diffDays <= parseInt(m[1], 10)) cancelPercent = r.percent;
+          } else if (lbl.indexOf('前日') >= 0) {
+            if (diffDays <= 1) cancelPercent = r.percent;
+          } else if (lbl.indexOf('当日') >= 0) {
+            if (diffDays <= 0) cancelPercent = r.percent;
+          }
+        }
+        cancelFee = Math.round(priceSnapshot * cancelPercent / 100);
+      }
+
+      // メール本文生成（キャンセル用）
+      const dateLabel = formatJpDate(dateKey);
+      const menuName  = menuNameSnapshot || '';
+      const feeText   = cancelFee > 0
+        ? '<p style="color:#c47b7b;font-weight:600;">キャンセル料: ¥' + cancelFee.toLocaleString() + '（' + cancelPercent + '%）</p>'
+          + (pol.qrUrl ? '<p><a href="' + pol.qrUrl + '">お支払いはこちら</a></p>' : '')
+        : '';
+
+      function buildCancelCustomerHtml() {
+        return '<div style="font-family:sans-serif;color:#1a1a18;line-height:1.7;max-width:560px;">'
+          + '<h2 style="color:#b5845a;font-size:18px;margin-bottom:16px;">ご予約のキャンセルを受け付けました</h2>'
+          + '<p>' + escapeHtml(customer.name || '') + ' 様</p>'
+          + '<p>以下の予約をキャンセルいたしました。</p>'
+          + '<div style="background:#f5ede4;border-radius:10px;padding:14px 18px;margin:14px 0;">'
+          + '<div><strong>日時:</strong> ' + escapeHtml(dateLabel) + ' ' + escapeHtml(start || '') + '〜' + escapeHtml(end || '') + '</div>'
+          + '<div><strong>メニュー:</strong> ' + escapeHtml(menuName) + '</div>'
+          + '</div>'
+          + feeText
+          + '<p style="font-size:12px;color:#73726c;margin-top:24px;">— ' + escapeHtml(salonName) + '</p>'
+          + '</div>';
+      }
+
+      function buildCancelSalonHtml() {
+        return '<div style="font-family:sans-serif;color:#1a1a18;line-height:1.7;max-width:560px;">'
+          + '<h2 style="color:#c47b7b;font-size:18px;margin-bottom:16px;">予約がキャンセルされました</h2>'
+          + '<div style="background:#faeaea;border-radius:10px;padding:14px 18px;margin:14px 0;">'
+          + '<div><strong>お客様:</strong> ' + escapeHtml(customer.name || '') + '</div>'
+          + '<div><strong>メール:</strong> ' + escapeHtml(customer.email || '') + '</div>'
+          + (customer.phone ? '<div><strong>電話:</strong> ' + escapeHtml(customer.phone) + '</div>' : '')
+          + '<div><strong>日時:</strong> ' + escapeHtml(dateLabel) + ' ' + escapeHtml(start || '') + '〜' + escapeHtml(end || '') + '</div>'
+          + '<div><strong>メニュー:</strong> ' + escapeHtml(menuName) + '</div>'
+          + (cancelFee > 0 ? '<div style="color:#c47b7b;font-weight:600;">キャンセル料: ¥' + cancelFee.toLocaleString() + '（' + cancelPercent + '%）</div>' : '')
+          + '</div>'
+          + '</div>';
+      }
+
+      const notifyChannels = customer.notifyChannels || { email: true };
+      if (notifyChannels.email && customer.email) {
+        const resend = getResend();
+        const fromName = salonName + ' <noreply@torita-app.com>';
+
+        // 顧客へ
+        await resend.emails.send({
+          from: fromName,
+          to: customer.email,
+          subject: '[' + salonName + '] ご予約のキャンセルを受け付けました',
+          html: buildCancelCustomerHtml()
+        });
+
+        // サロンへ
+        if (salon.email) {
+          await resend.emails.send({
+            from: FROM_EMAIL_DEFAULT,
+            to: salon.email,
+            subject: '[' + salonName + '] キャンセル: ' + formatJpDate(dateKey) + ' ' + (start || ''),
+            html: buildCancelSalonHtml()
+          });
+        }
+
+        logger.info('Cancel emails sent', { salonId, appointmentId });
+      }
+    } catch (err) {
+      logger.error('onAppointmentUpdate error', { error: err.message, stack: err.stack });
+    }
+  }
+);
+
+// ========================================
+// getAvailableSlots callable
 // ========================================
 exports.getAvailableSlots = onCall(
-  { region: 'asia-northeast1' },
   async (request) => {
     // 認証チェック
     if (!request.auth) {
