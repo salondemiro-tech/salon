@@ -153,6 +153,17 @@
   .verify-banner{background:var(--gol);border:1px solid var(--go);border-radius:10px;
                  padding:14px;font-size:13px;color:#7a5800;line-height:1.6;margin-bottom:14px;}
 
+  /* マイページ */
+  .mypage-section{border:1.5px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:14px;background:var(--bg);}
+  .mypage-section-title{font-size:13px;font-weight:600;color:var(--mu);margin-bottom:12px;letter-spacing:.04em;}
+  .mypage-field{margin-bottom:12px;}
+  .mypage-field label{display:block;font-size:12px;color:var(--mu);margin-bottom:4px;}
+  .mypage-field input{width:100%;padding:10px 12px;border:1.5px solid var(--bd);border-radius:10px;font-size:14px;font-family:inherit;background:var(--bg);color:var(--tx);box-sizing:border-box;}
+  .mypage-field input:focus{outline:none;border-color:var(--ac);}
+  .mypage-msg{font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:10px;}
+  .mypage-msg.ok{background:var(--gl);color:var(--gt);}
+  .mypage-msg.err{background:var(--rl);color:var(--rt);}
+
   /* キャンセルモーダル */
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:flex-end;justify-content:center;}
   .modal-sheet{background:var(--bg);border-radius:20px 20px 0 0;padding:24px 20px 32px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;}
@@ -196,6 +207,7 @@
   <div class="auth-bar" id="authBar" style="display:none;">
     <div class="auth-bar-email" id="authBarEmail"></div>
     <div style="display:flex;gap:12px;flex-shrink:0;">
+      <button class="auth-bar-btn" id="authBarMypageBtn">マイページ</button>
       <button class="auth-bar-btn" id="authBarHistoryBtn">予約履歴</button>
       <button class="auth-bar-btn" id="authBarLogoutBtn">ログアウト</button>
     </div>
@@ -321,6 +333,7 @@ function updateAuthBar(){
     $('authBarEmail').textContent = user.email || '';
     $('authBarLogoutBtn').onclick = doLogout;
     $('authBarHistoryBtn').onclick = function(){ goStep('history'); };
+    $('authBarMypageBtn').onclick = function(){ goStep('mypage'); };
   } else {
     bar.style.display = 'none';
   }
@@ -367,6 +380,7 @@ function render(){
     case 'confirm':  renderConfirmStep(); break;
     case 'complete': renderCompleteStep(); break;
     case 'history':  renderHistoryStep(); break;
+    case 'mypage':   renderMypageStep(); break;
     default:         showLoading();
   }
 }
@@ -1406,6 +1420,239 @@ function renderCompleteStep(){
   });
 }
 
+
+
+// ============================================================
+// D-8 マイページ
+// ============================================================
+function renderMypageStep(){
+  setFooter('');
+  showLoading('マイページを読み込んでいます...');
+
+  // 顧客情報をFirestoreから取得
+  if (typeof dbCustomerResolveMyCard !== 'function'){
+    setBody('<div class="error-box">システムの読み込みに失敗しました。</div>');
+    return;
+  }
+
+  dbCustomerResolveMyCard(function(res){
+    if (!res || !res.customer){
+      setBody('<div class="error-box">プロフィール情報を取得できませんでした。</div>');
+      return;
+    }
+    var customer = res.customer;
+    var user = appState.user;
+    var currentEmail = (user && user.email) ? user.email : (customer.email || '');
+
+    var html =
+      '<div class="step-title">マイページ</div>' +
+
+      // ---- プロフィール ----
+      '<div class="mypage-section">' +
+        '<div class="mypage-section-title">プロフィール</div>' +
+        '<div id="mypageProfileMsg"></div>' +
+        '<div class="mypage-field">' +
+          '<label>お名前</label>' +
+          '<input type="text" id="mpName" value="' + esc(customer.name || '') + '" placeholder="お名前">' +
+        '</div>' +
+        '<div class="mypage-field">' +
+          '<label>電話番号</label>' +
+          '<input type="tel" id="mpPhone" value="' + esc(customer.phone || '') + '" placeholder="090-0000-0000">' +
+        '</div>' +
+        '<button class="sbtn" id="mpProfileSaveBtn">プロフィールを保存</button>' +
+      '</div>' +
+
+      // ---- メールアドレス変更 ----
+      '<div class="mypage-section">' +
+        '<div class="mypage-section-title">メールアドレス変更</div>' +
+        '<div id="mypageEmailMsg"></div>' +
+        '<div class="mypage-field">' +
+          '<label>現在のメールアドレス</label>' +
+          '<input type="email" readonly value="' + esc(currentEmail) + '" style="background:var(--s2);color:var(--mu);">' +
+        '</div>' +
+        '<div class="mypage-field">' +
+          '<label>新しいメールアドレス</label>' +
+          '<input type="email" id="mpNewEmail" placeholder="new@example.com">' +
+        '</div>' +
+        '<div class="mypage-field">' +
+          '<label>現在のパスワード（確認用）</label>' +
+          '<input type="password" id="mpEmailPassword" placeholder="現在のパスワード">' +
+        '</div>' +
+        '<button class="sbtn" id="mpEmailSaveBtn">メールアドレスを変更</button>' +
+      '</div>' +
+
+      // ---- パスワード変更 ----
+      '<div class="mypage-section">' +
+        '<div class="mypage-section-title">パスワード変更</div>' +
+        '<div id="mypagePwMsg"></div>' +
+        '<div class="mypage-field">' +
+          '<label>現在のパスワード</label>' +
+          '<input type="password" id="mpCurrentPw" placeholder="現在のパスワード">' +
+        '</div>' +
+        '<div class="mypage-field">' +
+          '<label>新しいパスワード（6文字以上）</label>' +
+          '<input type="password" id="mpNewPw" placeholder="新しいパスワード">' +
+        '</div>' +
+        '<div class="mypage-field">' +
+          '<label>新しいパスワード（確認）</label>' +
+          '<input type="password" id="mpNewPw2" placeholder="もう一度入力">' +
+        '</div>' +
+        '<button class="sbtn" id="mpPwSaveBtn">パスワードを変更</button>' +
+      '</div>' +
+
+      '<button class="gbtn" id="mypageBackBtn">戻る</button>';
+
+    setBody(html);
+
+    // ---- プロフィール保存 ----
+    document.getElementById('mpProfileSaveBtn').addEventListener('click', function(){
+      var btn = document.getElementById('mpProfileSaveBtn');
+      var msgEl = document.getElementById('mypageProfileMsg');
+      var name = (document.getElementById('mpName').value || '').trim();
+      var phone = (document.getElementById('mpPhone').value || '').trim();
+      if (!name){ showMypageMsg(msgEl, 'err', 'お名前を入力してください。'); return; }
+      btn.disabled = true;
+      btn.textContent = '保存中...';
+      hideMypageMsg(msgEl);
+
+      dbCustomerUpdateMyProfile({ name: name, phone: phone }, function(err){
+        if (err){
+          showMypageMsg(msgEl, 'err', '保存に失敗しました。もう一度お試しください。');
+          btn.disabled = false;
+          btn.textContent = 'プロフィールを保存';
+          return;
+        }
+        // Firebase Auth displayName も同期
+        var user = firebase.auth().currentUser;
+        if (user){
+          user.updateProfile({ displayName: name }).then(function(){
+            showMypageMsg(msgEl, 'ok', '保存しました。');
+            btn.disabled = false;
+            btn.textContent = 'プロフィールを保存';
+          }).catch(function(){
+            // displayName同期失敗はFIrestore保存済みなので警告のみ
+            showMypageMsg(msgEl, 'ok', '保存しました（Auth同期は一部失敗）。');
+            btn.disabled = false;
+            btn.textContent = 'プロフィールを保存';
+          });
+        } else {
+          showMypageMsg(msgEl, 'ok', '保存しました。');
+          btn.disabled = false;
+          btn.textContent = 'プロフィールを保存';
+        }
+      });
+    });
+
+    // ---- メールアドレス変更 ----
+    document.getElementById('mpEmailSaveBtn').addEventListener('click', function(){
+      var btn = document.getElementById('mpEmailSaveBtn');
+      var msgEl = document.getElementById('mypageEmailMsg');
+      var newEmail = (document.getElementById('mpNewEmail').value || '').trim();
+      var password = document.getElementById('mpEmailPassword').value || '';
+      if (!newEmail){ showMypageMsg(msgEl, 'err', '新しいメールアドレスを入力してください。'); return; }
+      if (!password){ showMypageMsg(msgEl, 'err', '現在のパスワードを入力してください。'); return; }
+      btn.disabled = true;
+      btn.textContent = '変更中...';
+      hideMypageMsg(msgEl);
+
+      var user = firebase.auth().currentUser;
+      if (!user){ showMypageMsg(msgEl, 'err', 'ログイン状態を確認できません。'); btn.disabled = false; btn.textContent = 'メールアドレスを変更'; return; }
+
+      // 再認証 → Auth メール変更 → Firestore メール変更（順番厳守）
+      var credential = firebase.auth.EmailAuthProvider.credential(user.email, password);
+      user.reauthenticateWithCredential(credential).then(function(){
+        return user.updateEmail(newEmail);
+      }).then(function(){
+        // Auth成功 → Firestore更新（email直接update）
+        var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
+        var uid = (typeof getCurrentUserUid === 'function') ? getCurrentUserUid() : null;
+        if (!sid || !uid){ return Promise.reject(new Error('not authenticated')); }
+        return new Promise(function(resolve, reject){
+          if (typeof dbCustomerResolveMyCard !== 'function'){ reject(new Error('no resolver')); return; }
+          dbCustomerResolveMyCard(function(res){
+            if (!res || !res.customerDocId){ reject(new Error('no customerDocId')); return; }
+            var db = firebase.firestore();
+            db.collection('salons').doc(sid).collection('customers').doc(res.customerDocId)
+              .update({ email: newEmail, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+              .then(resolve).catch(reject);
+          });
+        });
+      }).then(function(){
+        showMypageMsg(msgEl, 'ok', 'メールアドレスを変更しました。');
+        // auth-barのメール表示も更新
+        var emailEl = document.getElementById('authBarEmail');
+        if (emailEl) emailEl.textContent = newEmail;
+        // 現在のメール表示欄も更新
+        var curEl = document.querySelector('#mpEmailSaveBtn').closest('.mypage-section').querySelector('input[readonly]');
+        if (curEl) curEl.value = newEmail;
+        document.getElementById('mpNewEmail').value = '';
+        document.getElementById('mpEmailPassword').value = '';
+        btn.disabled = false;
+        btn.textContent = 'メールアドレスを変更';
+      }).catch(function(e){
+        var msg = 'メールアドレスの変更に失敗しました。';
+        if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') msg = 'パスワードが正しくありません。';
+        if (e.code === 'auth/email-already-in-use') msg = 'そのメールアドレスはすでに使用されています。';
+        if (e.code === 'auth/invalid-email') msg = 'メールアドレスの形式が正しくありません。';
+        if (e.code === 'auth/requires-recent-login') msg = 'セキュリティのため再ログインが必要です。一度ログアウトして再度ログインしてください。';
+        showMypageMsg(msgEl, 'err', msg);
+        btn.disabled = false;
+        btn.textContent = 'メールアドレスを変更';
+      });
+    });
+
+    // ---- パスワード変更 ----
+    document.getElementById('mpPwSaveBtn').addEventListener('click', function(){
+      var btn = document.getElementById('mpPwSaveBtn');
+      var msgEl = document.getElementById('mypagePwMsg');
+      var currentPw = document.getElementById('mpCurrentPw').value || '';
+      var newPw = document.getElementById('mpNewPw').value || '';
+      var newPw2 = document.getElementById('mpNewPw2').value || '';
+      if (!currentPw){ showMypageMsg(msgEl, 'err', '現在のパスワードを入力してください。'); return; }
+      if (newPw.length < 6){ showMypageMsg(msgEl, 'err', '新しいパスワードは6文字以上で入力してください。'); return; }
+      if (newPw !== newPw2){ showMypageMsg(msgEl, 'err', '新しいパスワードが一致しません。'); return; }
+      btn.disabled = true;
+      btn.textContent = '変更中...';
+      hideMypageMsg(msgEl);
+
+      var user = firebase.auth().currentUser;
+      if (!user){ showMypageMsg(msgEl, 'err', 'ログイン状態を確認できません。'); btn.disabled = false; btn.textContent = 'パスワードを変更'; return; }
+
+      var credential = firebase.auth.EmailAuthProvider.credential(user.email, currentPw);
+      user.reauthenticateWithCredential(credential).then(function(){
+        return user.updatePassword(newPw);
+      }).then(function(){
+        showMypageMsg(msgEl, 'ok', 'パスワードを変更しました。');
+        document.getElementById('mpCurrentPw').value = '';
+        document.getElementById('mpNewPw').value = '';
+        document.getElementById('mpNewPw2').value = '';
+        btn.disabled = false;
+        btn.textContent = 'パスワードを変更';
+      }).catch(function(e){
+        var msg = 'パスワードの変更に失敗しました。';
+        if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') msg = '現在のパスワードが正しくありません。';
+        if (e.code === 'auth/requires-recent-login') msg = 'セキュリティのため再ログインが必要です。一度ログアウトして再度ログインしてください。';
+        showMypageMsg(msgEl, 'err', msg);
+        btn.disabled = false;
+        btn.textContent = 'パスワードを変更';
+      });
+    });
+
+    document.getElementById('mypageBackBtn').addEventListener('click', function(){ goStep('menu'); });
+  });
+}
+
+function showMypageMsg(el, type, msg){
+  if (!el) return;
+  el.className = 'mypage-msg ' + type;
+  el.textContent = msg;
+  el.style.display = 'block';
+}
+function hideMypageMsg(el){
+  if (!el) return;
+  el.style.display = 'none';
+  el.textContent = '';
+}
 
 // ============================================================
 // D-7 予約履歴・キャンセル
