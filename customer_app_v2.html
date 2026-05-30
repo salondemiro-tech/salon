@@ -1591,6 +1591,7 @@ function renderMypageStep(){
         btn.textContent = 'メールアドレスを変更';
       }).catch(function(e){
         var msg = 'メールアドレスの変更に失敗しました。';
+        alert('DEBUG: code=' + e.code + ' msg=' + e.message); // DEBUG
         if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') msg = 'パスワードが正しくありません。';
         if (e.code === 'auth/email-already-in-use') msg = 'そのメールアドレスはすでに使用されています。';
         if (e.code === 'auth/invalid-email') msg = 'メールアドレスの形式が正しくありません。';
