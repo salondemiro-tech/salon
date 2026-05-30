@@ -153,6 +153,21 @@
   .verify-banner{background:var(--gol);border:1px solid var(--go);border-radius:10px;
                  padding:14px;font-size:13px;color:#7a5800;line-height:1.6;margin-bottom:14px;}
 
+  /* キャンセルモーダル */
+  .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:flex-end;justify-content:center;}
+  .modal-sheet{background:var(--bg);border-radius:20px 20px 0 0;padding:24px 20px 32px;width:100%;max-width:480px;max-height:85vh;overflow-y:auto;}
+  .modal-title{font-size:17px;font-weight:600;margin-bottom:6px;}
+  .modal-sub{font-size:13px;color:var(--mu);margin-bottom:16px;line-height:1.6;}
+  .modal-warn{background:var(--rl);border-left:3px solid var(--rd);border-radius:8px;padding:12px 14px;font-size:13px;color:var(--rt);line-height:1.6;margin-bottom:14px;}
+  .modal-warn a{color:var(--rd);font-weight:600;}
+  .modal-fee{background:var(--gol);border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#7a5800;}
+  .modal-fee-amount{font-size:20px;font-weight:600;margin-top:4px;}
+  .policy-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:200;display:flex;align-items:center;justify-content:center;padding:20px;}
+  .policy-modal-box{background:var(--bg);border-radius:16px;padding:22px;max-width:440px;width:100%;max-height:70vh;overflow-y:auto;}
+  .policy-modal-title{font-size:15px;font-weight:600;margin-bottom:12px;}
+  .policy-modal-text{font-size:13px;color:var(--tx);line-height:1.8;white-space:pre-wrap;}
+  .policy-modal-close{width:100%;padding:12px;background:var(--s2);border:none;border-radius:10px;font-size:14px;cursor:pointer;margin-top:16px;font-family:inherit;}
+
   /* 予約履歴 */
   .hist-card{border:1.5px solid var(--bd);border-radius:14px;padding:16px;margin-bottom:12px;background:var(--bg);}
   .hist-date{font-size:15px;font-weight:600;color:var(--tx);margin-bottom:6px;}
@@ -241,7 +256,8 @@ var appState = {
 
   step: 'loading',        // loading / menu / option / date / identity / confirm / complete
   busy: false,            // 二重送信防止
-  slotConflictMsg: null   // 空き再チェックで埋まっていた場合のメッセージ
+  slotConflictMsg: null,  // 空き再チェックで埋まっていた場合のメッセージ
+  cancelPolicy: null      // キャンセル規定（履歴画面のキャンセル処理で使用）
 };
 
 // グローバル参照
@@ -420,11 +436,21 @@ function loadSalonInfo(){
     $('hdrSalon').textContent = name;
     $('hdrSub').textContent = 'ご予約';
 
-    // settings も取得（営業時間。スロット計算で使う）
+    // settings・cancelPolicy を並列取得
     if (typeof dbSalonGetConfig === 'function'){
+      var loaded = { settings: false, cancel: false };
+      function checkDone(){
+        if (loaded.settings && loaded.cancel) goStep('menu');
+      }
       dbSalonGetConfig('settings', function(s){
         appState.settings = s || null;
-        goStep('menu');
+        loaded.settings = true;
+        checkDone();
+      });
+      dbSalonGetConfig('cancelPolicy', function(p){
+        appState.cancelPolicy = p || null;
+        loaded.cancel = true;
+        checkDone();
       });
     } else {
       goStep('menu');
@@ -1382,8 +1408,164 @@ function renderCompleteStep(){
 
 
 // ============================================================
-// D-7 予約履歴画面
+// D-7 予約履歴・キャンセル
 // ============================================================
+
+// キャンセル期限チェック
+// deadline: '前日まで'|'2日前まで'|'3日前まで'
+// 戻り値: true=期限内（キャンセル可）、false=期限切れ
+function isCancelable(dateKey, start){
+  var settings = appState.settings || {};
+  var deadline = settings.deadline || '前日まで';
+  var now = new Date();
+  var apptDate = new Date(dateKey + 'T' + start + ':00+09:00');
+  var diffDays = (apptDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+  if (deadline === '3日前まで') return diffDays > 3;
+  if (deadline === '2日前まで') return diffDays > 2;
+  return diffDays > 1; // '前日まで' デフォルト
+}
+
+// キャンセル料計算
+// 戻り値: { fee: 数値, percent: 数値 }
+function calcCancelFee(item){
+  var pol = appState.cancelPolicy || {};
+  var rates = pol.rates || [];
+  if (!rates.length || !item.priceSnapshot) return { fee: 0, percent: 0 };
+  var now = new Date();
+  var apptDate = new Date(item.dateKey + 'T' + (item.start || '00:00') + ':00+09:00');
+  var diffDays = (apptDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24);
+  var percent = 0;
+  var i;
+  for (i = 0; i < rates.length; i++){
+    var r = rates[i];
+    var lbl = r.label || '';
+    var m = lbl.match(/(\d+)日前/);
+    if (m){
+      if (diffDays <= parseInt(m[1], 10)) percent = r.percent;
+    } else if (lbl.indexOf('前日') >= 0){
+      if (diffDays <= 1) percent = r.percent;
+    } else if (lbl.indexOf('当日') >= 0){
+      if (diffDays <= 0) percent = r.percent;
+    }
+  }
+  var fee = Math.round(item.priceSnapshot * percent / 100);
+  return { fee: fee, percent: percent };
+}
+
+// キャンセル規定モーダル表示
+function showPolicyModal(){
+  var pol = appState.cancelPolicy || {};
+  var text = pol.text || '（キャンセル規定が設定されていません）';
+  var overlay = document.createElement('div');
+  overlay.className = 'policy-modal-overlay';
+  overlay.id = 'policyModalOverlay';
+  overlay.innerHTML =
+    '<div class="policy-modal-box">' +
+      '<div class="policy-modal-title">キャンセル・変更ポリシー</div>' +
+      '<div class="policy-modal-text" id="policyModalText"></div>' +
+      '<button class="policy-modal-close" id="policyModalClose">閉じる</button>' +
+    '</div>';
+  document.body.appendChild(overlay);
+  document.getElementById('policyModalText').textContent = text;
+  document.getElementById('policyModalClose').addEventListener('click', function(){
+    var el = document.getElementById('policyModalOverlay');
+    if (el) el.parentNode.removeChild(el);
+  });
+  overlay.addEventListener('click', function(e){
+    if (e.target === overlay){
+      var el = document.getElementById('policyModalOverlay');
+      if (el) el.parentNode.removeChild(el);
+    }
+  });
+}
+
+// キャンセル確認モーダル表示
+function showCancelModal(item){
+  var feeInfo = calcCancelFee(item);
+  var hasFee = feeInfo.fee > 0;
+  var menuName = item.menuNameSnapshot || item.menuId || '';
+  var dateLabel = formatDateJp(item.dateKey) + ' ' + (item.start || '') + '〜';
+
+  var warnHtml = '';
+  if (hasFee){
+    warnHtml =
+      '<div class="modal-warn">' +
+        'この予約はキャンセル料が発生する期間です。別日・別時間での取り直しをご希望の方は' +
+        '一度サロンに連絡しキャンセル料・変更手数料についてご確認ください。' +
+        'キャンセル・変更ポリシーは' +
+        '<a href="#" id="cancelPolicyLink">こちら</a>' +
+        'からもご確認いただけます。' +
+      '</div>' +
+      '<div class="modal-fee">' +
+        'キャンセル料' +
+        '<div class="modal-fee-amount">' + esc(yenSafe(feeInfo.fee)) +
+          '<span style="font-size:13px;font-weight:normal;margin-left:6px;">（' + feeInfo.percent + '%）</span>' +
+        '</div>' +
+      '</div>';
+  }
+
+  var overlay = document.createElement('div');
+  overlay.className = 'modal-overlay';
+  overlay.id = 'cancelModalOverlay';
+  overlay.innerHTML =
+    '<div class="modal-sheet">' +
+      '<div class="modal-title">予約をキャンセルしますか？</div>' +
+      '<div class="modal-sub">' + esc(dateLabel) + '<br>' + esc(menuName) + '</div>' +
+      warnHtml +
+      '<button class="pbtn" id="cancelExecBtn" style="background:var(--rd);">キャンセルを実行する</button>' +
+      '<button class="gbtn" id="cancelAbortBtn">戻る</button>' +
+    '</div>';
+  document.body.appendChild(overlay);
+
+  if (hasFee){
+    document.getElementById('cancelPolicyLink').addEventListener('click', function(e){
+      e.preventDefault();
+      showPolicyModal();
+    });
+  }
+
+  document.getElementById('cancelAbortBtn').addEventListener('click', function(){
+    var el = document.getElementById('cancelModalOverlay');
+    if (el) el.parentNode.removeChild(el);
+  });
+
+  document.getElementById('cancelExecBtn').addEventListener('click', function(){
+    var btn = document.getElementById('cancelExecBtn');
+    if (!btn || btn.disabled) return;
+    btn.disabled = true;
+    btn.textContent = '処理中...';
+    doCancel(item, function(err){
+      var el = document.getElementById('cancelModalOverlay');
+      if (el) el.parentNode.removeChild(el);
+      if (err){
+        setBody('<div class="error-box">キャンセルに失敗しました。もう一度お試しください。</div>' +
+                '<button class="gbtn" id="histBackBtn2">予約履歴に戻る</button>');
+        var b = document.getElementById('histBackBtn2');
+        if (b) b.addEventListener('click', function(){ goStep('history'); });
+      } else {
+        // 履歴を再描画（再取得）
+        goStep('history');
+      }
+    });
+  });
+}
+
+// キャンセル実行（Firestoreのstatus更新）
+function doCancel(item, cb){
+  var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
+  var uid = (typeof getCurrentUserUid === 'function') ? getCurrentUserUid() : null;
+  if (!sid || !uid || !item._id){
+    cb(new Error('not authenticated'));
+    return;
+  }
+  var db = firebase.firestore();
+  db.collection('salons').doc(sid)
+    .collection('appointments').doc(item._id)
+    .update({ status: 'cancelled_by_customer' })
+    .then(function(){ cb(null); })
+    .catch(function(e){ cb(e); });
+}
+
 function renderHistoryStep(){
   setFooter('');
   showLoading('予約履歴を読み込んでいます...');
@@ -1401,18 +1583,16 @@ function renderHistoryStep(){
 
     var items = result.merged || [];
 
-    // ステータス表示ヘルパー
     function statusBadge(st){
-      if (st === 'confirmed')  return '<span class="hist-status confirmed">確定</span>';
-      if (st === 'pending')    return '<span class="hist-status pending">確認中</span>';
-      if (st === 'cancelled')  return '<span class="hist-status cancelled">キャンセル</span>';
+      if (st === 'confirmed')           return '<span class="hist-status confirmed">確定</span>';
+      if (st === 'pending')             return '<span class="hist-status pending">確認中</span>';
+      if (st === 'cancelled' ||
+          st === 'cancelled_by_customer') return '<span class="hist-status cancelled">キャンセル</span>';
       return '<span class="hist-status other">' + esc(st || '—') + '</span>';
     }
 
-    // メニュー名解決：スナップショット優先
     function resolveMenuName(item){
       if (item.menuNameSnapshot) return item.menuNameSnapshot;
-      // appStateのメニュー一覧から検索
       var menus = appState.menus || [];
       var i;
       for (i = 0; i < menus.length; i++){
@@ -1429,18 +1609,33 @@ function renderHistoryStep(){
       var i;
       for (i = 0; i < items.length; i++){
         var item = items[i];
+        var st = item.status || '';
         var menuName = resolveMenuName(item);
         var price = (item.priceSnapshot != null) ? yenSafe(item.priceSnapshot) : '';
         var duration = item.durationSnapshot ? (item.durationSnapshot + '分') : '';
+        var isCancelled = (st === 'cancelled' || st === 'cancelled_by_customer' || st === 'no_show');
+        var isActive = (st === 'pending' || st === 'confirmed');
+
+        // キャンセルボタン判定
+        var cancelBtnHtml = '';
+        if (isActive){
+          var cancelable = isCancelable(item.dateKey, item.start || '00:00');
+          if (cancelable){
+            cancelBtnHtml = '<button class="gbtn hist-cancel-btn" data-idx="' + i + '" style="margin-top:10px;color:var(--rd);border-color:var(--rd);">キャンセルする</button>';
+          } else {
+            cancelBtnHtml = '<button class="gbtn" disabled style="margin-top:10px;opacity:.5;cursor:default;">キャンセル期限を過ぎています — サロンへ直接ご連絡ください</button>';
+          }
+        }
 
         html += '<div class="hist-card">' +
           '<div class="hist-date">' + esc(formatDateJp(item.dateKey)) + ' ' + esc(item.start || '') + '〜</div>' +
           '<div class="hist-menu">' + esc(menuName) + '</div>' +
           '<div class="hist-meta">' +
-            statusBadge(item.status) +
+            statusBadge(st) +
             (price ? '<span>' + esc(price) + '</span>' : '') +
             (duration ? '<span>' + esc(duration) + '</span>' : '') +
           '</div>' +
+          cancelBtnHtml +
         '</div>';
       }
     }
@@ -1448,11 +1643,26 @@ function renderHistoryStep(){
     html += '<button class="gbtn" id="histBackBtn">予約画面に戻る</button>';
 
     setBody(html);
-    $('histBackBtn').addEventListener('click', function(){ goStep('menu'); });
+
+    // キャンセルボタンのイベント登録
+    var cancelBtns = document.querySelectorAll('.hist-cancel-btn');
+    var allItems = items; // クロージャ用
+    var j;
+    for (j = 0; j < cancelBtns.length; j++){
+      (function(btn){
+        var idx = parseInt(btn.getAttribute('data-idx'), 10);
+        btn.addEventListener('click', function(){
+          showCancelModal(allItems[idx]);
+        });
+      })(cancelBtns[j]);
+    }
+
+    document.getElementById('histBackBtn').addEventListener('click', function(){ goStep('menu'); });
   });
 }
 
 // 起動
+
 window.addEventListener('load', init);
 
 
