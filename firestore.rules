@@ -351,10 +351,10 @@ service cloud.firestore {
         allow update: if (
           (isSignedIn() &&
            resource.data.authUid == request.auth.uid &&
-           resource.data.status == 'confirmed' &&
-           request.resource.data.status == 'cancelled' &&
+           (resource.data.status == 'confirmed' || resource.data.status == 'pending') &&
+           request.resource.data.status == 'cancelled_by_customer' &&
            request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status', 'updatedAt']))
+             .hasOnly(['status', 'cancelledBy', 'cancelledAt', 'cancelFeeSnapshot', 'cancelFeePercentSnapshot']))
           ||
           (isSalonStaff(salonId) &&
            request.resource.data.customerDocId == resource.data.customerDocId &&

@@ -1558,10 +1558,18 @@ function doCancel(item, cb){
     cb(new Error('not authenticated'));
     return;
   }
+  var feeInfo = calcCancelFee(item);
   var db = firebase.firestore();
+  var updateData = {
+    status: 'cancelled_by_customer',
+    cancelledBy: 'customer',
+    cancelledAt: firebase.firestore.FieldValue.serverTimestamp(),
+    cancelFeeSnapshot: feeInfo.fee,
+    cancelFeePercentSnapshot: feeInfo.percent
+  };
   db.collection('salons').doc(sid)
     .collection('appointments').doc(item._id)
-    .update({ status: 'cancelled_by_customer' })
+    .update(updateData)
     .then(function(){ cb(null); })
     .catch(function(e){ cb(e); });
 }
