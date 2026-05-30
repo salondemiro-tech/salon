@@ -689,14 +689,19 @@ exports.getAvailableSlots = onCall(
 
     // ---- ブロック済み区間を収集 ----
     // ブロック対象: status==='confirmed' または pendingCreate===true
-    // ブロックしない: cancelled / no_show / time_conflict / failed
+    // ブロックしない: キャンセル系(cancelled/cancelled_by_customer/cancelled_by_salon/no_show/time_conflict/failed)
+    const CANCEL_STATUSES = new Set([
+      'cancelled', 'cancelled_by_customer', 'cancelled_by_salon',
+      'no_show', 'time_conflict', 'failed'
+    ]);
     const busy = [];
 
     apptSnap.forEach(doc => {
       const a = doc.data();
       const isConfirmed  = a.status === 'confirmed';
       const isPending    = a.pendingCreate === true;
-      if (!isConfirmed && !isPending) return; // キャンセル等は除外
+      if (CANCEL_STATUSES.has(a.status)) return; // キャンセル系は除外
+      if (!isConfirmed && !isPending) return;
 
       // startAt/endAt (Timestamp) が使えればそちら優先、なければ start/end 文字列
       let s, e;
