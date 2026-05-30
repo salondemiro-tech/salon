@@ -273,8 +273,11 @@ service cloud.firestore {
 
         allow create: if (
           // ── (A) 顧客アプリ予約（pendingCreate=true）──
+          //   claim済み顧客のみ、自分のcustomerDocIdで予約作成できる
           (isSignedIn() &&
            exists(/databases/$(database)/documents/salons/$(salonId)) &&
+           exists(/databases/$(database)/documents/salons/$(salonId)/authIndex/$(request.auth.uid)) &&
+           get(/databases/$(database)/documents/salons/$(salonId)/authIndex/$(request.auth.uid)).data.customerDocId == request.resource.data.customerDocId &&
            request.resource.data.authUid == request.auth.uid &&
            request.resource.data.keys().hasOnly([
              'dateKey', 'start', 'customerDocId', 'authUid',
