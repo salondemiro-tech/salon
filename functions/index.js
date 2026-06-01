@@ -349,8 +349,10 @@ exports.onAppointmentCreate = onDocumentCreated(
       // 11. 通知メール送信（顧客 + サロン）
       // ============================================================
       const notifyChannels = customer.notifyChannels || { email: true, line: false };
-      
-      if (notifyChannels.email && customer.email) {
+      // 通知先: 予約時点のメール(customerEmail)を最優先、なければカルテのemail
+      const notifyTo = data.customerEmail || customer.email || '';
+
+      if (notifyChannels.email && notifyTo) {
         try {
           const resend = getResend();
           const salonName = salon.name || 'サロン';
@@ -359,7 +361,7 @@ exports.onAppointmentCreate = onDocumentCreated(
           // 顧客へ
           await resend.emails.send({
             from: fromName,
-            to: customer.email,
+            to: notifyTo,
             subject: '[' + salonName + '] ご予約ありがとうございます',
             html: buildCustomerEmailHtml(
               salonName, customer.name || '',
@@ -376,7 +378,7 @@ exports.onAppointmentCreate = onDocumentCreated(
               subject: '[' + salonName + '] 新しい予約: ' + formatJpDate(dateKey) + ' ' + start,
               html: buildSalonEmailHtml(
                 salonName, customer.name || '',
-                customer.email, customer.phone || '',
+                notifyTo, customer.phone || '',
                 dateKey, start, end,
                 menu.name || '', optionMenuNames
               )
@@ -598,14 +600,15 @@ exports.onAppointmentUpdate = onDocumentUpdated(
       }
 
       const notifyChannels = customer.notifyChannels || { email: true };
-      if (notifyChannels.email && customer.email) {
+      const cancelNotifyTo = after.customerEmail || customer.email || '';
+      if (notifyChannels.email && cancelNotifyTo) {
         const resend = getResend();
         const fromName = salonName + ' <noreply@torita-app.com>';
 
         // 顧客へ
         await resend.emails.send({
           from: fromName,
-          to: customer.email,
+          to: cancelNotifyTo,
           subject: '[' + salonName + '] ご予約のキャンセルを受け付けました',
           html: buildCancelCustomerHtml()
         });
