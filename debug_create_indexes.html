@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>複合インデックス作成 - TORITA debug</title>
+
+<!-- Firebase SDK 9.23.0 compat（customer_app_v2 と同じ構成） -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+
+<style>
+  *{box-sizing:border-box;}
+  body{
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+    background:#f0ede8;color:#1a1a18;margin:0;padding:16px;
+    -webkit-text-size-adjust:100%;line-height:1.6;
+  }
+  .wrap{max-width:560px;margin:0 auto;}
+  h1{font-size:18px;margin:0 0 4px;}
+  .sub{font-size:12px;color:#73726c;margin-bottom:16px;}
+  .card{background:#fff;border:1px solid rgba(0,0,0,.10);border-radius:12px;
+        padding:16px;margin-bottom:14px;}
+  .auth-status{font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:14px;}
+  .auth-status.ng{background:#faeaea;color:#6b1f1f;}
+  .auth-status.ok{background:#e8f2eb;color:#1e4d2b;}
+  .login-row{display:flex;flex-direction:column;gap:8px;}
+  .login-row input{padding:11px 12px;border:1.5px solid rgba(0,0,0,.12);
+                   border-radius:9px;font-size:16px;font-family:inherit;}
+  button{font-family:inherit;cursor:pointer;}
+  .btn{width:100%;padding:13px;background:#b5845a;color:#fff;border:none;
+       border-radius:10px;font-size:15px;font-weight:600;}
+  .btn:disabled{opacity:.4;cursor:default;}
+  .btn-sub{width:100%;padding:11px;background:none;color:#b5845a;
+           border:2px solid #b5845a;border-radius:10px;font-size:14px;font-weight:600;}
+  .btn-run{width:100%;padding:14px;background:#1a1a18;color:#fff;border:none;
+           border-radius:10px;font-size:15px;font-weight:600;margin-bottom:8px;}
+  .salon-id{font-size:11px;color:#73726c;word-break:break-all;margin-top:8px;
+            font-family:monospace;background:#f8f7f4;padding:8px;border-radius:6px;}
+  .result-item{border:1px solid rgba(0,0,0,.10);border-radius:10px;padding:12px;
+               margin-bottom:10px;font-size:13px;}
+  .result-item .rtitle{font-weight:600;margin-bottom:4px;font-size:13px;}
+  .result-item .rdesc{color:#73726c;font-size:12px;margin-bottom:8px;
+                      font-family:monospace;}
+  .verdict{display:inline-block;font-size:12px;font-weight:700;
+           padding:3px 10px;border-radius:20px;margin-bottom:8px;}
+  .verdict.need{background:#fdf6e3;color:#7a5800;}
+  .verdict.exists{background:#e8f2eb;color:#1e4d2b;}
+  .verdict.err{background:#faeaea;color:#6b1f1f;}
+  .verdict.run{background:#f0ede8;color:#73726c;}
+  .idx-link{display:block;width:100%;padding:12px;background:#2962ff;color:#fff;
+            border:none;border-radius:9px;font-size:14px;font-weight:600;
+            text-align:center;text-decoration:none;margin-top:6px;}
+  .rdetail{font-size:11px;color:#888;margin-top:6px;word-break:break-all;}
+  .summary{font-size:13px;font-weight:600;padding:12px;border-radius:10px;
+           margin-bottom:14px;text-align:center;line-height:1.7;}
+  .summary.done{background:#e8f2eb;color:#1e4d2b;}
+  .summary.todo{background:#fdf6e3;color:#7a5800;}
+  .note{font-size:11px;color:#73726c;line-height:1.7;margin-top:14px;
+        background:#fff;border-radius:10px;padding:14px;border:1px solid rgba(0,0,0,.08);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>複合インデックス作成</h1>
+  <div class="sub">販売前チェックリスト②③：顧客履歴・カルテ履歴用の複合インデックスを作成する</div>
+
+  <div id="authStatus" class="auth-status ng">ログイン状態を確認中...</div>
+
+  <div class="card" id="loginCard" style="display:none;">
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;">torita.test@gmail.com でログイン</div>
+    <div class="login-row">
+      <input type="email" id="emailInput" placeholder="torita.test@gmail.com" autocomplete="email" inputmode="email">
+      <input type="password" id="passInput" placeholder="パスワード" autocomplete="current-password">
+      <button class="btn" id="loginBtn">ログイン</button>
+    </div>
+  </div>
+
+  <div class="card" id="testCard" style="display:none;">
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;">インデックス検査を実行</div>
+    <div class="sub" style="margin-bottom:12px;">
+      必要な複合インデックス（②③ × appointments / archive の4つ）に対応するクエリを順に実行します。
+      インデックスが未作成なら「作成リンク」が表示されるので、青いボタンをタップして「作成」を押してください。
+    </div>
+    <button class="btn-run" id="runBtn">検査を実行する</button>
+    <button class="btn-sub" id="logoutBtn">ログアウト</button>
+    <div class="salon-id" id="salonIdLabel"></div>
+  </div>
+
+  <div id="summary"></div>
+  <div id="results"></div>
+
+  <div class="note" id="noteBox" style="display:none;">
+    <b>見かた</b><br>
+    ・<span style="color:#7a5800;font-weight:700;">要作成</span>：青いボタンをタップ → Firebase の画面が開く → 「保存／作成」を押す。フィールドと並び順は自動入力済み。<br>
+    ・<span style="color:#1e4d2b;font-weight:700;">作成済み</span>：そのインデックスは既にある。何もしなくてOK。<br><br>
+    <b>注意</b>：作成ボタンを押した直後はインデックスが「構築中」になり、数分かかります。構築完了するまでそのクエリはエラーのままです。全部のボタンを押したら数分待ち、もう一度「検査を実行する」を押して全部「作成済み」になれば完了です。<br><br>
+    <b>archive について</b>：appointments_archive にまだ1件もデータが無い場合、クエリが成功してしまいリンクが出ないことがあります。その場合「作成済み」表示でも実際にはインデックス未作成のことがあります。archive は将来バッチ稼働後に使うものなので、今リンクが出なければ後回しで問題ありません（販売前チェックリスト F-6 で最終確認）。
+  </div>
+</div>
+
+<script>
+// ============================================================
+// debug_create_indexes.html  -  TORITA 複合インデックス作成（チェックリスト②③）
+//
+// 目的：
+//   B-7 / F-6 で必要な複合インデックスを、クライアントからクエリを実行して
+//   Firestore に「インデックスが必要」エラーを出させ、その作成リンクを
+//   画面にボタン表示する。iPad + Console 環境では firestore.indexes.json の
+//   deploy ができないため、この方式でインデックスを作る。
+//
+//   対象（DESIGN.md B-7）：
+//     ② (customerDocId ASC, dateKey DESC)  … appointments / appointments_archive
+//     ③ (authUid ASC,       dateKey DESC)  … appointments / appointments_archive
+//
+//   salonId は getCurrentSalonId()（= Auth UID）から動的取得。
+//   本物の salonId はハードコードしない（再発防止ルール）。
+//
+// ES5 互換（var/function/Promise.then のみ）。
+// ============================================================
+
+function $(id){ return document.getElementById(id); }
+var auth = null;
+
+// 検査するクエリ定義
+// col: サブコレクション名 / field: 第1ソートフィールド
+var QUERIES = [
+  { title: '③ authUid × dateKey（appointments）',
+    desc: 'where(authUid==me).orderBy(dateKey desc)',
+    col: 'appointments', field: 'authUid', useAuthValue: true },
+
+  { title: '③ authUid × dateKey（archive）',
+    desc: 'where(authUid==me).orderBy(dateKey desc)',
+    col: 'appointments_archive', field: 'authUid', useAuthValue: true },
+
+  { title: '② customerDocId × dateKey（appointments）',
+    desc: 'where(customerDocId==X).orderBy(dateKey desc)',
+    col: 'appointments', field: 'customerDocId', useAuthValue: false },
+
+  { title: '② customerDocId × dateKey（archive）',
+    desc: 'where(customerDocId==X).orderBy(dateKey desc)',
+    col: 'appointments_archive', field: 'customerDocId', useAuthValue: false }
+];
+
+function initAuth(){
+  if (!window.firebase || !firebase.apps || firebase.apps.length === 0){
+    $('authStatus').textContent = '初期化に失敗しました。firebase-init.js を確認してください。';
+    return;
+  }
+  auth = firebase.auth();
+  auth.onAuthStateChanged(function(user){
+    if (user){
+      $('authStatus').className = 'auth-status ok';
+      $('authStatus').textContent = 'ログイン中：' + (user.email || '');
+      $('loginCard').style.display = 'none';
+      $('testCard').style.display = 'block';
+      $('noteBox').style.display = 'block';
+      var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : user.uid;
+      $('salonIdLabel').textContent = 'salonId（Auth UID）: ' + (sid || '取得失敗');
+    } else {
+      $('authStatus').className = 'auth-status ng';
+      $('authStatus').textContent = 'ログインしていません。torita.test@gmail.com でログインしてください。';
+      $('loginCard').style.display = 'block';
+      $('testCard').style.display = 'none';
+      $('noteBox').style.display = 'none';
+    }
+  });
+}
+
+function doLogin(){
+  var email = ($('emailInput').value || '').trim();
+  var pass = $('passInput').value || '';
+  if (!email || !pass){ alert('メールアドレスとパスワードを入力してください。'); return; }
+  var btn = $('loginBtn');
+  btn.disabled = true; btn.textContent = 'ログイン中...';
+  auth.signInWithEmailAndPassword(email, pass).then(function(){
+    btn.disabled = false; btn.textContent = 'ログイン';
+  }).catch(function(err){
+    btn.disabled = false; btn.textContent = 'ログイン';
+    alert('ログイン失敗：' + (err && err.code ? err.code : 'unknown'));
+  });
+}
+
+function doLogout(){
+  auth.signOut().then(function(){
+    $('summary').innerHTML = '';
+    $('results').innerHTML = '';
+  });
+}
+
+// インデックス作成リンクを Firestore エラーメッセージから抽出
+function extractIndexUrl(msg){
+  if (!msg) return null;
+  var m = String(msg).match(/https:\/\/console\.firebase\.google\.com\/[^\s)"']+/);
+  return m ? m[0] : null;
+}
+
+function runChecks(){
+  var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
+  var uid = (typeof getCurrentUserUid === 'function') ? getCurrentUserUid() : null;
+  if (!sid || !uid){
+    alert('salonId / uid が取得できません。ログインし直してください。');
+    return;
+  }
+
+  $('runBtn').disabled = true;
+  $('runBtn').textContent = '検査中...';
+  $('summary').innerHTML = '';
+  $('results').innerHTML = '';
+
+  var i;
+  for (i = 0; i < QUERIES.length; i++){
+    var q = QUERIES[i];
+    var div = document.createElement('div');
+    div.className = 'result-item';
+    div.id = 'result_' + i;
+    div.innerHTML =
+      '<div class="rtitle">' + escHtml(q.title) + '</div>' +
+      '<div class="rdesc">' + escHtml(q.col) + ': ' + escHtml(q.desc) + '</div>' +
+      '<span class="verdict run" id="verdict_' + i + '">検査中...</span>' +
+      '<div id="linkarea_' + i + '"></div>' +
+      '<div class="rdetail" id="detail_' + i + '"></div>';
+    $('results').appendChild(div);
+  }
+
+  var db = firebase.firestore();
+  var needCount = 0;
+  var existsCount = 0;
+  var chain = Promise.resolve();
+
+  QUERIES.forEach(function(q, idx){
+    chain = chain.then(function(){
+      var base = db.collection('salons').doc(sid).collection(q.col);
+      // 第1フィールドの値：authUid は自分の uid、customerDocId はダミー文字列でOK
+      // （インデックスの有無はクエリ形状だけで決まる。ヒット件数は関係ない）
+      var filterValue = q.useAuthValue ? uid : '__index_probe__';
+      var ref = base.where(q.field, '==', filterValue)
+                    .orderBy('dateKey', 'desc')
+                    .limit(1);
+      return ref.get().then(function(){
+        // 成功 = インデックス不要だった or 既に存在
+        setExists(idx);
+        existsCount++;
+      }).catch(function(err){
+        var code = (err && err.code) ? err.code : '';
+        var msg = (err && err.message) ? err.message : '';
+        if (code === 'failed-precondition' || msg.indexOf('index') >= 0){
+          var url = extractIndexUrl(msg);
+          setNeed(idx, url, msg);
+          needCount++;
+        } else {
+          setErr(idx, code + ' ' + msg);
+        }
+      });
+    });
+  });
+
+  chain.then(function(){
+    $('runBtn').disabled = false;
+    $('runBtn').textContent = 'もう一度検査する';
+    var sm = $('summary');
+    if (needCount === 0){
+      sm.className = 'summary done';
+      sm.innerHTML = '✅ 要作成のインデックスはありません<br>'
+                   + '（成功 ' + existsCount + ' / ' + QUERIES.length + '）';
+    } else {
+      sm.className = 'summary todo';
+      sm.innerHTML = '⚠️ 作成が必要なインデックスが ' + needCount + ' 件あります<br>'
+                   + '各項目の青いボタンをタップして作成してください。<br>'
+                   + '作成後、数分待ってもう一度「検査する」を押してください。';
+    }
+  });
+}
+
+function setExists(idx){
+  var v = $('verdict_' + idx);
+  if (v){ v.className = 'verdict exists'; v.textContent = '作成済み（またはインデックス不要）'; }
+}
+
+function setNeed(idx, url, rawMsg){
+  var v = $('verdict_' + idx);
+  if (v){ v.className = 'verdict need'; v.textContent = '要作成'; }
+  var area = $('linkarea_' + idx);
+  if (area){
+    if (url){
+      area.innerHTML = '<a class="idx-link" href="' + escHtml(url) + '" target="_blank" rel="noopener">'
+                     + 'このインデックスを作成する（タップ）</a>';
+    } else {
+      area.innerHTML = '<div class="rdetail">作成リンクが取得できませんでした。'
+                     + '下のエラー全文を見て、含まれるURLを手動で開いてください。</div>';
+    }
+  }
+  var d = $('detail_' + idx);
+  if (d && rawMsg){ d.textContent = rawMsg; }
+}
+
+function setErr(idx, detail){
+  var v = $('verdict_' + idx);
+  if (v){ v.className = 'verdict err'; v.textContent = '想定外のエラー'; }
+  var d = $('detail_' + idx);
+  if (d){ d.textContent = detail; }
+}
+
+function escHtml(s){
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+window.addEventListener('load', function(){
+  initAuth();
+  $('loginBtn').addEventListener('click', doLogin);
+  $('logoutBtn').addEventListener('click', doLogout);
+  $('runBtn').addEventListener('click', runChecks);
+});
+</script>
+</body>
+</html>
