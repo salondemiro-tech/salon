@@ -450,30 +450,25 @@ function init(){
 // ログイン時にAuth.emailとFirestore customer.emailを自動同期
 function syncEmailIfChanged(user, cb){
   var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
-  alert('SYNC開始\nauth.email=' + (user && user.email) + '\nsid=' + sid);
-  if (!sid || !user || !user.email){ alert('SYNC中断: sid/user/email無し'); cb(); return; }
+  if (!sid || !user || !user.email){ cb(); return; }
 
-  if (typeof onFbReady !== 'function'){ alert('SYNC中断: onFbReady無し'); cb(); return; }
+  if (typeof onFbReady !== 'function'){ cb(); return; }
 
   onFbReady(function(){
-    if (typeof dbCustomerResolveMyCard !== 'function'){ alert('SYNC中断: resolveMyCard無し'); cb(); return; }
+    if (typeof dbCustomerResolveMyCard !== 'function'){ cb(); return; }
 
     dbCustomerResolveMyCard(function(res){
-      if (!res || !res.customerDocId || !res.customer){
-        alert('SYNC中断: resolveMyCard失敗\nres=' + JSON.stringify(res));
-        cb(); return;
-      }
+      if (!res || !res.customerDocId || !res.customer){ cb(); return; }
       var fsEmail = res.customer.email || '';
-      alert('SYNC照合\nauth=' + user.email + '\nfs=' + fsEmail + '\ndocId=' + res.customerDocId);
-      if (fsEmail === user.email){ alert('SYNC: 一致のためスキップ'); cb(); return; }
+      if (fsEmail === user.email){ cb(); return; }
 
       // 不一致 → Firestoreを新メールで更新してから次へ
       firebase.firestore()
         .collection('salons').doc(sid).collection('customers').doc(res.customerDocId)
         .update({ email: user.email, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
-        .then(function(){ alert('SYNC成功 → ' + user.email); cb(); })
+        .then(function(){ cb(); })
         .catch(function(e){
-          alert('SYNC失敗: ' + (e && e.message));
+          console.warn('[syncEmailIfChanged] Firestore更新失敗:', e && e.message);
           cb();
         });
     });
@@ -1399,29 +1394,37 @@ function doBooking(){
 
     appState.customerDocId = res.customerDocId;
 
-    // Step 2: 予約作成
+    // Step 2: 予約作成（直前にAuthを強制更新して最新メールを取得）
     if (typeof dbCustomerCreateAppointment !== 'function'){
       bookingFail('システムエラー（予約関数が見つかりません）。');
       return;
     }
 
-    var apptData = {
-      dateKey: appState.selectedDate,
-      start: appState.selectedSlot,
-      menuId: appState.selectedMenu._id,
-      optionMenuIds: optionIds()
-    };
+    var authUser = firebase.auth().currentUser;
+    var reloadPromise = authUser ? authUser.reload() : Promise.resolve();
+    reloadPromise.then(function(){
+      var freshUser = firebase.auth().currentUser;
+      var notifyEmail = (freshUser && freshUser.email) ? freshUser.email : '';
 
-    dbCustomerCreateAppointment(apptData, function(err2, addRes){
-      if (err2 || !addRes){
-        var m2 = (err2 && err2.message) ? err2.message : '予約の作成に失敗しました。';
-        bookingFail('予約の確定に失敗しました（' + esc(m2) + '）。'
-                  + 'その時間帯が埋まった可能性があります。日時を選び直してください。');
-        return;
-      }
-      appState.busy = false;
-      appState.lastAppointmentId = addRes._id || null;
-      goStep('complete');
+      var apptData = {
+        dateKey: appState.selectedDate,
+        start: appState.selectedSlot,
+        menuId: appState.selectedMenu._id,
+        optionMenuIds: optionIds(),
+        customerEmail: notifyEmail   // 予約時点の最新メール（Auth正）
+      };
+
+      dbCustomerCreateAppointment(apptData, function(err2, addRes){
+        if (err2 || !addRes){
+          var m2 = (err2 && err2.message) ? err2.message : '予約の作成に失敗しました。';
+          bookingFail('予約の確定に失敗しました（' + esc(m2) + '）。'
+                    + 'その時間帯が埋まった可能性があります。日時を選び直してください。');
+          return;
+        }
+        appState.busy = false;
+        appState.lastAppointmentId = addRes._id || null;
+        goStep('complete');
+      });
     });
   });
   }); // dbLoadCustomerBooking（空き再チェック）の閉じ

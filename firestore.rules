@@ -282,7 +282,7 @@ service cloud.firestore {
            request.resource.data.keys().hasOnly([
              'dateKey', 'start', 'customerDocId', 'authUid',
              'menuId', 'optionMenuIds', 'pendingCreate',
-             'source', 'createdAt'
+             'source', 'createdAt', 'customerEmail'
            ]) &&
            request.resource.data.keys().hasAll([
              'dateKey', 'start', 'customerDocId',
@@ -297,7 +297,9 @@ service cloud.firestore {
            request.resource.data.start.matches('^[0-9]{2}:[0-9]{2}$') &&
            request.resource.data.menuId is string &&
            (!('optionMenuIds' in request.resource.data) ||
-             request.resource.data.optionMenuIds is list))
+             request.resource.data.optionMenuIds is list) &&
+           (!('customerEmail' in request.resource.data) ||
+             request.resource.data.customerEmail is string))
           ||
           // ── (B) サロン手動登録（電話・店頭予約、最初から確定）──
           //   対象がサロン仮登録カルテなら authUid=null。後でその

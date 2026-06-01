@@ -1977,6 +1977,10 @@
         menuId: String(data.menuId),
         pendingCreate: true
       };
+      // 予約時点の通知先メール（Auth正・メール変更直後の遅延対策）
+      if (data.customerEmail) {
+        doc.customerEmail = String(data.customerEmail);
+      }
       if (data.optionMenuIds && data.optionMenuIds.length > 0) {
         // 配列だけを通す
         var opts = [];
