@@ -418,6 +418,7 @@ service cloud.firestore {
       // shared_db.js dbSaveSettings が送るフィールドと完全一致確認済み:
       //   openTime/closeTime/intervalMin/intervalInClose/slotMin/
       //   closedDows/weeklyClose/bookingWeeks/lastMin/deadline/updatedAt
+      //   + createdAt（A-8初期化が1回書く。merge時に残るためホワイトリストに含める）
       // ─────────────────────────────────────────────────────────
       match /config/settings {
         allow read: if isSignedIn();
@@ -425,8 +426,11 @@ service cloud.firestore {
           request.resource.data.keys().hasOnly([
             'openTime', 'closeTime', 'intervalMin', 'intervalInClose',
             'slotMin', 'closedDows', 'weeklyClose',
-            'bookingWeeks', 'lastMin', 'deadline', 'updatedAt'
+            'bookingWeeks', 'lastMin', 'deadline',
+            'createdAt', 'updatedAt'
           ]) &&
+          (!('createdAt' in request.resource.data) ||
+            request.resource.data.createdAt is timestamp) &&
           (!('openTime' in request.resource.data) ||
             request.resource.data.openTime is string) &&
           (!('closeTime' in request.resource.data) ||
@@ -464,8 +468,10 @@ service cloud.firestore {
         allow write: if isSalonStaff(salonId) &&
           request.resource.data.keys().hasOnly([
             'text', 'rates', 'showOnBook', 'showOnCancel',
-            'qrUrl', 'qrMsg', 'updatedAt'
+            'qrUrl', 'qrMsg', 'createdAt', 'updatedAt'
           ]) &&
+          (!('createdAt' in request.resource.data) ||
+            request.resource.data.createdAt is timestamp) &&
           (!('text' in request.resource.data) ||
             request.resource.data.text is string) &&
           (!('qrUrl' in request.resource.data) ||
@@ -492,8 +498,10 @@ service cloud.firestore {
         allow write: if isSalonStaff(salonId) &&
           request.resource.data.keys().hasOnly([
             'enabled', 'goal', 'reward', 'bonusStamps',
-            'color', 'expiry', 'updatedAt'
+            'color', 'expiry', 'createdAt', 'updatedAt'
           ]) &&
+          (!('createdAt' in request.resource.data) ||
+            request.resource.data.createdAt is timestamp) &&
           (!('enabled' in request.resource.data) ||
             request.resource.data.enabled is bool) &&
           (!('goal' in request.resource.data) ||
