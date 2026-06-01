@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>config ルール検証 - TORITA debug</title>
+
+<!-- Firebase SDK 9.23.0 compat（customer_app_v2 と同じ構成） -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+
+<style>
+  *{box-sizing:border-box;}
+  body{
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+    background:#f0ede8;color:#1a1a18;margin:0;padding:16px;
+    -webkit-text-size-adjust:100%;line-height:1.6;
+  }
+  .wrap{max-width:560px;margin:0 auto;}
+  h1{font-size:18px;margin:0 0 4px;}
+  .sub{font-size:12px;color:#73726c;margin-bottom:16px;}
+  .card{background:#fff;border:1px solid rgba(0,0,0,.10);border-radius:12px;
+        padding:16px;margin-bottom:14px;}
+  .auth-status{font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:14px;}
+  .auth-status.ng{background:#faeaea;color:#6b1f1f;}
+  .auth-status.ok{background:#e8f2eb;color:#1e4d2b;}
+  .login-row{display:flex;flex-direction:column;gap:8px;}
+  .login-row input{padding:11px 12px;border:1.5px solid rgba(0,0,0,.12);
+                   border-radius:9px;font-size:16px;font-family:inherit;}
+  button{font-family:inherit;cursor:pointer;}
+  .btn{width:100%;padding:13px;background:#b5845a;color:#fff;border:none;
+       border-radius:10px;font-size:15px;font-weight:600;}
+  .btn:disabled{opacity:.4;cursor:default;}
+  .btn-sub{width:100%;padding:11px;background:none;color:#b5845a;
+           border:2px solid #b5845a;border-radius:10px;font-size:14px;font-weight:600;}
+  .btn-run{width:100%;padding:14px;background:#1a1a18;color:#fff;border:none;
+           border-radius:10px;font-size:15px;font-weight:600;margin-bottom:8px;}
+  .salon-id{font-size:11px;color:#73726c;word-break:break-all;margin-top:8px;
+            font-family:monospace;background:#f8f7f4;padding:8px;border-radius:6px;}
+  .result-item{border:1px solid rgba(0,0,0,.10);border-radius:10px;padding:12px;
+               margin-bottom:10px;font-size:13px;}
+  .result-item .rtitle{font-weight:600;margin-bottom:6px;font-size:13px;}
+  .result-item .rdesc{color:#73726c;font-size:12px;margin-bottom:8px;}
+  .verdict{display:inline-block;font-size:12px;font-weight:700;
+           padding:3px 10px;border-radius:20px;}
+  .verdict.pass{background:#e8f2eb;color:#1e4d2b;}
+  .verdict.fail{background:#faeaea;color:#6b1f1f;}
+  .verdict.run{background:#f0ede8;color:#73726c;}
+  .rdetail{font-size:11px;color:#888;margin-top:6px;font-family:monospace;
+           word-break:break-all;}
+  .summary{font-size:14px;font-weight:600;padding:12px;border-radius:10px;
+           margin-bottom:14px;text-align:center;}
+  .summary.allpass{background:#e8f2eb;color:#1e4d2b;}
+  .summary.somefail{background:#faeaea;color:#6b1f1f;}
+  .note{font-size:11px;color:#73726c;line-height:1.7;margin-top:14px;
+        background:#fff;border-radius:10px;padding:14px;border:1px solid rgba(0,0,0,.08);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>config セキュリティルール検証</h1>
+  <div class="sub">2026/6/1 ルール（config 3ドキュメントのホワイトリスト＋型チェック）の動作確認</div>
+
+  <div id="authStatus" class="auth-status ng">ログイン状態を確認中...</div>
+
+  <div class="card" id="loginCard" style="display:none;">
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;">torita.test@gmail.com でログイン</div>
+    <div class="login-row">
+      <input type="email" id="emailInput" placeholder="torita.test@gmail.com" autocomplete="email" inputmode="email">
+      <input type="password" id="passInput" placeholder="パスワード" autocomplete="current-password">
+      <button class="btn" id="loginBtn">ログイン</button>
+    </div>
+  </div>
+
+  <div class="card" id="testCard" style="display:none;">
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;">テスト実行</div>
+    <div class="sub" style="margin-bottom:12px;">
+      ログイン中のサロン（自分のconfig）に対して、不正な書き込み・正常な書き込みを順番に試します。
+    </div>
+    <button class="btn-run" id="runBtn">テストを実行する</button>
+    <button class="btn-sub" id="logoutBtn">ログアウト</button>
+    <div class="salon-id" id="salonIdLabel"></div>
+  </div>
+
+  <div id="summary"></div>
+  <div id="results"></div>
+
+  <div class="note" id="noteBox" style="display:none;">
+    <b>判定の見かた</b><br>
+    ・<b>不正書き込みテスト①〜⑥</b>：書き込みが「拒否（permission-denied）」されれば <b>合格（PASS）</b>。もし書けてしまったら <b>不合格（FAIL）</b>＝ルールに穴あり。<br>
+    ・<b>正常書き込みテスト⑦</b>：正しい形のデータが「成功」すれば <b>合格（PASS）</b>。もし拒否されたら <b>不合格（FAIL）</b>＝ルールが厳しすぎて本来の保存まで壊している。<br><br>
+    <b>後始末</b>：テストは settings ドキュメントに書き込みを試みますが、⑦の正常書き込みは <code>config/settings</code> を実際に上書きします。テストサロンなので問題ありませんが、テスト後に営業時間設定（C-6）を一度開いて保存し直すと確実です。
+  </div>
+</div>
+
+<script>
+// ============================================================
+// debug_config_rules.html  -  TORITA config ルール検証（販売前チェックリスト②）
+//
+// 目的：
+//   2026/6/1 に締めた config/settings, config/cancelPolicy, config/stampCard の
+//   フィールドホワイトリスト＋型チェックが効いているかをクライアント権限で検証する。
+//
+// 重要：
+//   Firebase Console からの書き込みはルールをバイパスするためテストにならない。
+//   このページは「ログイン中の一般クライアント」として書き込みを試すので、
+//   ルールが正しくテストされる。
+//
+//   salonId は getCurrentSalonId()（= ログイン中の Auth UID）から動的取得。
+//   本物の salonId はハードコードしない（再発防止ルール）。
+//
+// ES5 互換（var/function/Promise.then のみ）。
+// ============================================================
+
+function $(id){ return document.getElementById(id); }
+var auth = null;
+
+// テスト定義
+// kind: 'deny' = 拒否されたら合格 / 'allow' = 成功したら合格
+// doc:  書き込み先の configId
+// data: 書き込むデータ
+var TESTS = [
+  {
+    title: '① ホワイトリスト外フィールド（isAdmin）',
+    desc: 'config/settings に isAdmin:true を混ぜて書く',
+    kind: 'deny',
+    doc: 'settings',
+    data: { openTime: '10:00', isAdmin: true }
+  },
+  {
+    title: '② 不正フィールド名（__proto__ 風）',
+    desc: 'config/settings に許可外の hacked フィールドを書く',
+    kind: 'deny',
+    doc: 'settings',
+    data: { openTime: '10:00', hacked: 'yes' }
+  },
+  {
+    title: '③ 型違反（intervalMin に文字列）',
+    desc: 'config/settings の intervalMin に "abc" を書く',
+    kind: 'deny',
+    doc: 'settings',
+    data: { intervalMin: 'abc' }
+  },
+  {
+    title: '④ 未知のconfigドキュメント',
+    desc: 'config/unknownDoc に書き込む（包括ルールで禁止のはず）',
+    kind: 'deny',
+    doc: 'unknownDoc',
+    data: { foo: 'bar' }
+  },
+  {
+    title: '⑤ 型違反（cancelPolicy.showOnBook に文字列）',
+    desc: 'config/cancelPolicy の showOnBook に "true"（文字列）を書く',
+    kind: 'deny',
+    doc: 'cancelPolicy',
+    data: { showOnBook: 'true' }
+  },
+  {
+    title: '⑥ 値域違反（stampCard.goal が範囲外）',
+    desc: 'config/stampCard の goal に 999 を書く（1〜100のはず）',
+    kind: 'deny',
+    doc: 'stampCard',
+    data: { goal: 999 }
+  },
+  {
+    title: '⑦【正常系】settings を正しい型で書く',
+    desc: 'config/settings に正しい形のデータを書く（成功するべき）',
+    kind: 'allow',
+    doc: 'settings',
+    data: {
+      openTime: '10:00',
+      closeTime: '19:00',
+      intervalMin: 30,
+      slotMin: 30,
+      bookingWeeks: 8
+    }
+  }
+];
+
+// ------------------------------------------------------------
+// 認証状態の監視
+// ------------------------------------------------------------
+function initAuth(){
+  if (!window.firebase || !firebase.apps || firebase.apps.length === 0){
+    $('authStatus').textContent = '初期化に失敗しました。firebase-init.js を確認してください。';
+    return;
+  }
+  auth = firebase.auth();
+  auth.onAuthStateChanged(function(user){
+    if (user){
+      var verified = user.emailVerified ? '（メール確認済み）' : '（メール未確認）';
+      $('authStatus').className = 'auth-status ok';
+      $('authStatus').textContent = 'ログイン中：' + (user.email || '') + ' ' + verified;
+      $('loginCard').style.display = 'none';
+      $('testCard').style.display = 'block';
+      $('noteBox').style.display = 'block';
+      var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : user.uid;
+      $('salonIdLabel').textContent = 'salonId（Auth UID）: ' + (sid || '取得失敗');
+    } else {
+      $('authStatus').className = 'auth-status ng';
+      $('authStatus').textContent = 'ログインしていません。torita.test@gmail.com でログインしてください。';
+      $('loginCard').style.display = 'block';
+      $('testCard').style.display = 'none';
+      $('noteBox').style.display = 'none';
+    }
+  });
+}
+
+function doLogin(){
+  var email = ($('emailInput').value || '').trim();
+  var pass = $('passInput').value || '';
+  if (!email || !pass){ alert('メールアドレスとパスワードを入力してください。'); return; }
+  var btn = $('loginBtn');
+  btn.disabled = true;
+  btn.textContent = 'ログイン中...';
+  auth.signInWithEmailAndPassword(email, pass).then(function(){
+    btn.disabled = false;
+    btn.textContent = 'ログイン';
+  }).catch(function(err){
+    btn.disabled = false;
+    btn.textContent = 'ログイン';
+    alert('ログイン失敗：' + (err && err.code ? err.code : 'unknown'));
+  });
+}
+
+function doLogout(){
+  auth.signOut().then(function(){
+    $('summary').innerHTML = '';
+    $('results').innerHTML = '';
+  });
+}
+
+// ------------------------------------------------------------
+// テスト実行
+// ------------------------------------------------------------
+function runTests(){
+  var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
+  if (!sid){
+    alert('salonId が取得できません。ログインし直してください。');
+    return;
+  }
+
+  $('runBtn').disabled = true;
+  $('runBtn').textContent = '実行中...';
+  $('summary').innerHTML = '';
+  $('results').innerHTML = '';
+
+  // 各テストの結果枠を先に描画
+  var i;
+  for (i = 0; i < TESTS.length; i++){
+    var t = TESTS[i];
+    var div = document.createElement('div');
+    div.className = 'result-item';
+    div.id = 'result_' + i;
+    div.innerHTML =
+      '<div class="rtitle">' + escHtml(t.title) + '</div>' +
+      '<div class="rdesc">' + escHtml(t.desc) + '</div>' +
+      '<span class="verdict run" id="verdict_' + i + '">実行待ち</span>' +
+      '<div class="rdetail" id="detail_' + i + '"></div>';
+    $('results').appendChild(div);
+  }
+
+  // 1件ずつ順番に実行（Promiseチェーンで直列化）
+  var db = firebase.firestore();
+  var passCount = 0;
+  var chain = Promise.resolve();
+
+  TESTS.forEach(function(t, idx){
+    chain = chain.then(function(){
+      var path = 'salons/' + sid + '/config/' + t.doc;
+      return db.doc(path).set(t.data, { merge: true }).then(function(){
+        // 書き込み成功
+        if (t.kind === 'allow'){
+          setVerdict(idx, true, '成功（想定どおり書き込めた）');
+          passCount++;
+        } else {
+          setVerdict(idx, false, '書き込めてしまった！ルールに穴があります');
+        }
+      }).catch(function(err){
+        var code = (err && err.code) ? err.code : 'unknown';
+        if (t.kind === 'deny'){
+          // 拒否されれば合格（permission-denied を期待）
+          var isPermDenied = (code === 'permission-denied');
+          setVerdict(idx, isPermDenied, isPermDenied
+            ? '拒否された（想定どおり）: ' + code
+            : '別のエラーで失敗: ' + code);
+          if (isPermDenied) passCount++;
+        } else {
+          // allow なのに拒否された＝厳しすぎ
+          setVerdict(idx, false, '拒否された（ルールが厳しすぎる）: ' + code);
+        }
+      });
+    });
+  });
+
+  chain.then(function(){
+    $('runBtn').disabled = false;
+    $('runBtn').textContent = 'もう一度テストを実行する';
+    var total = TESTS.length;
+    var allPass = (passCount === total);
+    var sm = $('summary');
+    sm.className = 'summary ' + (allPass ? 'allpass' : 'somefail');
+    sm.textContent = allPass
+      ? '✅ 全' + total + '項目 合格（ルールは正しく機能しています）'
+      : '⚠️ ' + passCount + '/' + total + ' 合格（FAIL があります。上の詳細を確認してください）';
+  });
+}
+
+function setVerdict(idx, pass, detail){
+  var v = $('verdict_' + idx);
+  var d = $('detail_' + idx);
+  if (v){
+    v.className = 'verdict ' + (pass ? 'pass' : 'fail');
+    v.textContent = pass ? '合格 PASS' : '不合格 FAIL';
+  }
+  if (d){ d.textContent = detail; }
+}
+
+function escHtml(s){
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// 起動
+window.addEventListener('load', function(){
+  initAuth();
+  $('loginBtn').addEventListener('click', doLogin);
+  $('logoutBtn').addEventListener('click', doLogout);
+  $('runBtn').addEventListener('click', runTests);
+});
+</script>
+</body>
+</html>
