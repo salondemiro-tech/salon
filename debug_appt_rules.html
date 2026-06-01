@@ -1,0 +1,442 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>予約ルール検証（A経路偽装） - TORITA debug</title>
+
+<!-- Firebase SDK 9.23.0 compat（customer_app_v2 と同じ構成） -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+
+<style>
+  *{box-sizing:border-box;}
+  body{
+    font-family:-apple-system,"Hiragino Kaku Gothic ProN",sans-serif;
+    background:#f0ede8;color:#1a1a18;margin:0;padding:16px;
+    -webkit-text-size-adjust:100%;line-height:1.6;
+  }
+  .wrap{max-width:560px;margin:0 auto;}
+  h1{font-size:18px;margin:0 0 4px;}
+  .sub{font-size:12px;color:#73726c;margin-bottom:16px;}
+  .card{background:#fff;border:1px solid rgba(0,0,0,.10);border-radius:12px;
+        padding:16px;margin-bottom:14px;}
+  .auth-status{font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:14px;}
+  .auth-status.ng{background:#faeaea;color:#6b1f1f;}
+  .auth-status.ok{background:#e8f2eb;color:#1e4d2b;}
+  .auth-status.warn{background:#fdf6e3;color:#7a5800;}
+  .login-row{display:flex;flex-direction:column;gap:8px;}
+  .login-row input{padding:11px 12px;border:1.5px solid rgba(0,0,0,.12);
+                   border-radius:9px;font-size:16px;font-family:inherit;}
+  button{font-family:inherit;cursor:pointer;}
+  .btn{width:100%;padding:13px;background:#b5845a;color:#fff;border:none;
+       border-radius:10px;font-size:15px;font-weight:600;}
+  .btn:disabled{opacity:.4;cursor:default;}
+  .btn-sub{width:100%;padding:11px;background:none;color:#b5845a;
+           border:2px solid #b5845a;border-radius:10px;font-size:14px;font-weight:600;}
+  .btn-run{width:100%;padding:14px;background:#1a1a18;color:#fff;border:none;
+           border-radius:10px;font-size:15px;font-weight:600;margin-bottom:8px;}
+  .salon-id{font-size:11px;color:#73726c;word-break:break-all;margin-top:8px;
+            font-family:monospace;background:#f8f7f4;padding:8px;border-radius:6px;}
+  .result-item{border:1px solid rgba(0,0,0,.10);border-radius:10px;padding:12px;
+               margin-bottom:10px;font-size:13px;}
+  .result-item .rtitle{font-weight:600;margin-bottom:4px;font-size:13px;}
+  .result-item .rdesc{color:#73726c;font-size:12px;margin-bottom:8px;
+                      font-family:monospace;word-break:break-all;}
+  .verdict{display:inline-block;font-size:12px;font-weight:700;
+           padding:3px 10px;border-radius:20px;}
+  .verdict.pass{background:#e8f2eb;color:#1e4d2b;}
+  .verdict.fail{background:#faeaea;color:#6b1f1f;}
+  .verdict.run{background:#f0ede8;color:#73726c;}
+  .rdetail{font-size:11px;color:#888;margin-top:6px;font-family:monospace;
+           word-break:break-all;}
+  .summary{font-size:14px;font-weight:600;padding:12px;border-radius:10px;
+           margin-bottom:14px;text-align:center;line-height:1.7;}
+  .summary.allpass{background:#e8f2eb;color:#1e4d2b;}
+  .summary.somefail{background:#faeaea;color:#6b1f1f;}
+  .note{font-size:11px;color:#73726c;line-height:1.7;margin-top:14px;
+        background:#fff;border-radius:10px;padding:14px;border:1px solid rgba(0,0,0,.08);}
+  .cleanup{margin-top:14px;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>予約ルール検証（A経路・顧客の偽装書き込み）</h1>
+  <div class="sub">販売前チェックリスト⑥（A-step1-4 残り）：顧客アプリ予約でサーバー確定フィールドを偽装できないか検証</div>
+
+  <div id="authStatus" class="auth-status ng">ログイン状態を確認中...</div>
+
+  <div class="card" id="loginCard" style="display:none;">
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;">claim済み顧客アカウントでログイン</div>
+    <div class="sub" style="margin-bottom:10px;">torita.test+12345678912@gmail.com（このサロンで予約済みの顧客）</div>
+    <div class="login-row">
+      <input type="email" id="emailInput" placeholder="torita.test+...@gmail.com" autocomplete="email" inputmode="email">
+      <input type="password" id="passInput" placeholder="パスワード" autocomplete="current-password">
+      <button class="btn" id="loginBtn">ログイン</button>
+    </div>
+  </div>
+
+  <div class="card" id="testCard" style="display:none;">
+    <div style="font-size:13px;font-weight:600;margin-bottom:10px;">テスト実行</div>
+    <div class="sub" style="margin-bottom:12px;">
+      この顧客として、不正なフィールドを混ぜた予約・正常な予約を順番に試します。
+      事前に「自分のcustomerDocId」を authIndex から解決します（claim済みでないと実行できません）。
+    </div>
+    <button class="btn-run" id="runBtn">テストを実行する</button>
+    <button class="btn-sub" id="logoutBtn">ログアウト</button>
+    <div class="salon-id" id="salonIdLabel"></div>
+  </div>
+
+  <div id="summary"></div>
+  <div id="results"></div>
+
+  <div class="cleanup card" id="cleanupCard" style="display:none;">
+    <div style="font-size:13px;font-weight:600;margin-bottom:8px;">後始末</div>
+    <div class="sub" style="margin-bottom:10px;">
+      このテストで作成に成功した予約（正常系⑧など）を削除します。
+      テストサロンのカレンダーを汚さないために実行してください。
+    </div>
+    <button class="btn-sub" id="cleanupBtn">作成された予約を削除する</button>
+    <div id="cleanupMsg" style="font-size:12px;margin-top:8px;"></div>
+  </div>
+
+  <div class="note" id="noteBox" style="display:none;">
+    <b>判定の見かた</b><br>
+    ・<b>偽装テスト①〜⑦</b>：書き込みが「拒否（permission-denied）」されれば <b>合格（PASS）</b>。書けてしまったら <b>不合格（FAIL）</b>＝ルールに穴あり。<br>
+    ・<b>正常テスト⑧</b>：正しいフィールドだけの予約が「成功」すれば <b>合格（PASS）</b>。拒否されたら <b>不合格（FAIL）</b>＝ルールが厳しすぎ。<br><br>
+    <b>⑦ createdAt について</b>：現ルールではA経路のホワイトリストに createdAt が含まれているため、<b>FAIL（書けてしまう）になる可能性</b>があります。その場合はルールから createdAt を外す修正を検討します（createdAt はサーバーが確定すべきフィールド）。<br><br>
+    <b>後始末</b>：⑧の正常予約は本物の予約として作成されます。テスト後、下の「作成された予約を削除する」を押してください。
+  </div>
+</div>
+
+<script>
+// ============================================================
+// debug_appt_rules.html  -  TORITA A経路予約の偽装書き込み検証（チェックリスト⑥）
+//
+// 目的：
+//   顧客アプリ予約(A経路 pendingCreate)で、サーバーが確定すべきフィールド
+//   （priceSnapshot/staffId/status/end/createdAt 等）を顧客が偽装して
+//   書き込めないかを、claim済み顧客クライアントとして検証する。
+//
+//   A経路ルールは「authIndex/{uid} が存在し、その customerDocId と
+//   request.resource.data.customerDocId が一致」が前提。よって
+//   claim済み顧客でログインし、自分の customerDocId を解決してから試す。
+//
+//   salonId は getCurrentSalonId()（=?salon、無ければAuth UID）から取得。
+//   本物IDはハードコードしない（再発防止ルール）。
+//   ※ 顧客は ?salon= が無いと salonId を解決できないため、このページは
+//     URL に ?salon=<salonId> を付けて開く必要がある。付いていない場合は
+//     警告を出す。
+//
+// ES5 互換（var/function/Promise.then のみ）。
+// ============================================================
+
+function $(id){ return document.getElementById(id); }
+var auth = null;
+var myCustomerDocId = null;
+var createdApptIds = [];   // 作成に成功した予約ID（後始末用）
+
+// 形式チェックを通す共通の正常フィールド（基準）
+function baseValidDoc(uid, docId){
+  return {
+    dateKey: futureDateKey(),
+    start: '10:00',
+    customerDocId: docId,
+    authUid: uid,
+    menuId: 'probe_menu',     // 実在しなくてもルール検証は通る（Functions側で弾かれるが作成自体はA経路ルールの範囲）
+    pendingCreate: true
+  };
+}
+
+// 30日後くらいの dateKey（過去日でない安全な未来日）
+function futureDateKey(){
+  var d = new Date();
+  d.setDate(d.getDate() + 30);
+  var y = d.getFullYear();
+  var m = d.getMonth() + 1;
+  var day = d.getDate();
+  return y + '-' + pad2(m) + '-' + pad2(day);
+}
+function pad2(n){ return (n < 10 ? '0' : '') + n; }
+
+// テスト定義を作る（uid, docId が必要なので実行時に組む）
+function buildTests(uid, docId){
+  return [
+    {
+      title: '① priceSnapshot 偽装（料金ゼロ）',
+      desc: '正常予約に priceSnapshot:0 を混ぜる',
+      kind: 'deny',
+      mutate: function(d){ d.priceSnapshot = 0; }
+    },
+    {
+      title: '② staffId 偽装',
+      desc: '正常予約に staffId:"owner" を混ぜる（サーバー確定フィールド）',
+      kind: 'deny',
+      mutate: function(d){ d.staffId = 'owner'; }
+    },
+    {
+      title: '③ status 偽装（確定扱い）',
+      desc: '正常予約に status:"confirmed" を混ぜる',
+      kind: 'deny',
+      mutate: function(d){ d.status = 'confirmed'; }
+    },
+    {
+      title: '④ end 偽装（施術時間短縮）',
+      desc: '正常予約に end:"10:05" を混ぜる',
+      kind: 'deny',
+      mutate: function(d){ d.end = '10:05'; }
+    },
+    {
+      title: '⑤ authUid 偽装（他人のUID）',
+      desc: 'authUid を別人のでたらめUIDにする',
+      kind: 'deny',
+      mutate: function(d){ d.authUid = 'someone_else_fake_uid_0001'; }
+    },
+    {
+      title: '⑥ customerDocId 偽装（他人のカルテ）',
+      desc: 'customerDocId をでたらめなIDにする',
+      kind: 'deny',
+      mutate: function(d){ d.customerDocId = 'cus_fake_not_mine_0001'; }
+    },
+    {
+      title: '⑦ createdAt 偽装（過去日時を送る）',
+      desc: 'createdAt に過去の固定日時を送る（現ルールでは通る可能性あり）',
+      kind: 'deny',
+      mutate: function(d){
+        d.createdAt = firebase.firestore.Timestamp.fromDate(new Date('2020-01-01T00:00:00Z'));
+      }
+    },
+    {
+      title: '⑧【正常系】正しいフィールドだけで予約',
+      desc: 'dateKey/start/customerDocId/authUid/menuId/pendingCreate のみ',
+      kind: 'allow',
+      mutate: function(d){ /* 何も足さない */ }
+    }
+  ];
+}
+
+function initAuth(){
+  if (!window.firebase || !firebase.apps || firebase.apps.length === 0){
+    $('authStatus').textContent = '初期化に失敗しました。firebase-init.js を確認してください。';
+    return;
+  }
+  auth = firebase.auth();
+  auth.onAuthStateChanged(function(user){
+    if (user){
+      var verified = user.emailVerified ? '（メール確認済み）' : '（メール未確認・A経路は弾かれます）';
+      $('authStatus').className = 'auth-status ' + (user.emailVerified ? 'ok' : 'warn');
+      $('authStatus').textContent = 'ログイン中：' + (user.email || '') + ' ' + verified;
+      $('loginCard').style.display = 'none';
+      $('testCard').style.display = 'block';
+      $('noteBox').style.display = 'block';
+      var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
+      if (!sid){
+        $('salonIdLabel').textContent = '⚠️ salonId が取得できません。このページのURLに ?salon=<salonId> を付けて開いてください。';
+      } else {
+        $('salonIdLabel').textContent = 'salonId: ' + sid + ' ／ あなたのUID: ' + user.uid;
+      }
+    } else {
+      $('authStatus').className = 'auth-status ng';
+      $('authStatus').textContent = 'ログインしていません。claim済み顧客アカウントでログインしてください。';
+      $('loginCard').style.display = 'block';
+      $('testCard').style.display = 'none';
+      $('noteBox').style.display = 'none';
+      $('cleanupCard').style.display = 'none';
+    }
+  });
+}
+
+function doLogin(){
+  var email = ($('emailInput').value || '').trim();
+  var pass = $('passInput').value || '';
+  if (!email || !pass){ alert('メールアドレスとパスワードを入力してください。'); return; }
+  var btn = $('loginBtn');
+  btn.disabled = true; btn.textContent = 'ログイン中...';
+  auth.signInWithEmailAndPassword(email, pass).then(function(){
+    btn.disabled = false; btn.textContent = 'ログイン';
+  }).catch(function(err){
+    btn.disabled = false; btn.textContent = 'ログイン';
+    alert('ログイン失敗：' + (err && err.code ? err.code : 'unknown'));
+  });
+}
+
+function doLogout(){
+  auth.signOut().then(function(){
+    $('summary').innerHTML = '';
+    $('results').innerHTML = '';
+    createdApptIds = [];
+  });
+}
+
+function runTests(){
+  var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
+  var uid = (typeof getCurrentUserUid === 'function') ? getCurrentUserUid() : null;
+  if (!sid){
+    alert('salonId が取得できません。URLに ?salon=<salonId> を付けて開いてください。');
+    return;
+  }
+  if (!uid){
+    alert('ログイン状態を確認できません。ログインし直してください。');
+    return;
+  }
+
+  $('runBtn').disabled = true;
+  $('runBtn').textContent = '自分のカルテを確認中...';
+  $('summary').innerHTML = '';
+  $('results').innerHTML = '';
+  createdApptIds = [];
+
+  // まず自分の customerDocId を解決（claim済みか確認）
+  if (typeof dbCustomerResolveMyCard !== 'function'){
+    alert('shared_db.js が読み込めていません。');
+    $('runBtn').disabled = false; $('runBtn').textContent = 'テストを実行する';
+    return;
+  }
+
+  dbCustomerResolveMyCard(function(res){
+    if (!res || !res.customerDocId){
+      $('runBtn').disabled = false; $('runBtn').textContent = 'テストを実行する';
+      var sm = $('summary');
+      sm.className = 'summary somefail';
+      sm.innerHTML = '⚠️ このアカウントは claim 済みではありません（authIndex なし）。<br>'
+                   + 'A経路テストには claim 済み顧客が必要です。先に顧客アプリで1件予約してください。';
+      return;
+    }
+    myCustomerDocId = res.customerDocId;
+    $('runBtn').textContent = '実行中...';
+    executeTests(sid, uid, myCustomerDocId);
+  });
+}
+
+function executeTests(sid, uid, docId){
+  var tests = buildTests(uid, docId);
+  var db = firebase.firestore();
+  var col = db.collection('salons').doc(sid).collection('appointments');
+
+  // 結果枠を先に描画
+  var i;
+  for (i = 0; i < tests.length; i++){
+    var t = tests[i];
+    var div = document.createElement('div');
+    div.className = 'result-item';
+    div.id = 'result_' + i;
+    div.innerHTML =
+      '<div class="rtitle">' + escHtml(t.title) + '</div>' +
+      '<div class="rdesc">' + escHtml(t.desc) + '</div>' +
+      '<span class="verdict run" id="verdict_' + i + '">実行待ち</span>' +
+      '<div class="rdetail" id="detail_' + i + '"></div>';
+    $('results').appendChild(div);
+  }
+
+  var passCount = 0;
+  var chain = Promise.resolve();
+
+  tests.forEach(function(t, idx){
+    chain = chain.then(function(){
+      // 基準の正常ドキュメントを作って、テストごとに改ざんを適用
+      var doc = baseValidDoc(uid, docId);
+      t.mutate(doc);
+      // add() で新規作成を試みる
+      return col.add(doc).then(function(ref){
+        // 書き込み成功
+        if (t.kind === 'allow'){
+          setVerdict(idx, true, '成功（想定どおり作成できた）id=' + ref.id);
+          passCount++;
+          createdApptIds.push(ref.id);  // 後始末対象
+        } else {
+          setVerdict(idx, false, '書き込めてしまった！ルールに穴あり id=' + ref.id);
+          createdApptIds.push(ref.id);  // 作られてしまったので後始末対象
+        }
+      }).catch(function(err){
+        var code = (err && err.code) ? err.code : 'unknown';
+        if (t.kind === 'deny'){
+          var isPermDenied = (code === 'permission-denied');
+          setVerdict(idx, isPermDenied, isPermDenied
+            ? '拒否された（想定どおり）: ' + code
+            : '別のエラーで失敗: ' + code);
+          if (isPermDenied) passCount++;
+        } else {
+          setVerdict(idx, false, '拒否された（ルールが厳しすぎ）: ' + code);
+        }
+      });
+    });
+  });
+
+  chain.then(function(){
+    $('runBtn').disabled = false;
+    $('runBtn').textContent = 'もう一度テストを実行する';
+    var total = tests.length;
+    var allPass = (passCount === total);
+    var sm = $('summary');
+    sm.className = 'summary ' + (allPass ? 'allpass' : 'somefail');
+    sm.innerHTML = allPass
+      ? '✅ 全' + total + '項目 合格'
+      : '⚠️ ' + passCount + '/' + total + ' 合格（FAIL があります。詳細を確認してください）';
+    // 後始末カードを表示（作成された予約があれば）
+    if (createdApptIds.length > 0){
+      $('cleanupCard').style.display = 'block';
+    }
+  });
+}
+
+function setVerdict(idx, pass, detail){
+  var v = $('verdict_' + idx);
+  var d = $('detail_' + idx);
+  if (v){
+    v.className = 'verdict ' + (pass ? 'pass' : 'fail');
+    v.textContent = pass ? '合格 PASS' : '不合格 FAIL';
+  }
+  if (d){ d.textContent = detail; }
+}
+
+function doCleanup(){
+  var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
+  if (!sid || createdApptIds.length === 0){
+    $('cleanupMsg').textContent = '削除対象がありません。';
+    return;
+  }
+  var btn = $('cleanupBtn');
+  btn.disabled = true; btn.textContent = '削除中...';
+  var db = firebase.firestore();
+  var col = db.collection('salons').doc(sid).collection('appointments');
+  var done = 0, ok = 0, fail = 0;
+  var total = createdApptIds.length;
+
+  createdApptIds.forEach(function(id){
+    col.doc(id).delete().then(function(){
+      ok++; step();
+    }).catch(function(){
+      fail++; step();
+    });
+  });
+
+  function step(){
+    done++;
+    if (done >= total){
+      btn.disabled = false; btn.textContent = '作成された予約を削除する';
+      $('cleanupMsg').textContent = '削除完了：成功 ' + ok + ' 件 / 失敗 ' + fail + ' 件'
+        + (fail > 0 ? '（顧客は自分の予約を削除する権限が無いルールの可能性。その場合はサロン側/Consoleで削除してください）' : '');
+      if (fail === 0){ createdApptIds = []; }
+    }
+  }
+}
+
+function escHtml(s){
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
+    .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+window.addEventListener('load', function(){
+  initAuth();
+  $('loginBtn').addEventListener('click', doLogin);
+  $('logoutBtn').addEventListener('click', doLogout);
+  $('runBtn').addEventListener('click', runTests);
+  $('cleanupBtn').addEventListener('click', doCleanup);
+});
+</script>
+</body>
+</html>
