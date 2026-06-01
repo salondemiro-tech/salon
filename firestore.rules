@@ -38,6 +38,13 @@
 //     送るフィールドと1対1照合済み
 //   - 包括ルール match /config/{configId} は read only に変更
 //     （上記3種以外のconfigドキュメントへの write は禁止）
+//
+// 2026/6/1 変更点（その2・⑥ A-step1-4 検証）:
+//   - appointments 作成A経路（顧客アプリ予約）のホワイトリストから
+//     createdAt を削除。顧客が createdAt を偽装して送れる穴を塞いだ。
+//   - createdAt は Functions が serverTimestamp で確定するため、
+//     クライアントから送る必要はない（shared_db.js も元々送っていない）。
+//   - price/staffId/status/end/authUid/customerDocId 偽装は元から拒否済み（PASS確認）。
 // ============================================================
 
 rules_version = '2';
@@ -291,8 +298,13 @@ service cloud.firestore {
            request.resource.data.keys().hasOnly([
              'dateKey', 'start', 'customerDocId', 'authUid',
              'menuId', 'optionMenuIds', 'pendingCreate',
-             'source', 'createdAt', 'customerEmail'
+             'source', 'customerEmail'
            ]) &&
+           // ★ 2026/6/1 createdAt をA経路ホワイトリストから除外（⑥検証でFAIL）。
+           //   createdAt は Functions が serverTimestamp で確定するフィールド。
+           //   顧客が過去日時等を偽装して送れないようにする。
+           //   shared_db.js dbCustomerCreateAppointment は元々 createdAt を
+           //   送らないため、正常な予約作成には影響しない。
            request.resource.data.keys().hasAll([
              'dateKey', 'start', 'customerDocId',
              'authUid', 'menuId', 'pendingCreate'
