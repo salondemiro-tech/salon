@@ -450,27 +450,31 @@ function init(){
 // ログイン時にAuth.emailとFirestore customer.emailを自動同期
 function syncEmailIfChanged(user, cb){
   var sid = (typeof getCurrentSalonId === 'function') ? getCurrentSalonId() : null;
-  if (!sid || !user || !user.email){ cb(); return; }
+  alert('SYNC開始\nauth.email=' + (user && user.email) + '\nsid=' + sid);
+  if (!sid || !user || !user.email){ alert('SYNC中断: sid/user/email無し'); cb(); return; }
 
-  // onFbReady でラップして _fbReady 競合を回避
-  if (typeof onFbReady !== 'function'){ cb(); return; }
+  if (typeof onFbReady !== 'function'){ alert('SYNC中断: onFbReady無し'); cb(); return; }
 
   onFbReady(function(){
-    if (typeof dbCustomerResolveMyCard !== 'function'){ cb(); return; }
+    if (typeof dbCustomerResolveMyCard !== 'function'){ alert('SYNC中断: resolveMyCard無し'); cb(); return; }
 
     dbCustomerResolveMyCard(function(res){
-      if (!res || !res.customerDocId || !res.customer){ cb(); return; }
+      if (!res || !res.customerDocId || !res.customer){
+        alert('SYNC中断: resolveMyCard失敗\nres=' + JSON.stringify(res));
+        cb(); return;
+      }
       var fsEmail = res.customer.email || '';
-      if (fsEmail === user.email){ cb(); return; } // 一致していればスキップ
+      alert('SYNC照合\nauth=' + user.email + '\nfs=' + fsEmail + '\ndocId=' + res.customerDocId);
+      if (fsEmail === user.email){ alert('SYNC: 一致のためスキップ'); cb(); return; }
 
       // 不一致 → Firestoreを新メールで更新してから次へ
       firebase.firestore()
         .collection('salons').doc(sid).collection('customers').doc(res.customerDocId)
         .update({ email: user.email, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
-        .then(function(){ cb(); })
+        .then(function(){ alert('SYNC成功 → ' + user.email); cb(); })
         .catch(function(e){
-          console.warn('[syncEmailIfChanged] Firestore更新失敗:', e && e.message);
-          cb(); // 失敗してもcbは呼ぶ（画面遷移は止めない）
+          alert('SYNC失敗: ' + (e && e.message));
+          cb();
         });
     });
   });
@@ -1142,8 +1146,10 @@ function doLogin(){
       identityMode = 'verify'; render();
       return;
     }
-    // ログイン成功 → サロン情報取得して予約フローへ
-    loadSalonInfo();
+    // ログイン成功 → メール同期 → サロン情報取得して予約フローへ
+    syncEmailIfChanged(cred.user, function(){
+      loadSalonInfo();
+    });
   }).catch(function(err){
     appState.busy = false;
     if ($('loginBtn')){ $('loginBtn').disabled = false; $('loginBtn').textContent = 'ログイン'; }
