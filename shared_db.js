@@ -1,6 +1,7 @@
 /*
  * shared_db.js  -  TORITA Phase A-step2 / A-1
  * 作成: 2026/5/14
+ * 最終改訂: 2026/6/2 (F-3: dbSalonGetCustomerHistory の orderBy 復活)
  *
  * 役割:
  *   Firestore アクセス層の土台。すべての画面はこのファイル経由で DB を読み書きする。
@@ -10,52 +11,20 @@
  *   - firestore.rules (Phase A-step1-1 で deploy 済み) と完全整合
  *   - functions/index.js onAppointmentCreate (Phase A-step1-3 で deploy 済み) と整合
  *
- * 主要な設計判断 (2026/5/14):
- *   - staffs ドキュメント ID は 'owner' 固定 (メモリ#22準拠)
- *   - firestore.rules の isSalonStaff() は isSalonOwner() 代用に修正済み
- *     (Auth UID == salonId 判定)。requireSalonStaff もこれに合わせた。
- *   - 予約の staffId フィールド値は 'owner' (Functions が確定するのでクライアントは送らない)
- *   - 顧客作成時 email 必須 (ルール 175-176 行)
- *   - 予約作成時 createdAt はクライアントから送らない (Functions に任せる)
- *
- * ES5 互換:
- *   - var / function / Promise.then のみ
- *   - const / let / アロー関数 / async-await / テンプレートリテラル / ?. は全て禁止
- *
- * コールバック規約:
- *   - 全関数 cb(result) 形式
- *   - 成功時: result = データ または true
- *   - 失敗時: result = null (console.error にログ)
- *   - getCurrentSalonId 等の同期関数のみ例外
- *
- * Firebase SDK 前提:
- *   - firebase-app-compat / firebase-auth-compat / firebase-firestore-compat
- *   - グローバル window.firebase が存在する compat 版で動作
+ * ES5 互換: var / function / Promise.then のみ
  */
 
 (function () {
-
-  // ============================================================
-  // 内部状態
-  // ============================================================
 
   var _fbReady = false;
   var _readyCallbacks = [];
   var _urlSalonId = null;
 
-  // ============================================================
-  // URL パラメータ ?salon=xxx 解析 (即時実行)
-  // ============================================================
-
   function _parseUrlSalonId() {
     try {
       var qs = window.location.search || '';
-      if (qs.charAt(0) === '?') {
-        qs = qs.substring(1);
-      }
-      if (!qs) {
-        return null;
-      }
+      if (qs.charAt(0) === '?') { qs = qs.substring(1); }
+      if (!qs) { return null; }
       var pairs = qs.split('&');
       var i;
       for (i = 0; i < pairs.length; i++) {
@@ -71,22 +40,11 @@
   }
   _urlSalonId = _parseUrlSalonId();
 
-  // ============================================================
-  // getCurrentSalonId / getCurrentUserUid (設計書 5-2: 単一定義)
-  //
-  // 優先順位: URL ?salon=xxx  →  Auth UID  →  null
-  // HTML 側は絶対にこの関数を上書きしないこと。
-  // ============================================================
-
   function getCurrentSalonId() {
-    if (_urlSalonId) {
-      return _urlSalonId;
-    }
+    if (_urlSalonId) { return _urlSalonId; }
     if (window.firebase && firebase.auth) {
       var u = firebase.auth().currentUser;
-      if (u && u.uid) {
-        return u.uid;
-      }
+      if (u && u.uid) { return u.uid; }
     }
     return null;
   }
@@ -95,21 +53,11 @@
   function getCurrentUserUid() {
     if (window.firebase && firebase.auth) {
       var u = firebase.auth().currentUser;
-      if (u && u.uid) {
-        return u.uid;
-      }
+      if (u && u.uid) { return u.uid; }
     }
     return null;
   }
   window.getCurrentUserUid = getCurrentUserUid;
-
-  // ============================================================
-  // onFbReady / isFbReady
-  //
-  // Firebase SDK ロード直後は currentUser が null なので、
-  // onAuthStateChanged が 1 度発火するまで _fbReady=true にしない。
-  // 各画面は必ず onFbReady(function(){ ... }) でラップして処理を開始する。
-  // ============================================================
 
   function _initFirebaseReady() {
     if (!window.firebase || !firebase.auth) {
@@ -123,11 +71,8 @@
         _readyCallbacks = [];
         var i;
         for (i = 0; i < cbs.length; i++) {
-          try {
-            cbs[i]();
-          } catch (e) {
-            console.error('[shared_db] onFbReady cb error', e);
-          }
+          try { cbs[i](); }
+          catch (e) { console.error('[shared_db] onFbReady cb error', e); }
         }
       }
     });
@@ -135,37 +80,21 @@
   _initFirebaseReady();
 
   function onFbReady(cb) {
-    if (typeof cb !== 'function') {
-      return;
-    }
+    if (typeof cb !== 'function') { return; }
     if (_fbReady) {
-      try {
-        cb();
-      } catch (e) {
-        console.error('[shared_db] onFbReady cb error', e);
-      }
+      try { cb(); }
+      catch (e) { console.error('[shared_db] onFbReady cb error', e); }
     } else {
       _readyCallbacks.push(cb);
     }
   }
   window.onFbReady = onFbReady;
 
-  function isFbReady() {
-    return _fbReady;
-  }
+  function isFbReady() { return _fbReady; }
   window.isFbReady = isFbReady;
 
-  // ============================================================
-  // 内部ヘルパー
-  // ============================================================
+  function _db() { return firebase.firestore(); }
 
-  function _db() {
-    return firebase.firestore();
-  }
-
-  // ★ カルテ写真用 Storage ヘルパー（v8.1+ C-9）
-  //   使用画面は <script src="firebase-storage-compat.js"> の追加が必要
-  //   firebase.storage() が無ければ null を返す（写真機能 OFF 相当）
   function _storage() {
     if (!firebase.storage) {
       console.warn('[shared_db] firebase.storage が未ロード。'
@@ -179,11 +108,6 @@
     return firebase.firestore.FieldValue.serverTimestamp();
   }
 
-  // ★ Cloud Functions ヘルパー（v8.1+ D-step3）
-  //   使用画面は <script src="firebase-functions-compat.js"> の追加が必要。
-  //   firebase.functions が無ければ null を返す（呼び出し側でエラー扱い）。
-  //   リージョンは asia-northeast1 固定（メモリ#環境情報）。
-  //   resolveOrClaimCustomer など callable Function を呼ぶために使う。
   function _functions() {
     if (!firebase.functions) {
       console.warn('[shared_db] firebase.functions が未ロード。'
@@ -199,41 +123,15 @@
 
   function _salonRef() {
     var sid = getCurrentSalonId();
-    if (!sid) {
-      return null;
-    }
+    if (!sid) { return null; }
     return _db().collection('salons').doc(sid);
   }
 
-  // ------------------------------------------------------------
-  // _safeCb : コールバックを安全に呼ぶ共通ヘルパー（可変長対応）
-  //
-  // 【2026/5/28 D-step3 で可変長化】
-  //   旧実装は function _safeCb(cb, value) で「1引数しか運べない」
-  //   設計だった。C-9 写真機能事故（2026/5/24）の根本原因は、
-  //   cb(err, photoObj) のように2引数返したい箇所で第2引数が
-  //   捨てられていたこと。
-  //   ここを可変長対応にすることで、
-  //     _safeCb(cb)              -> cb()
-  //     _safeCb(cb, value)       -> cb(value)          ←既存呼び出しは後方互換
-  //     _safeCb(cb, err, photo)  -> cb(err, photo)     ←2引数以上も透過
-  //   が全て正しく動く。既存125箇所はノータッチで動作する。
-  //
-  //   【方針（GPTレビュー反映）】
-  //   ・新規 dbCustomer* など新しいコードは Node 流儀 cb(err, value) に寄せる
-  //   ・既存の1引数API（cb(data) / cb(null)）はそのまま維持
-  //   ・upload/auth/transaction 等の重要関数は、必要に応じて
-  //     関数内ローカル callCb を併用してよい（ログや補助処理を挟むため）
-  //   ・_safeCb はインフラ、ローカル callCb は業務ロジック専用、という住み分け
-  // ------------------------------------------------------------
   function _safeCb(cb /*, ...args */) {
     if (typeof cb === 'function') {
       var args = Array.prototype.slice.call(arguments, 1);
-      try {
-        cb.apply(null, args);
-      } catch (e) {
-        console.error('[shared_db] cb error', e);
-      }
+      try { cb.apply(null, args); }
+      catch (e) { console.error('[shared_db] cb error', e); }
     }
   }
 
@@ -243,75 +141,32 @@
     console.error('[shared_db] ' + label + ' failed:', code, msg);
   }
 
-  // ============================================================
-  // requireSalonStaff / requireCustomerAuth
-  //
-  // 各画面が「自分が読み書きできる立場か」を確認するヘルパー。
-  // 実際の権限制御は Firestore Rules が行うが、これはクライアント側で
-  // 「無駄なリクエストを送る前に弾く」「画面遷移を制御する」ために使う。
-  // ============================================================
-
-  // ログイン中ユーザが現在の salonId のスタッフか
-  // ------------------------------------------------------------
-  // 【2026/5/14 owner固定方式】判定: Auth UID == salonId
-  //   firestore.rules の isSalonStaff() が isSalonOwner() 代用に
-  //   修正されたため、クライアント側も同じロジックに揃える。
-  //   フェーズ1はスタッフ=オーナー1人なので UID==salonId で正しい。
-  //   旧実装は staffs/{Auth UID} を exists で見ていたが、staffs の
-  //   ドキュメントID が 'owner' 固定になったため永遠に false になる
-  //   バグがあった。exists() の Firestore 読み取り(1read課金)も削減。
-  //   フェーズ2で複数スタッフ対応時、staffs/{Auth UID} の get() に戻す。
-  // ------------------------------------------------------------
   function requireSalonStaff(cb) {
     onFbReady(function () {
       var uid = getCurrentUserUid();
       var sid = getCurrentSalonId();
-      if (!uid || !sid) {
-        _safeCb(cb, false);
-        return;
-      }
+      if (!uid || !sid) { _safeCb(cb, false); return; }
       _safeCb(cb, uid === sid);
     });
   }
   window.requireSalonStaff = requireSalonStaff;
 
-  // ログイン中ユーザが顧客 (メール認証済み) か
-  // 判定: ログイン済み かつ emailVerified == true
   function requireCustomerAuth(cb) {
     onFbReady(function () {
-      if (!window.firebase || !firebase.auth) {
-        _safeCb(cb, false);
-        return;
-      }
+      if (!window.firebase || !firebase.auth) { _safeCb(cb, false); return; }
       var u = firebase.auth().currentUser;
-      if (!u) {
-        _safeCb(cb, false);
-        return;
-      }
-      if (u.emailVerified !== true) {
-        _safeCb(cb, false);
-        return;
-      }
+      if (!u) { _safeCb(cb, false); return; }
+      if (u.emailVerified !== true) { _safeCb(cb, false); return; }
       _safeCb(cb, true);
     });
   }
   window.requireCustomerAuth = requireCustomerAuth;
 
-  // ============================================================
-  // 抽象化レイヤ (将来 onSnapshot に差し替え可能)
-  //
-  // 各画面は直接 firebase.firestore() を呼ばず、できるだけここを通す。
-  // フェーズ 2 でリアルタイム同期に切り替えるとき、ここだけ書き換えれば済む。
-  // ============================================================
-
   function dbReadDoc(path, cb) {
     onFbReady(function () {
       _db().doc(path).get()
         .then(function (snap) {
-          if (!snap.exists) {
-            _safeCb(cb, null);
-            return;
-          }
+          if (!snap.exists) { _safeCb(cb, null); return; }
           var data = snap.data();
           data._id = snap.id;
           _safeCb(cb, data);
@@ -324,15 +179,13 @@
   }
   window.dbReadDoc = dbReadDoc;
 
-  // queryBuilder は省略可。あれば function(colRef){ return colRef.where(...).orderBy(...) } の形
   function dbReadCollection(path, queryBuilder, cb) {
     onFbReady(function () {
       var ref = _db().collection(path);
       var q = ref;
       if (typeof queryBuilder === 'function') {
-        try {
-          q = queryBuilder(ref);
-        } catch (e) {
+        try { q = queryBuilder(ref); }
+        catch (e) {
           _logErr('dbReadCollection queryBuilder', e);
           _safeCb(cb, null);
           return;
@@ -396,9 +249,7 @@
   function dbAddDoc(collectionPath, data, cb) {
     onFbReady(function () {
       _db().collection(collectionPath).add(data)
-        .then(function (ref) {
-          _safeCb(cb, { _id: ref.id });
-        })
+        .then(function (ref) { _safeCb(cb, { _id: ref.id }); })
         .catch(function (err) {
           _logErr('dbAddDoc(' + collectionPath + ')', err);
           _safeCb(cb, null);
@@ -407,14 +258,6 @@
   }
   window.dbAddDoc = dbAddDoc;
 
-  // ============================================================
-  // サロン側 CRUD  (dbSalon*)
-  //
-  // ログイン中のサロンスタッフが操作する想定。
-  // 各関数は内部で getCurrentSalonId() を取得して使う。
-  // ============================================================
-
-  // サロン本体ドキュメント (salons/{salonId}) を取得
   function dbSalonGetInfo(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -422,19 +265,14 @@
   }
   window.dbSalonGetInfo = dbSalonGetInfo;
 
-  // サロン本体ドキュメントを更新 (email は変更不可: ルール 62 行)
   function dbSalonUpdateInfo(patch, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
-    // email 変更はルールで弾かれるが、念のためクライアント側でも防ぐ
-    if (patch && patch.hasOwnProperty('email')) {
-      delete patch.email;
-    }
+    if (patch && patch.hasOwnProperty('email')) { delete patch.email; }
     dbUpdateDoc('salons/' + sid, patch, cb);
   }
   window.dbSalonUpdateInfo = dbSalonUpdateInfo;
 
-  // config 取得 (settings / cancelPolicy / stampCard など)
   function dbSalonGetConfig(configId, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -442,7 +280,6 @@
   }
   window.dbSalonGetConfig = dbSalonGetConfig;
 
-  // config 設定 (merge:true で部分更新)
   function dbSalonSetConfig(configId, data, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -450,11 +287,6 @@
   }
   window.dbSalonSetConfig = dbSalonSetConfig;
 
-  // 顧客一覧
-  // 顧客一覧。★ v8.1: 統合済み（isMerged==true）カルテは
-  //   soft delete されているので一覧から除外する（v8.1 3-4）。
-  //   取得後にクライアント側でフィルタ（Firestore の != クエリは
-  //   インデックス制約が厳しいため、取得後フィルタが安全）
   function dbSalonListCustomers(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -471,16 +303,6 @@
   }
   window.dbSalonListCustomers = dbSalonListCustomers;
 
-  // 顧客 1 件取得
-  // ★ v8.1 新規: サロン側顧客登録（電話・店頭予約客をサロンが登録）
-  //   DESIGN.md 3-3 customers 作成(a)サロン分岐と1対1:
-  //     authUid=null 必須 / createdSource='salon' 必須
-  //     ホワイトリスト: name,phone,email,authUid,createdSource,
-  //       notifyChannels,isMerged,mergedInto,mergedAt,
-  //       mergedAliases,createdAt
-  //   customerDocId は Firestore 自動採番（add）。
-  //   後でこの顧客がアプリ登録した時、claim Function が
-  //   email 一致で authUid を後付けする（v8.1 2-3/2-4）。
   function dbSalonCreateCustomer(data, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -489,7 +311,6 @@
       _safeCb(cb, null);
       return;
     }
-
     var notifyChannels;
     if (data.notifyChannels && typeof data.notifyChannels === 'object') {
       notifyChannels = {
@@ -499,14 +320,12 @@
     } else {
       notifyChannels = { email: false, line: false };
     }
-
-    // ホワイトリストに厳密準拠したドキュメント（ルールと1対1）
     var doc = {
       name: String(data.name),
       phone: data.phone ? String(data.phone) : '',
       email: data.email ? String(data.email) : '',
-      authUid: null,                 // サロン登録は必ず null
-      createdSource: 'salon',        // 必ず 'salon'
+      authUid: null,
+      createdSource: 'salon',
       notifyChannels: notifyChannels,
       isMerged: false,
       mergedInto: null,
@@ -514,8 +333,6 @@
       mergedAliases: [],
       createdAt: _serverTimestamp()
     };
-
-    // 自動採番 ID で作成（add）。customerDocId は Firestore が採番
     dbAddDoc('salons/' + sid + '/customers', doc, cb);
   }
   window.dbSalonCreateCustomer = dbSalonCreateCustomer;
@@ -527,11 +344,6 @@
   }
   window.dbSalonGetCustomer = dbSalonGetCustomer;
 
-  // 顧客更新 (memo / stampCount / lastVisit / totalSpent などスタッフ専用)
-  // ★ v8.1: Firestoreルール 3-3 customers と1対1。クライアントから
-  //   書けないフィールド（Function=admin 専用）を patch から除外する:
-  //   lineUserId / authUid / isMerged / mergedInto / mergedAt /
-  //   mergedAliases / createdSource / lockedByJob
   function dbSalonUpdateCustomer(customerDocId, patch, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !customerDocId) { _safeCb(cb, null); return; }
@@ -542,9 +354,7 @@
       ];
       var i;
       for (i = 0; i < _protected.length; i++) {
-        if (patch.hasOwnProperty(_protected[i])) {
-          delete patch[_protected[i]];
-        }
+        if (patch.hasOwnProperty(_protected[i])) { delete patch[_protected[i]]; }
       }
       patch.updatedAt = _serverTimestamp();
     }
@@ -552,8 +362,6 @@
   }
   window.dbSalonUpdateCustomer = dbSalonUpdateCustomer;
 
-  // 顧客削除 (オーナーのみ。通常運用は soft delete を推奨だが、
-  //  物理削除 API はルール上オーナーに許可されているため残す)
   function dbSalonDeleteCustomer(customerDocId, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !customerDocId) { _safeCb(cb, null); return; }
@@ -563,56 +371,23 @@
 
   // ------------------------------------------------------------
   // Phase B-8: サロン側 顧客詳細の来店履歴 (current + archive 統合)
-  //
-  // 設計準拠:
-  //   - DESIGN.md v6 セクション 7 Phase B B-8
-  //     「顧客履歴 / 顧客詳細画面は appointments(current) と
-  //       appointments_archive の両方を読みに行く」
-  //   - DESIGN_NOTES.md 項目7:
-  //       原設計の「6ヶ月 / 月次バッチ」は早すぎるため
-  //       「18ヶ月 / 半年に1回バッチ」に修正済み。
-  //       なお appointments → appointments_archive へ移す
-  //       Cloud Functions バッチ自体は後回し (今回方針)。
-  //       今は「読む側」だけ両対応にしておき、将来バッチを足しても
-  //       このAPIを一切変えずに済むようにする (設計書 0-2 の指針)。
-  //
-  //   dbLoadCustomerHistory (B-1) は「顧客本人が自分の履歴を見る」用。
-  //   こちらは「サロンスタッフが特定顧客の来店履歴を見る」用 (顧客詳細画面)。
-  //   firestore.rules: appointments / appointments_archive とも
-  //   read は isSalonStaff(salonId) で許可済み (A-step1, 360-365行)。
-  //
-  //   B-6: customerDocId == 指定顧客で絞り、dateKey 降順 + limit。
-  //        全件 get() しない。
-  //
-  //   戻り値: { current:[...], archive:[...], merged:[...],
-  //             upcoming:[...], visits:[...], excluded:[...] }
-  //     merged   : 全件 dateKey 降順 (後方互換)
-  //     ★ 2026/5/23 追加分類 (DESIGN.md C-9 改訂 と1対1)：
-  //     upcoming : status=='confirmed' && endAt(or end時刻) >= 今
-  //                （今後の予約セクション用）
-  //     visits   : status=='visited' OR
-  //                (status=='confirmed' && endAt < 今)
-  //                （来店履歴セクション用・統計の対象）
-  //     excluded : status=='cancelled' / 'no_show' / 'pendingCreate'
-  //                （表示しない・統計の対象外）
+  //   戻り値: { current, archive, merged, upcoming, visits, excluded }
   // ------------------------------------------------------------
   function dbSalonGetCustomerHistory(customerDocId, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !customerDocId) { _safeCb(cb, null); return; }
 
-    var HISTORY_LIMIT = 100; // サロン側は本人画面より多めに見たい
+    var HISTORY_LIMIT = 100;
 
     function _queryCust(col) {
       // ★ v8.1: 予約は customerDocId を持つ（旧 customerId 廃止）
-      // ★ 2026/5/24: orderBy を外して複合インデックス不要に。
-      //   メモリ#26「販売前必須対処：Firestore 初回遅延問題」と関連。
-      //   復活させる時は Firebase Console で
-      //   (customerDocId Asc, dateKey Desc) の複合インデックスを
-      //   appointments / appointments_archive 両方に明示作成すること。
-      //   取得後に merged 配列でクライアントソート済みなので
-      //   並び順は変わらない。limit はランダム100件取得になるが
-      //   1人サロン1顧客の予約は実用上100件未満なので当面OK。
+      // ★ 2026/6/2 F-3: 複合インデックス (customerDocId Asc, dateKey Desc)
+      //   が appointments / appointments_archive 両方に作成・有効化された
+      //   ため、暫定で外していた orderBy を復活。
+      //   limit(100) が「新しい順100件」になる（旧: 順序不定100件）。
+      //   取得後の merged.sort は current+archive 統合の最終並び保証として残す。
       return col.where('customerDocId', '==', customerDocId)
+                .orderBy('dateKey', 'desc')
                 .limit(HISTORY_LIMIT);
     }
 
@@ -633,10 +408,7 @@
           dbReadCollection(
             'salons/' + sid + '/appointments_archive',
             _queryCust,
-            function (v) {
-              // archive がまだ無い / 空でも [] に正規化
-              done(v || []);
-            }
+            function (v) { done(v || []); }
           );
         }
       }
@@ -659,8 +431,6 @@
         return (ak < bk) ? 1 : -1;
       });
 
-      // ★ 2026/5/23 追加：今後の予約 / 来店履歴 / 除外 に分類
-      //   DESIGN.md C-9 改訂仕様と1対1
       var nowMs = Date.now();
       var upcoming = [];
       var visits = [];
@@ -674,24 +444,12 @@
           excluded.push(a);
           continue;
         }
-        if (st === 'visited') {
-          // 明示的に visited にされた → 必ず来店履歴
-          visits.push(a);
-          continue;
-        }
-        // status === 'confirmed' を時間で自動分類
-        // 判定優先順位: endAt (Timestamp) → dateKey + end (HH:MM) → dateKey 末
+        if (st === 'visited') { visits.push(a); continue; }
         var endMs = _calcEndMs(a);
-        if (endMs == null) {
-          // 終了時刻不明 → 安全側として upcoming 扱い
-          upcoming.push(a);
-        } else if (endMs >= nowMs) {
-          upcoming.push(a);
-        } else {
-          visits.push(a);
-        }
+        if (endMs == null) { upcoming.push(a); }
+        else if (endMs >= nowMs) { upcoming.push(a); }
+        else { visits.push(a); }
       }
-      // upcoming は時系列昇順 (近い予定が先頭)
       upcoming.sort(function (a, b) {
         var ak = a.dateKey || '';
         var bk = b.dateKey || '';
@@ -703,7 +461,6 @@
         }
         return (ak < bk) ? -1 : 1;
       });
-      // visits は時系列降順 (新しい来店が先頭)
       visits.sort(function (a, b) {
         var ak = a.dateKey || '';
         var bk = b.dateKey || '';
@@ -728,14 +485,11 @@
   }
   window.dbSalonGetCustomerHistory = dbSalonGetCustomerHistory;
 
-  // 予約終了時刻を ms で算出（endAt > end > dateKey 末の順で評価）
   function _calcEndMs(a) {
     if (!a) { return null; }
-    // 1. Firestore Timestamp の endAt
     if (a.endAt && typeof a.endAt.toMillis === 'function') {
       return a.endAt.toMillis();
     }
-    // 2. dateKey + end "HH:MM"
     if (a.dateKey && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(a.dateKey)
         && a.end && /^[0-9]{2}:[0-9]{2}$/.test(a.end)) {
       var p = a.dateKey.split('-');
@@ -747,7 +501,6 @@
                          parseInt(t[1], 10));
       return dt.getTime();
     }
-    // 3. dateKey の終わり (23:59) で代用
     if (a.dateKey && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(a.dateKey)) {
       var p2 = a.dateKey.split('-');
       var dt2 = new Date(parseInt(p2[0], 10),
@@ -759,26 +512,11 @@
     return null;
   }
 
-  // ============================================================
-  // サロン側メニュー API
-  // DESIGN.md 0-2 menus スキーマ / 3-3 menus ルールと1対1。
-  // フィールドホワイトリスト:
-  //   name,duration,price,type,public,eligibleStaffIds,
-  //   requiredResourceIds,
-  //   description,contraindications,photoUrl,sortOrder,createdAt
-  // ★ v8.1: intervalBefore/intervalAfter は廃止。
-  //   インターバルはサロン共通設定 settings.intervalMin に1本化
-  //   （メニュー単位ではなく全予約に自動付与・後から変更可）
-  // フェーズ1ではeligibleStaffIds=['owner'], requiredResourceIds=['default']固定
-  // ============================================================
-
-  // メニュー一覧（サロン側：public/非公開 両方取得、sortOrder順）
   function dbSalonListMenus(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
     dbReadCollection('salons/' + sid + '/menus', null, function (list) {
       if (!list) { _safeCb(cb, null); return; }
-      // sortOrder 昇順、未設定は末尾、同値は name 昇順で安定化
       list.sort(function (a, b) {
         var ao = (typeof a.sortOrder === 'number') ? a.sortOrder : 999999;
         var bo = (typeof b.sortOrder === 'number') ? b.sortOrder : 999999;
@@ -793,7 +531,6 @@
   }
   window.dbSalonListMenus = dbSalonListMenus;
 
-  // メニュー単体取得
   function dbSalonGetMenu(menuId, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !menuId) { _safeCb(cb, null); return; }
@@ -801,11 +538,6 @@
   }
   window.dbSalonGetMenu = dbSalonGetMenu;
 
-  // メニュー作成（DESIGN.md 3-3 menus 作成ホワイトリスト1対1）
-  // data: { name, duration, price, type, public,
-  //         description?, contraindications?, sortOrder? }
-  // eligibleStaffIds/requiredResourceIds はフェーズ1固定値を自動付与
-  // ★ v8.1: メニュー単位 interval は廃止（settings.intervalMin に1本化）
   function dbSalonCreateMenu(data, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -813,7 +545,6 @@
       console.error('[shared_db] dbSalonCreateMenu: name is required');
       _safeCb(cb, null); return;
     }
-
     var dur = parseInt(data.duration, 10);
     if (isNaN(dur) || dur <= 0) {
       console.error('[shared_db] dbSalonCreateMenu: duration must be > 0');
@@ -821,49 +552,37 @@
     }
     var pr = parseInt(data.price, 10);
     if (isNaN(pr) || pr < 0) { pr = 0; }
-
     var typ = (data.type === 'option') ? 'option' : 'main';
-    var pub = (data.public !== false);  // 既定 true
-
+    var pub = (data.public !== false);
     var doc = {
       name: String(data.name),
       duration: dur,
       price: pr,
       type: typ,
       public: pub,
-      eligibleStaffIds: ['owner'],     // フェーズ1固定
-      requiredResourceIds: ['default'], // フェーズ1固定
+      eligibleStaffIds: ['owner'],
+      requiredResourceIds: ['default'],
       createdAt: _serverTimestamp()
     };
     if (data.description) { doc.description = String(data.description); }
-    if (data.contraindications) {
-      doc.contraindications = String(data.contraindications);
-    }
+    if (data.contraindications) { doc.contraindications = String(data.contraindications); }
     if (data.photoUrl) { doc.photoUrl = String(data.photoUrl); }
     if (typeof data.sortOrder === 'number' && data.sortOrder >= 0) {
       doc.sortOrder = parseInt(data.sortOrder, 10);
     }
-
     dbAddDoc('salons/' + sid + '/menus', doc, cb);
   }
   window.dbSalonCreateMenu = dbSalonCreateMenu;
 
-  // メニュー更新。createdAt/eligibleStaffIds/requiredResourceIds は
-  // クライアント書込みから除外（フェーズ1固定値・サーバ管理）
   function dbSalonUpdateMenu(menuId, patch, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !menuId) { _safeCb(cb, null); return; }
     if (patch) {
-      var _protected = [
-        'createdAt', 'eligibleStaffIds', 'requiredResourceIds'
-      ];
+      var _protected = ['createdAt', 'eligibleStaffIds', 'requiredResourceIds'];
       var i;
       for (i = 0; i < _protected.length; i++) {
-        if (patch.hasOwnProperty(_protected[i])) {
-          delete patch[_protected[i]];
-        }
+        if (patch.hasOwnProperty(_protected[i])) { delete patch[_protected[i]]; }
       }
-      // 型の最低限の正規化
       if (patch.hasOwnProperty('duration')) {
         var d = parseInt(patch.duration, 10);
         if (isNaN(d) || d <= 0) { delete patch.duration; }
@@ -892,10 +611,6 @@
   }
   window.dbSalonUpdateMenu = dbSalonUpdateMenu;
 
-  // メニュー削除（オーナーのみ）。
-  // 注意：過去予約は menuNameSnapshot 等を持っているので参照不能には
-  //   ならないが、将来の予約導線から外したいだけなら public:false を
-  //   推奨。物理削除する場合のみこれを使う。
   function dbSalonDeleteMenu(menuId, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !menuId) { _safeCb(cb, null); return; }
@@ -903,9 +618,6 @@
   }
   window.dbSalonDeleteMenu = dbSalonDeleteMenu;
 
-  // 並び替え用：複数メニューの sortOrder を一括更新
-  // orderList: [{ _id: 'm1', sortOrder: 0 }, { _id: 'm2', sortOrder: 1 }, ...]
-  // 1件ずつ dbUpdateDoc を順次実行（数件程度の想定・分割バッチ不要）
   function dbSalonReorderMenus(orderList, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !orderList || orderList.length === 0) {
@@ -935,47 +647,25 @@
   }
   window.dbSalonReorderMenus = dbSalonReorderMenus;
 
-  // ============================================================
-  // サロン共通設定 API（営業時間・インターバル等）
-  // パス: salons/{salonId}/config/settings
-  // DESIGN.md 0-2 サロン共通設定スキーマと1対1。
-  // ★ v8.1: intervalMin はここで管理（メニュー単位の interval は廃止）
-  // ============================================================
-
-  // 設定取得。未作成なら null ではなく既定値を返して画面側を簡単にする
   function dbGetSettings(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, _defaultSettings()); return; }
     dbReadDoc('salons/' + sid + '/config/settings', function (doc) {
-      if (!doc) {
-        // 未作成は既定値（初回起動時の挙動）
-        _safeCb(cb, _defaultSettings());
-        return;
-      }
-      // 既定値をベースに既存値で上書き（部分保存にも耐える）
+      if (!doc) { _safeCb(cb, _defaultSettings()); return; }
       var base = _defaultSettings();
       var k;
-      for (k in doc) {
-        if (doc.hasOwnProperty(k)) { base[k] = doc[k]; }
-      }
+      for (k in doc) { if (doc.hasOwnProperty(k)) { base[k] = doc[k]; } }
       _safeCb(cb, base);
     });
   }
   window.dbGetSettings = dbGetSettings;
 
-  // 設定保存（set merge:true で部分更新可）
-  // settings: { openTime, closeTime, intervalMin, intervalInClose,
-  //             slotMin, closedDows, weeklyClose, bookingWeeks,
-  //             lastMin, deadline }
-  // 戻り値 cb(err): 成功時 null、失敗時 Error 相当の真値
   function dbSaveSettings(settings, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, new Error('no salon')); return; }
     if (!settings || typeof settings !== 'object') {
-      _safeCb(cb, new Error('invalid settings'));
-      return;
+      _safeCb(cb, new Error('invalid settings')); return;
     }
-    // 型の最低限の正規化
     var doc = {};
     if (typeof settings.openTime === 'string')  { doc.openTime  = settings.openTime; }
     if (typeof settings.closeTime === 'string') { doc.closeTime = settings.closeTime; }
@@ -1009,37 +699,20 @@
     if (typeof settings.lastMin === 'string')  { doc.lastMin = settings.lastMin; }
     if (typeof settings.deadline === 'string') { doc.deadline = settings.deadline; }
     doc.updatedAt = _serverTimestamp();
-
     dbWriteDoc('salons/' + sid + '/config/settings', doc, true,
-      function (ok) {
-        _safeCb(cb, ok ? null : new Error('save failed'));
-      });
+      function (ok) { _safeCb(cb, ok ? null : new Error('save failed')); });
   }
   window.dbSaveSettings = dbSaveSettings;
 
-  // 既定設定（初回起動時の表示用）
   function _defaultSettings() {
     return {
-      openTime: '10:00',
-      closeTime: '19:00',
-      intervalMin: 30,
-      intervalInClose: false,
-      slotMin: 30,
-      closedDows: [],
-      weeklyClose: [],
-      bookingWeeks: 8,
-      lastMin: 'same1h',
+      openTime: '10:00', closeTime: '19:00', intervalMin: 30,
+      intervalInClose: false, slotMin: 30, closedDows: [],
+      weeklyClose: [], bookingWeeks: 8, lastMin: 'same1h',
       deadline: '前日まで'
     };
   }
 
-  // ============================================================
-  // キャンセル規定 API（cancelPolicy）
-  // パス: salons/{salonId}/config/cancelPolicy
-  // DESIGN.md 0-2 キャンセル規定スキーマと1対1
-  // ============================================================
-
-  // 取得。未作成なら既定値を返す（初回起動時の挙動）
   function dbGetCancelPolicy(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, _defaultCancelPolicy()); return; }
@@ -1047,51 +720,35 @@
       if (!doc) { _safeCb(cb, _defaultCancelPolicy()); return; }
       var base = _defaultCancelPolicy();
       var k;
-      for (k in doc) {
-        if (doc.hasOwnProperty(k)) { base[k] = doc[k]; }
-      }
+      for (k in doc) { if (doc.hasOwnProperty(k)) { base[k] = doc[k]; } }
       _safeCb(cb, base);
     });
   }
   window.dbGetCancelPolicy = dbGetCancelPolicy;
 
-  // 保存（set merge:true で部分更新）
-  // policy: { text, rates[], showOnBook, showOnCancel, qrUrl, qrMsg }
-  // 戻り値 cb(err): 成功 null / 失敗 Error 相当
   function dbSaveCancelPolicy(policy, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, new Error('no salon')); return; }
     if (!policy || typeof policy !== 'object') {
-      _safeCb(cb, new Error('invalid policy'));
-      return;
+      _safeCb(cb, new Error('invalid policy')); return;
     }
     var doc = {};
     if (typeof policy.text === 'string')  { doc.text  = policy.text; }
     if (typeof policy.qrUrl === 'string') { doc.qrUrl = policy.qrUrl; }
     if (typeof policy.qrMsg === 'string') { doc.qrMsg = policy.qrMsg; }
-    if (typeof policy.showOnBook === 'boolean') {
-      doc.showOnBook = policy.showOnBook;
-    }
-    if (typeof policy.showOnCancel === 'boolean') {
-      doc.showOnCancel = policy.showOnCancel;
-    }
+    if (typeof policy.showOnBook === 'boolean') { doc.showOnBook = policy.showOnBook; }
+    if (typeof policy.showOnCancel === 'boolean') { doc.showOnCancel = policy.showOnCancel; }
     if (Array.isArray(policy.rates)) {
       doc.rates = policy.rates.map(function (r) {
         var p = parseInt(r.percent, 10);
         if (isNaN(p) || p < 0) { p = 0; }
         if (p > 100) { p = 100; }
-        return {
-          label: String(r.label || ''),
-          percent: p
-        };
+        return { label: String(r.label || ''), percent: p };
       });
     }
     doc.updatedAt = _serverTimestamp();
-
     dbWriteDoc('salons/' + sid + '/config/cancelPolicy', doc, true,
-      function (ok) {
-        _safeCb(cb, ok ? null : new Error('save failed'));
-      });
+      function (ok) { _safeCb(cb, ok ? null : new Error('save failed')); });
   }
   window.dbSaveCancelPolicy = dbSaveCancelPolicy;
 
@@ -1104,22 +761,10 @@
         { label: '当日',      percent: 100 },
         { label: '無断キャンセル', percent: 100 }
       ],
-      showOnBook: true,
-      showOnCancel: true,
-      qrUrl: '',
-      qrMsg: ''
+      showOnBook: true, showOnCancel: true, qrUrl: '', qrMsg: ''
     };
   }
 
-  // ============================================================
-  // スタンプカード API（stampCard）
-  // パス: salons/{salonId}/config/stampCard
-  // DESIGN.md 0-2 スタンプカードスキーマと1対1
-  // ※ スタンプの「個数」は customers.stampCount にあり、
-  //   このドキュメントは「カードの仕様」のみ保持
-  // ============================================================
-
-  // 取得。未作成なら既定値を返す
   function dbGetStampCard(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, _defaultStampCard()); return; }
@@ -1127,27 +772,20 @@
       if (!doc) { _safeCb(cb, _defaultStampCard()); return; }
       var base = _defaultStampCard();
       var k;
-      for (k in doc) {
-        if (doc.hasOwnProperty(k)) { base[k] = doc[k]; }
-      }
+      for (k in doc) { if (doc.hasOwnProperty(k)) { base[k] = doc[k]; } }
       _safeCb(cb, base);
     });
   }
   window.dbGetStampCard = dbGetStampCard;
 
-  // 保存（set merge:true）
-  // policy: { enabled, goal, reward, bonusStamps[], color, expiry }
   function dbSaveStampCard(policy, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, new Error('no salon')); return; }
     if (!policy || typeof policy !== 'object') {
-      _safeCb(cb, new Error('invalid policy'));
-      return;
+      _safeCb(cb, new Error('invalid policy')); return;
     }
     var doc = {};
-    if (typeof policy.enabled === 'boolean') {
-      doc.enabled = policy.enabled;
-    }
+    if (typeof policy.enabled === 'boolean') { doc.enabled = policy.enabled; }
     if (policy.goal != null) {
       var g = parseInt(policy.goal, 10);
       if (!isNaN(g) && g >= 1 && g <= 100) { doc.goal = g; }
@@ -1162,36 +800,22 @@
       doc.bonusStamps = policy.bonusStamps.map(function (b) {
         var at = parseInt(b.at, 10);
         if (isNaN(at) || at < 1) { at = 1; }
-        return {
-          at: at,
-          reward: String(b.reward || '')
-        };
+        return { at: at, reward: String(b.reward || '') };
       });
     }
     doc.updatedAt = _serverTimestamp();
-
     dbWriteDoc('salons/' + sid + '/config/stampCard', doc, true,
-      function (ok) {
-        _safeCb(cb, ok ? null : new Error('save failed'));
-      });
+      function (ok) { _safeCb(cb, ok ? null : new Error('save failed')); });
   }
   window.dbSaveStampCard = dbSaveStampCard;
 
   function _defaultStampCard() {
     return {
-      enabled: false,
-      goal: 10,
-      reward: '',
-      bonusStamps: [],
-      color: '#b5845a',
-      expiry: 'none'
+      enabled: false, goal: 10, reward: '', bonusStamps: [],
+      color: '#b5845a', expiry: 'none'
     };
   }
 
-  // 予約一覧
-  // filterObj: { dateKey: '2026-05-14' } のように指定可能 (任意)
-  //            指定なしなら全件
-  // 注: 大量取得を避けるため、画面側で必ず日付や status などを指定すること
   function dbSalonListAppointments(filterObj, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -1208,7 +832,6 @@
         q = q.where('status', '==', filterObj.status);
       }
       if (filterObj && filterObj.customerDocId) {
-        // ★ v8.1: customerId → customerDocId
         q = q.where('customerDocId', '==', filterObj.customerDocId);
       }
       return q;
@@ -1216,7 +839,6 @@
   }
   window.dbSalonListAppointments = dbSalonListAppointments;
 
-  // 予約 1 件取得
   function dbSalonGetAppointment(appointmentId, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !appointmentId) { _safeCb(cb, null); return; }
@@ -1224,61 +846,29 @@
   }
   window.dbSalonGetAppointment = dbSalonGetAppointment;
 
-  // 予約更新 (サロン側: status 変更や時間変更など)
-  // 注: ★ v8.1: customerDocId は変更不可 (ルール 256 行)
-  //     authUid もサロンからは変更不可 (claim Function 専用)
   function dbSalonUpdateAppointment(appointmentId, patch, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !appointmentId) { _safeCb(cb, null); return; }
-    if (patch && patch.hasOwnProperty('customerDocId')) {
-      delete patch.customerDocId;
-    }
-    if (patch && patch.hasOwnProperty('authUid')) {
-      delete patch.authUid;
-    }
-    if (patch) {
-      patch.updatedAt = _serverTimestamp();
-    }
+    if (patch && patch.hasOwnProperty('customerDocId')) { delete patch.customerDocId; }
+    if (patch && patch.hasOwnProperty('authUid')) { delete patch.authUid; }
+    if (patch) { patch.updatedAt = _serverTimestamp(); }
     dbUpdateDoc('salons/' + sid + '/appointments/' + appointmentId, patch, cb);
   }
   window.dbSalonUpdateAppointment = dbSalonUpdateAppointment;
 
-  // ============================================================
-  // ★ 予約ステータス変更（例外手動操作用）
-  // DESIGN.md status 定義と1対1：
-  //   'confirmed' / 'visited' / 'cancelled' / 'no_show'
-  //   ('pendingCreate' は手動変更禁止・Functions 専用)
-  // 用途：
-  //   - C-3 予約詳細モーダルから「無断キャンセル」「来店済みに変更」
-  //     「予定に戻す」を選んだ時のラッパー
-  //   - 自動 visited 判定では status を書き換えない（表示時計算で十分）
-  //     例外的にこの API で書き換える時だけ使う
-  // ============================================================
   function dbSalonUpdateAppointmentStatus(aid, newStatus, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !aid) { _safeCb(cb, null); return; }
     var ALLOWED = ['confirmed', 'visited', 'cancelled', 'no_show'];
     if (ALLOWED.indexOf(newStatus) < 0) {
-      _logErr('dbSalonUpdateAppointmentStatus',
-              'invalid status: ' + newStatus);
+      _logErr('dbSalonUpdateAppointmentStatus', 'invalid status: ' + newStatus);
       _safeCb(cb, null);
       return;
     }
-    dbSalonUpdateAppointment(aid, {
-      status: newStatus
-    }, cb);
+    dbSalonUpdateAppointment(aid, { status: newStatus }, cb);
   }
   window.dbSalonUpdateAppointmentStatus = dbSalonUpdateAppointmentStatus;
 
-  // ============================================================
-  // ★ サロン手動予約作成（B経路）
-  // DESIGN.md 0-2 appointment スキーマ + 3-3 ルール B経路と1対1
-  // ホワイトリスト: dateKey, start, customerDocId, authUid,
-  //   menuId, optionMenuIds, end, durationMin, staffId,
-  //   resourceIds, status, source, priceSnapshot, menuNameSnapshot,
-  //   intervalAfterOverride, memo, editingBy, createdAt, updatedAt
-  // 必須: source=='manual', status=='confirmed', authUid=null(可)
-  // ============================================================
   function dbSalonCreateAppointment(data, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -1289,33 +879,28 @@
       _safeCb(cb, null);
       return;
     }
-    // dateKey 形式チェック
     if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(String(data.dateKey))) {
       console.error('[shared_db] invalid dateKey'); _safeCb(cb, null); return;
     }
-    // start 形式チェック
     if (!/^[0-9]{2}:[0-9]{2}$/.test(String(data.start))) {
       console.error('[shared_db] invalid start'); _safeCb(cb, null); return;
     }
-
     var doc = {
       dateKey: String(data.dateKey),
       start: String(data.start),
       customerDocId: String(data.customerDocId),
-      authUid: null,                     // ★ B経路：最初 null。claim Function が後埋め
+      authUid: null,
       menuId: String(data.menuId),
-      status: 'confirmed',                // B経路は最初から confirmed
-      source: 'manual',                   // 必須
-      staffId: 'owner',                   // フェーズ1固定
-      resourceIds: ['default'],           // フェーズ1固定
+      status: 'confirmed',
+      source: 'manual',
+      staffId: 'owner',
+      resourceIds: ['default'],
       createdAt: _serverTimestamp()
     };
-    // 任意フィールド
     if (Array.isArray(data.optionMenuIds)) {
       doc.optionMenuIds = data.optionMenuIds.map(String);
     }
-    if (typeof data.end === 'string'
-        && /^[0-9]{2}:[0-9]{2}$/.test(data.end)) {
+    if (typeof data.end === 'string' && /^[0-9]{2}:[0-9]{2}$/.test(data.end)) {
       doc.end = data.end;
     }
     if (typeof data.durationMin === 'number' && data.durationMin > 0) {
@@ -1327,51 +912,36 @@
     if (typeof data.menuNameSnapshot === 'string') {
       doc.menuNameSnapshot = data.menuNameSnapshot;
     }
-    if (typeof data.memo === 'string' && data.memo) {
-      doc.memo = data.memo;
-    }
+    if (typeof data.memo === 'string' && data.memo) { doc.memo = data.memo; }
     if (typeof data.intervalAfterOverride === 'number'
         && data.intervalAfterOverride >= 0) {
       doc.intervalAfterOverride = parseInt(data.intervalAfterOverride, 10);
     }
-
     dbAddDoc('salons/' + sid + '/appointments', doc, cb);
   }
   window.dbSalonCreateAppointment = dbSalonCreateAppointment;
 
-  // ============================================================
-  // ★ closeBlocks API（臨時休業ブロック・カレンダー用）
-  // DESIGN.md 0-2 closeBlocks スキーマと1対1
-  // パス: salons/{salonId}/closeBlocks/{blockId}
-  // ============================================================
-
-  // 月別取得（YYYY-MM）
   function dbSalonListCloseBlocks(yearMonth, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
     if (!yearMonth || !/^[0-9]{4}-[0-9]{2}$/.test(String(yearMonth))) {
-      // 全件取得（少なめ想定）
       dbReadCollection('salons/' + sid + '/closeBlocks', null, cb);
       return;
     }
     var ym = String(yearMonth);
     var from = ym + '-01';
-    var to = ym + '-31';  // 月末日キーは01-31なら全範囲カバー
+    var to = ym + '-31';
     dbReadCollection('salons/' + sid + '/closeBlocks', function (col) {
-      return col.where('dateKey', '>=', from)
-                .where('dateKey', '<=', to);
+      return col.where('dateKey', '>=', from).where('dateKey', '<=', to);
     }, cb);
   }
   window.dbSalonListCloseBlocks = dbSalonListCloseBlocks;
 
-  // 作成
-  // data: { dateKey, start, end, reason? }
   function dbSalonCreateCloseBlock(data, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
     if (!data || !data.dateKey || !data.start || !data.end) {
-      console.error('[shared_db] dbSalonCreateCloseBlock: '
-                  + 'dateKey/start/end are required');
+      console.error('[shared_db] dbSalonCreateCloseBlock: dateKey/start/end are required');
       _safeCb(cb, null);
       return;
     }
@@ -1396,7 +966,6 @@
   }
   window.dbSalonCreateCloseBlock = dbSalonCreateCloseBlock;
 
-  // 削除
   function dbSalonDeleteCloseBlock(blockId, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !blockId) { _safeCb(cb, null); return; }
@@ -1404,8 +973,6 @@
   }
   window.dbSalonDeleteCloseBlock = dbSalonDeleteCloseBlock;
 
-  // 予約削除 (オーナーのみ: ルール 260 行)
-  // 通常は status='cancelled' でソフト削除する方を推奨
   function dbSalonDeleteAppointment(appointmentId, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !appointmentId) { _safeCb(cb, null); return; }
@@ -1413,30 +980,18 @@
   }
   window.dbSalonDeleteAppointment = dbSalonDeleteAppointment;
 
-  // ============================================================
-  // ★ カルテ機能 API（v8.1+ C-9）
-  // DESIGN.md 0-2 appointment スキーマ payment/visitMemo/photos
-  //   + customer スキーマ karteNote と1対1。
-  // 写真は Firebase Storage に保存し、photos[] にメタを持つ。
-  // ============================================================
-
-  // 支払い金額を更新（円・整数。-1 で未入力に戻す）
   function dbSalonUpdateAppointmentPayment(aid, payment, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !aid) { _safeCb(cb, false); return; }
     var p = parseInt(payment, 10);
     var patch = {};
-    if (isNaN(p) || p < 0) {
-      patch.payment = _deleteField();
-    } else {
-      patch.payment = p;
-    }
+    if (isNaN(p) || p < 0) { patch.payment = _deleteField(); }
+    else { patch.payment = p; }
     patch.updatedAt = _serverTimestamp();
     dbUpdateDoc('salons/' + sid + '/appointments/' + aid, patch, cb);
   }
   window.dbSalonUpdateAppointmentPayment = dbSalonUpdateAppointmentPayment;
 
-  // 訪問メモを更新（自動保存用・空文字許可）
   function dbSalonUpdateAppointmentMemo(aid, memo, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !aid) { _safeCb(cb, false); return; }
@@ -1448,7 +1003,6 @@
   }
   window.dbSalonUpdateAppointmentMemo = dbSalonUpdateAppointmentMemo;
 
-  // 顧客カルテ全体メモ（karteNote）の更新（自動保存用）
   function dbSalonUpdateCustomerKarteNote(customerDocId, note, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !customerDocId) { _safeCb(cb, false); return; }
@@ -1460,18 +1014,6 @@
   }
   window.dbSalonUpdateCustomerKarteNote = dbSalonUpdateCustomerKarteNote;
 
-  // 写真を Storage にアップロード（blob 受け取り。リサイズは画面側責務）
-  // 戻り値 cb(err, { id, path, url, time })
-  // path: salons/{sid}/appointmentPhotos/{aid}/{photoId}.jpg
-  // 戻り値 cb(err, photoObj)
-  //   成功時: cb(null, { id, path, url, time })
-  //   失敗時: cb(Error)
-  //
-  // ★ 2026/5/24 修正: _safeCb は引数1つしか渡せない仕様だったため、
-  //   2引数を返すこの関数で第2引数 photoObj が捨てられていた。
-  //   結果、呼び出し側に null/undefined が渡り、次の
-  //   dbSalonAddAppointmentPhoto が invalid-args で失敗していた。
-  //   ローカル callCb で 2引数を確実に渡すよう変更。
   function dbSalonUploadAppointmentPhoto(aid, blob, cb) {
     function callCb(err, photoObj) {
       if (typeof cb !== 'function') { return; }
@@ -1484,26 +1026,16 @@
       return;
     }
     var st = _storage();
-    if (!st) {
-      callCb(new Error('firebase.storage 未ロード'), null);
-      return;
-    }
-    // 写真ID = 時刻 + ランダム（衝突回避）
-    var photoId = 'p_' + Date.now() + '_' +
-                  Math.floor(Math.random() * 100000);
-    var path = 'salons/' + sid +
-               '/appointmentPhotos/' + aid + '/' + photoId + '.jpg';
+    if (!st) { callCb(new Error('firebase.storage 未ロード'), null); return; }
+    var photoId = 'p_' + Date.now() + '_' + Math.floor(Math.random() * 100000);
+    var path = 'salons/' + sid + '/appointmentPhotos/' + aid + '/' + photoId + '.jpg';
     var ref = st.ref(path);
     var metadata = { contentType: 'image/jpeg' };
     ref.put(blob, metadata)
-      .then(function (snapshot) {
-        return snapshot.ref.getDownloadURL();
-      })
+      .then(function (snapshot) { return snapshot.ref.getDownloadURL(); })
       .then(function (url) {
         callCb(null, {
-          id: photoId,
-          path: path,
-          url: url,
+          id: photoId, path: path, url: url,
           time: new Date().toISOString()
         });
       })
@@ -1514,16 +1046,6 @@
   }
   window.dbSalonUploadAppointmentPhoto = dbSalonUploadAppointmentPhoto;
 
-  // appointment.photos[] に1枚追加（3枚上限は画面側で制御）
-  // photoObj: { id, path, url, time }
-  // 戻り値 cb(ok bool)
-  // appointment.photos[] に1枚追加（3枚上限は画面側で制御）
-  // photoObj: { id, path, url, time }
-  // 戻り値 cb(ok bool, errInfo)  errInfo = { code, message } または null
-  //
-  // ★ 2026/5/24 改訂3: _safeCb は引数1つしか渡せないバグに対応するため、
-  //   cb を try-catch で直接呼ぶ方式に変更。
-  //   arrayUnion を使わず read+rewrite。
   function dbSalonAddAppointmentPhoto(aid, photoObj, cb) {
     function callCb(ok, errInfo) {
       if (typeof cb !== 'function') { return; }
@@ -1539,19 +1061,16 @@
       return;
     }
     var docPath = 'salons/' + sid + '/appointments/' + aid;
-    // Step1: 既存ドキュメントを読む
     dbReadDoc(docPath, function (doc) {
       if (!doc) {
         callCb(false, {
           code: 'doc-not-found',
-          message: '予約ドキュメントが読めない: ' + docPath +
-                   ' (権限不足/不在/Auth未確定の可能性)'
+          message: '予約ドキュメントが読めない: ' + docPath
         });
         return;
       }
       var photos = Array.isArray(doc.photos) ? doc.photos.slice() : [];
       photos.push(photoObj);
-      // Step2: 配列全体で update
       onFbReady(function () {
         _db().doc(docPath).update({
           photos: photos,
@@ -1559,14 +1078,6 @@
         })
         .then(function () { callCb(true, null); })
         .catch(function (err) {
-          console.error('[dbSalonAddAppointmentPhoto] update FAIL', {
-            sid: sid, aid: aid, photoObj: photoObj,
-            errorCode: err && err.code,
-            errorMessage: err && err.message,
-            errorName: err && err.name,
-            existingPhotos: doc.photos,
-            newPhotosCount: photos.length
-          });
           _logErr('dbSalonAddAppointmentPhoto update(' + aid + ')', err);
           callCb(false, {
             code: (err && err.code) || 'update-failed-no-code',
@@ -1578,10 +1089,6 @@
   }
   window.dbSalonAddAppointmentPhoto = dbSalonAddAppointmentPhoto;
 
-  // appointment.photos から1枚削除 + Storage からも消す
-  // 戻り値 cb(ok bool)
-  //   Firestore の photos[] は要素全体一致でないと remove できないため
-  //   一度ドキュメントを読み出し、対象 id を除外して書き戻す方式
   function dbSalonDeleteAppointmentPhoto(aid, photoId, cb) {
     var sid = getCurrentSalonId();
     if (!sid || !aid || !photoId) { _safeCb(cb, false); return; }
@@ -1593,73 +1100,29 @@
       var kept = [];
       var i;
       for (i = 0; i < photos.length; i++) {
-        if (photos[i] && photos[i].id === photoId) {
-          target = photos[i];
-        } else {
-          kept.push(photos[i]);
-        }
+        if (photos[i] && photos[i].id === photoId) { target = photos[i]; }
+        else { kept.push(photos[i]); }
       }
-      if (!target) {
-        // 既に Firestore からは消えている。Storage 残骸の可能性も低い
-        _safeCb(cb, true);
-        return;
-      }
-      // 先に Firestore を更新（成功してから Storage 削除）
+      if (!target) { _safeCb(cb, true); return; }
       dbUpdateDoc(docPath, {
         photos: kept,
         updatedAt: _serverTimestamp()
       }, function (ok) {
         if (!ok) { _safeCb(cb, false); return; }
-        // Storage 削除（失敗しても Firestore は更新済みなので OK 扱い）
         var st = _storage();
         if (st && target.path) {
           st.ref(target.path).delete()
             .then(function () { _safeCb(cb, true); })
             .catch(function (err) {
               _logErr('storage delete(' + target.path + ')', err);
-              _safeCb(cb, true);  // メタは消えたので成功扱い
+              _safeCb(cb, true);
             });
-        } else {
-          _safeCb(cb, true);
-        }
+        } else { _safeCb(cb, true); }
       });
     });
   }
   window.dbSalonDeleteAppointmentPhoto = dbSalonDeleteAppointmentPhoto;
 
-  // ============================================================
-  // 顧客側 CRUD  (dbCustomer*)
-  //
-  // 顧客アプリ (customer_app.html v2) から呼ばれる想定。
-  // URL に ?salon=xxx を持っている前提で getCurrentSalonId() が値を返す。
-  //
-  // ============================================================
-  // 【2026/5/28 D-step3 で v8.1 化完了】
-  //   このセクションは旧 customerId 設計から v8.1（customerDocId+authUid 分離）へ
-  //   書き換え済み。主な変更:
-  //     - dbCustomerResolveMyCard : authIndex/{uid} → customerDocId 解決（既存）
-  //     - dbCustomerClaimMyCard    : 新設。resolveOrClaimCustomer Function 呼び出し
-  //                                  （カルテ作成/claim の唯一の正規ルート）
-  //     - dbCustomerCreateMyProfile: 廃止（呼ばれたらエラー返却。地雷不発化）
-  //     - dbCustomerGetMyProfile   : resolveMyCard 経由に変更
-  //     - dbCustomerUpdateMyProfile: resolveMyCard で customerDocId 解決→update
-  //     - dbCustomerListMyAppointments / dbLoadCustomerHistory :
-  //                                  where('customerId') → where('authUid')
-  //     - dbCustomerCreateAppointment: customerId:uid → customerDocId + authUid:uid
-  //   新規/書換関数のコールバックは Node 流儀 cb(err, value) に統一
-  //   （既存の dbReadDoc 等インフラ層は従来通り cb(value) 1引数のまま）。
-  //
-  // 【依存】dbCustomerClaimMyCard は Cloud Functions を呼ぶため、
-  //   呼び出し画面に <script src="firebase-functions-compat.js"> が必要。
-  //
-  // 【未実施・後続】
-  //   - merge Function (mergeCustomers) と needs_merge_review 解消 UI は Phase F
-  //   - customer_app.html v2（実画面）は D-step4
-  //   - dbLoadCustomerHistory / dbCustomerListMyAppointments の
-  //     authUid + dateKey 複合インデックス作成（販売前必須チェックリスト）
-  // ============================================================
-
-  // 予約画面の最初に表示するサロン情報 (info ドキュメント)
   function dbCustomerGetSalonInfo(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -1667,7 +1130,6 @@
   }
   window.dbCustomerGetSalonInfo = dbCustomerGetSalonInfo;
 
-  // 公開メニューのみ取得 (public:true)
   function dbCustomerGetPublicMenus(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -1677,32 +1139,18 @@
   }
   window.dbCustomerGetPublicMenus = dbCustomerGetPublicMenus;
 
-  // ★ v8.1 新規: 顧客が「自分のカルテ」を解決するヘルパー
-  //   DESIGN.md 0-2 / v8.1 1-3: authIndex が source of truth。
-  //   流れ: 自分の Auth UID → authIndex/{uid} を1回 get →
-  //         customerDocId を得て customers/{customerDocId} を直 get
-  //   （query を使わず2回の直 get。速い・安い・index 不要）
-  //   戻り値 cb(result):
-  //     成功      → { customerDocId: 'cus_xxx', customer: {...} }
-  //     未claim   → { customerDocId: null, customer: null }
-  //                 （authIndex が無い＝まだ claim されていない。
-  //                   claim 判定は Phase D で claim Function が担当）
-  //     エラー    → null
   function dbCustomerResolveMyCard(cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
     if (!sid || !uid) { _safeCb(cb, null); return; }
-
     dbReadDoc('salons/' + sid + '/authIndex/' + uid, function (idx) {
       if (!idx || !idx.customerDocId) {
-        // authIndex 未作成 = まだ claim されていない（正常な状態）
         _safeCb(cb, { customerDocId: null, customer: null });
         return;
       }
       var docId = idx.customerDocId;
       dbReadDoc('salons/' + sid + '/customers/' + docId, function (cust) {
         if (!cust) {
-          // authIndex はあるがカルテが無い（merge 等の途中・異常）
           _logErr('dbCustomerResolveMyCard',
                    'authIndex points to missing customer ' + docId);
           _safeCb(cb, { customerDocId: docId, customer: null });
@@ -1714,28 +1162,12 @@
   }
   window.dbCustomerResolveMyCard = dbCustomerResolveMyCard;
 
-  // 自分の顧客プロフィール
-  //
-  // 【2026/5/28 D-step3 v8.1化】
-  //   旧: customers/{Auth UID} を直 get（uid == docId 前提）
-  //   新: authIndex 経由で customerDocId を解決してから取得
-  //       （dbCustomerResolveMyCard を利用）
-  //
-  //   コールバック（Node 流儀）:
-  //     cb(err, { customerDocId, customer })
-  //     ・未claim（カルテ未紐付け）の場合は err=null, customerDocId=null, customer=null
-  //     ・customer は { name, phone, email, ... } のドキュメント本体
   function dbCustomerGetMyProfile(cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
     if (!sid || !uid) { _safeCb(cb, new Error('not authenticated'), null); return; }
-
     dbCustomerResolveMyCard(function (res) {
-      // dbCustomerResolveMyCard は { customerDocId, customer } を返す
-      if (!res) {
-        _safeCb(cb, new Error('resolve failed'), null);
-        return;
-      }
+      if (!res) { _safeCb(cb, new Error('resolve failed'), null); return; }
       _safeCb(cb, null, {
         customerDocId: res.customerDocId || null,
         customer: res.customer || null
@@ -1744,58 +1176,25 @@
   }
   window.dbCustomerGetMyProfile = dbCustomerGetMyProfile;
 
-  // dbCustomerClaimMyCard : 顧客本人のカルテ解決 / 作成（v8.1 正規ルート）
-  //
-  // 【2026/5/28 D-step3 新設】
-  //   v8.1 では「顧客が初めてアプリ登録する」処理は、クライアントから
-  //   customers に直接書き込むのではなく、必ず Cloud Function
-  //   resolveOrClaimCustomer を経由する。Function 内で:
-  //     - 同 email の未claimカルテ探索
-  //     - claim 成立 / 新規カルテ作成 / needsMergeReview 判定
-  //     - 過去予約の authUid 後埋め
-  //   を atomic に行う（DESIGN_v8_1 2-3, 2-4, 4-A/B/C）。
-  //
-  //   data: { name, phone }
-  //     salonId は内部で getCurrentSalonId() を使うので渡さなくてよい。
-  //     email は Function 側で request.auth.token.email を見るため渡さない。
-  //
-  //   コールバック（Node 流儀）:
-  //     cb(err, resultData)
-  //       resultData = {
-  //         result: 'claimed' | 'created_new' | 'already_resolved'
-  //                 | 'needs_merge_review',
-  //         customerDocId: string,
-  //         claimedAppointmentCount?: number,
-  //         ...
-  //       }
-  //   失敗時は cb(err, null)。err は Function の HttpsError。
   function dbCustomerClaimMyCard(data, cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
-    if (!sid || !uid) {
-      _safeCb(cb, new Error('not authenticated'), null);
-      return;
-    }
-
+    if (!sid || !uid) { _safeCb(cb, new Error('not authenticated'), null); return; }
     var fns = _functions();
     if (!fns) {
       _safeCb(cb, new Error('firebase-functions-compat.js が未ロードです'), null);
       return;
     }
-
     var payload = { salonId: sid };
     if (data && data.name) { payload.name = String(data.name); }
     if (data && data.phone) { payload.phone = String(data.phone); }
-
     var callable;
-    try {
-      callable = fns.httpsCallable('resolveOrClaimCustomer');
-    } catch (e) {
+    try { callable = fns.httpsCallable('resolveOrClaimCustomer'); }
+    catch (e) {
       _logErr('dbCustomerClaimMyCard httpsCallable', e);
       _safeCb(cb, e, null);
       return;
     }
-
     callable(payload).then(function (res) {
       _safeCb(cb, null, (res && res.data) ? res.data : null);
     }).catch(function (err) {
@@ -1805,28 +1204,18 @@
   }
   window.dbCustomerClaimMyCard = dbCustomerClaimMyCard;
 
-  // dbCustomerGetAvailableSlots(dateKey, menuId, optionMenuIds, cb)
-  //   getAvailableSlots callable Function を呼び出す。
-  //   空き枠情報のみ返す（個人情報なし）。
-  //   cb(err, { dateKey, slots: [{ start, available }] })
   function dbCustomerGetAvailableSlots(dateKey, menuId, optionMenuIds, cb) {
     var sid = getCurrentSalonId();
-    if (!sid) {
-      _safeCb(cb, new Error('salonId が取得できません。'), null);
-      return;
-    }
+    if (!sid) { _safeCb(cb, new Error('salonId が取得できません。'), null); return; }
     var callable;
-    try {
-      callable = _functions().httpsCallable('getAvailableSlots');
-    } catch (e) {
+    try { callable = _functions().httpsCallable('getAvailableSlots'); }
+    catch (e) {
       _logErr('dbCustomerGetAvailableSlots httpsCallable', e);
       _safeCb(cb, e, null);
       return;
     }
     callable({
-      salonId: sid,
-      dateKey: dateKey,
-      menuId: menuId,
+      salonId: sid, dateKey: dateKey, menuId: menuId,
       optionMenuIds: optionMenuIds || []
     }).then(function (res) {
       _safeCb(cb, null, (res && res.data) ? res.data : null);
@@ -1837,16 +1226,6 @@
   }
   window.dbCustomerGetAvailableSlots = dbCustomerGetAvailableSlots;
 
-
-  // dbCustomerCreateMyProfile : 【廃止・地雷不発化】
-  //
-  // 【2026/5/28 D-step3】
-  //   旧実装は customers/{Auth UID} に直接書き込む方式だったが、
-  //   v8.1 では customerDocId は Firestore 採番・claim は Function 経由が
-  //   唯一の正規ルートになったため廃止。
-  //   間違って呼ばれても直書きしないよう、エラーを返すだけにする
-  //   （deprecated コメントだけでは「呼べてしまう地雷」が残るため）。
-  //   新規コードは dbCustomerClaimMyCard を使うこと。
   function dbCustomerCreateMyProfile(data, cb) {
     var msg = 'dbCustomerCreateMyProfile は廃止されました（v8.1）。'
             + 'dbCustomerClaimMyCard を使ってください。';
@@ -1855,29 +1234,17 @@
   }
   window.dbCustomerCreateMyProfile = dbCustomerCreateMyProfile;
 
-  // 自分のプロフィール更新 (顧客本人が編集可能なフィールドのみ)
-  // ルール 227-231 行（本人 update）:
-  //   許可: name, phone, notifyChannels, updatedAt
-  //
-  // 【2026/5/28 D-step3 v8.1化】
-  //   旧: customers/{Auth UID} を直 update（uid == docId 前提）
-  //   新: authIndex 経由で customerDocId を解決してから update。
-  //       まだ claim されていない（カルテ未紐付け）場合はエラーを返す。
-  //   コールバック（Node 流儀）: cb(err, result)
   function dbCustomerUpdateMyProfile(patch, cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
     if (!sid || !uid) { _safeCb(cb, new Error('not authenticated'), null); return; }
     if (!patch) { _safeCb(cb, new Error('patch is empty'), null); return; }
-
     dbCustomerResolveMyCard(function (res) {
       if (!res || !res.customerDocId) {
         _safeCb(cb, new Error('カルテ未紐付け（先に dbCustomerClaimMyCard が必要）'), null);
         return;
       }
       var docId = res.customerDocId;
-
-      // 許可フィールド以外を除去
       var safe = {};
       if (patch.hasOwnProperty('name')) { safe.name = String(patch.name); }
       if (patch.hasOwnProperty('phone')) { safe.phone = String(patch.phone); }
@@ -1889,10 +1256,7 @@
         };
       }
       safe.updatedAt = _serverTimestamp();
-
       dbUpdateDoc('salons/' + sid + '/customers/' + docId, safe, function (ok) {
-        // dbUpdateDoc は成功/失敗を 1 引数（結果 or null）で返す既存仕様。
-        // Node 流儀に変換して呼び出し元へ返す。
         if (ok === null || ok === false) {
           _safeCb(cb, new Error('update failed'), null);
         } else {
@@ -1903,13 +1267,6 @@
   }
   window.dbCustomerUpdateMyProfile = dbCustomerUpdateMyProfile;
 
-  // 自分の予約一覧
-  // ルール 277-279 行: 予約本人（authUid 一致）は読める
-  //
-  // 【2026/5/28 D-step3 v8.1化】
-  //   旧: where('customerId', '==', uid)  ← customerId フィールドは廃止
-  //   新: where('authUid', '==', uid)
-  //       （DESIGN_v8_1：本人判定は authUid。customerId → customerDocId 改名済み）
   function dbCustomerListMyAppointments(cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
@@ -1920,38 +1277,14 @@
   }
   window.dbCustomerListMyAppointments = dbCustomerListMyAppointments;
 
-  // 予約作成 (pendingCreate=true 方式)
-  //
-  // 設計書 3-4 + ルール 281-300 行（appointments create A経路）:
-  //   送れるフィールド: dateKey, start, customerDocId, authUid,
-  //                    menuId, optionMenuIds, pendingCreate, source, createdAt
-  //   必須フィールド:   dateKey, start, customerDocId, authUid, menuId, pendingCreate
-  //   pendingCreate は必ず true / authUid == 自分の uid / source は省略 or 'online'
-  //
-  // 注: end / staffId / resourceIds / status / priceSnapshot 等は Functions が確定する。
-  //     クライアントからは絶対に送らない。
-  //     createdAt も Functions の serverTimestamp で確定するため、ここでは送らない。
-  //
-  // 【2026/5/28 D-step3 v8.1化】
-  //   旧: customerId: uid を送信（customerId フィールドは廃止）
-  //   新: customerDocId（authIndex 経由で解決）+ authUid: uid を送信。
-  //       カルテ未紐付け（未 claim）の場合はエラーを返す。
-  //   コールバック（Node 流儀）: cb(err, { _id })
-  //
-  // data: { dateKey, start, menuId, optionMenuIds? }
   function dbCustomerCreateAppointment(data, cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
-    if (!sid || !uid) {
-      _safeCb(cb, new Error('not authenticated'), null);
-      return;
-    }
+    if (!sid || !uid) { _safeCb(cb, new Error('not authenticated'), null); return; }
     if (!data || !data.dateKey || !data.start || !data.menuId) {
       _safeCb(cb, new Error('missing required fields'), null);
       return;
     }
-
-    // 形式チェック (ルール側でも弾かれるが、ここで先に弾いて無駄なリクエストを防ぐ)
     if (!/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(data.dateKey)) {
       _safeCb(cb, new Error('invalid dateKey'), null);
       return;
@@ -1960,15 +1293,12 @@
       _safeCb(cb, new Error('invalid start'), null);
       return;
     }
-
-    // 自分の customerDocId を解決してから予約を作る
     dbCustomerResolveMyCard(function (res) {
       if (!res || !res.customerDocId) {
         _safeCb(cb, new Error('カルテ未紐付け（先に dbCustomerClaimMyCard が必要）'), null);
         return;
       }
       var docId = res.customerDocId;
-
       var doc = {
         dateKey: String(data.dateKey),
         start: String(data.start),
@@ -1977,12 +1307,8 @@
         menuId: String(data.menuId),
         pendingCreate: true
       };
-      // 予約時点の通知先メール（Auth正・メール変更直後の遅延対策）
-      if (data.customerEmail) {
-        doc.customerEmail = String(data.customerEmail);
-      }
+      if (data.customerEmail) { doc.customerEmail = String(data.customerEmail); }
       if (data.optionMenuIds && data.optionMenuIds.length > 0) {
-        // 配列だけを通す
         var opts = [];
         var i;
         for (i = 0; i < data.optionMenuIds.length; i++) {
@@ -1990,147 +1316,61 @@
         }
         doc.optionMenuIds = opts;
       }
-
       dbAddDoc('salons/' + sid + '/appointments', doc, function (addRes) {
-        if (!addRes) {
-          _safeCb(cb, new Error('予約作成に失敗しました'), null);
-        } else {
-          _safeCb(cb, null, addRes); // { _id }
-        }
+        if (!addRes) { _safeCb(cb, new Error('予約作成に失敗しました'), null); }
+        else { _safeCb(cb, null, addRes); }
       });
     });
   }
   window.dbCustomerCreateAppointment = dbCustomerCreateAppointment;
 
-  // 自分の予約をキャンセル
-  // ルール 246-252 行: 顧客は confirmed -> cancelled に変更可能
   function dbCustomerCancelMyAppointment(appointmentId, cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
     if (!sid || !uid || !appointmentId) { _safeCb(cb, null); return; }
     dbUpdateDoc(
       'salons/' + sid + '/appointments/' + appointmentId,
-      {
-        status: 'cancelled',
-        updatedAt: _serverTimestamp()
-      },
+      { status: 'cancelled', updatedAt: _serverTimestamp() },
       cb
     );
   }
   window.dbCustomerCancelMyAppointment = dbCustomerCancelMyAppointment;
 
-  // ============================================================
-  // Phase B-1: 画面別並列取得 API (dbLoad*)
-  //
-  // 設計準拠:
-  //   - DESIGN.md v6 セクション 4 (速度設計 3秒以内), 5-3 (データ取得API統一),
-  //     7 Phase B (B-1〜B-8)
-  //   - DESIGN_NOTES.md 項目 7 (アーカイブ 18ヶ月/半年バッチ)
-  //
-  // 設計指針:
-  //   B-2: 各 API は内部で並列取得し、全部揃ったら一度だけ cb を呼ぶ
-  //        (Promise.all 相当を ES5 の pending カウンタで実現)
-  //   B-3: 各画面に必要な最小限のデータだけ取得 (無駄なコレクションを引かない)
-  //   B-4: ログイン直後は最小限 (dbLoadSalonDashboard は info + settings のみ)、
-  //        重いデータは画面遷移時に各 dbLoad* で取得
-  //   B-6: appointments は必ず dateKey 範囲 or == で絞る。全件 get() しない。
-  //        顧客履歴は customerId == uid + limit。
-  //   B-8: 顧客履歴のみ appointments(current) + appointments_archive 両方読む。
-  //        ※ 古い予約を archive へ移す Cloud Functions バッチは後回し
-  //          (DESIGN_NOTES 項目7。今は読む側だけ箱を用意)。
-  //
-  // 層分離 (設計書 5-3):
-  //   shared_db.js の dbLoad* は「DB 抽象化層の窓口」。
-  //   カレンダー固有の月/日バンドル取得は既に shared_db_calendar.js が
-  //   並列実装済み (calendarLoadMonth / calendarLoadDay) なので、
-  //   dbLoadSalonCalendar / dbLoadCustomerBooking はそれを薄くラップする。
-  //   二重実装しない (設計書 進め方の鉄則2: 棚卸ししてから実装)。
-  //
-  // コールバック規約:
-  //   - 成功時: result = バンドルオブジェクト
-  //   - 失敗時でも、取得できたものは入れて返す (画面側で null チェック可能)
-  //   - 致命的失敗 (salonId 取れない等) のみ result = null
-  // ============================================================
-
-  // 内部: 並列取得の合成ヘルパー
-  // tasks = [ { key: 'menus', run: function(done){ ... done(value) } }, ... ]
-  // 全 task 完了後、bundle = { menus: ..., ... } を cb に渡す
   function _parallelLoad(tasks, cb) {
     var bundle = {};
     var pending = tasks.length;
-    if (pending <= 0) {
-      _safeCb(cb, bundle);
-      return;
-    }
+    if (pending <= 0) { _safeCb(cb, bundle); return; }
     var i;
     function _makeDone(key) {
       return function (value) {
         bundle[key] = value;
         pending--;
-        if (pending <= 0) {
-          _safeCb(cb, bundle);
-        }
+        if (pending <= 0) { _safeCb(cb, bundle); }
       };
     }
     for (i = 0; i < tasks.length; i++) {
       var t = tasks[i];
-      try {
-        t.run(_makeDone(t.key));
-      } catch (e) {
+      try { t.run(_makeDone(t.key)); }
+      catch (e) {
         _logErr('_parallelLoad task(' + t.key + ')', e);
-        // 例外でも pending を進める (固まらないように)
         _makeDone(t.key)(null);
       }
     }
   }
 
-  // ------------------------------------------------------------
-  // dbLoadSalonDashboard(cb)
-  //   サロンのトップ (ダッシュボード) 画面用。
-  //   B-4: ログイン直後なので最小限。info + settings のみ。
-  //        予約一覧やカレンダーは各画面遷移時に別途取得する。
-  //   戻り値: { info, settings }
-  // ------------------------------------------------------------
   function dbLoadSalonDashboard(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
     _parallelLoad([
-      {
-        key: 'info',
-        run: function (done) {
-          dbSalonGetInfo(function (v) { done(v || null); });
-        }
-      },
-      {
-        key: 'settings',
-        run: function (done) {
-          dbSalonGetConfig('settings', function (v) { done(v || null); });
-        }
-      }
+      { key: 'info', run: function (done) { dbSalonGetInfo(function (v) { done(v || null); }); } },
+      { key: 'settings', run: function (done) { dbSalonGetConfig('settings', function (v) { done(v || null); }); } }
     ], cb);
   }
   window.dbLoadSalonDashboard = dbLoadSalonDashboard;
 
-  // ------------------------------------------------------------
-  // dbLoadSalonCalendar(monthStr, cb)
-  //   サロンのカレンダー画面用。
-  //   B-6: 指定月の appointments のみ (dateKey 範囲クエリ)。
-  //   実体は shared_db_calendar.js の calendarLoadMonth に委譲。
-  //   calendarLoadMonth は内部で settings/menus/appointments/closeBlocks を
-  //   並列取得して { settings, menus, appointments, closeBlocks,
-  //   monthStr, dateFrom, dateTo } を返す。
-  //   monthStr: "2026-05" 形式。
-  // ------------------------------------------------------------
   function dbLoadSalonCalendar(arg, cb) {
-    // ★ v8.1 改訂 (2026/5/22): 週ビュー化により week ベースに変更。
-    //   後方互換: 引数が "YYYY-MM" 形式の月文字列なら旧 calendarLoadMonth に
-    //   フォールバック（呼び出し側を一気に書き換えるリスクを下げる）。
-    //   新仕様: 引数が "YYYY-MM-DD"（週の開始日 dateKey）または Date オブジェクト
-    //   なら calendarLoadWeek で7日分取得。
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
-
-    // 月文字列判定（YYYY-MM）
     if (typeof arg === 'string' && /^[0-9]{4}-[0-9]{2}$/.test(arg)) {
       if (typeof window.calendarLoadMonth !== 'function') {
         _logErr('dbLoadSalonCalendar', 'shared_db_calendar.js not loaded');
@@ -2140,60 +1380,33 @@
       window.calendarLoadMonth(arg, cb);
       return;
     }
-
-    // それ以外は週ロードに渡す
     if (typeof window.calendarLoadWeek !== 'function') {
       _logErr('dbLoadSalonCalendar', 'shared_db_calendar.js not loaded');
       _safeCb(cb, null);
       return;
     }
     var weekStart;
-    if (arg instanceof Date) {
-      weekStart = arg;
-    } else if (typeof arg === 'string'
-               && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(arg)) {
-      // dateKey 文字列を Date 化
+    if (arg instanceof Date) { weekStart = arg; }
+    else if (typeof arg === 'string'
+             && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(arg)) {
       var p = arg.split('-');
       weekStart = new Date(parseInt(p[0], 10),
                            parseInt(p[1], 10) - 1,
                            parseInt(p[2], 10));
-    } else {
-      // 引数なし or 不正 → 今日基準
-      weekStart = new Date();
-    }
+    } else { weekStart = new Date(); }
     window.calendarLoadWeek(weekStart, cb);
   }
   window.dbLoadSalonCalendar = dbLoadSalonCalendar;
 
-  // ------------------------------------------------------------
-  // dbLoadSalonCustomers(cb)
-  //   サロンの顧客管理画面用。顧客一覧。
-  //   戻り値: { customers }
-  //   注: 顧客数が将来数千件規模になったら limit + ページングを検討
-  //       (Phase 2 以降。フェーズ1の小規模サロンでは全件で問題なし)。
-  // ------------------------------------------------------------
   function dbLoadSalonCustomers(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
     _parallelLoad([
-      {
-        key: 'customers',
-        run: function (done) {
-          dbSalonListCustomers(function (v) { done(v || []); });
-        }
-      }
+      { key: 'customers', run: function (done) { dbSalonListCustomers(function (v) { done(v || []); }); } }
     ], cb);
   }
   window.dbLoadSalonCustomers = dbLoadSalonCustomers;
 
-  // ------------------------------------------------------------
-  // dbLoadSalonMenus(cb)
-  //   メニュー設定画面用。
-  //   設計書 B-1: menus + staffs + resources。
-  //   フェーズ1では staffs は owner 1件、resources は default 1件だが、
-  //   3次元予約モデル (設計書 0-2) のため最初から3点セットで取得する。
-  //   戻り値: { menus, staffs, resources }
-  // ------------------------------------------------------------
   function dbLoadSalonMenus(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -2209,78 +1422,29 @@
           }
         }
       },
-      {
-        key: 'staffs',
-        run: function (done) {
-          dbReadCollection(base + '/staffs', null, function (v) { done(v || []); });
-        }
-      },
-      {
-        key: 'resources',
-        run: function (done) {
-          dbReadCollection(base + '/resources', null, function (v) { done(v || []); });
-        }
-      }
+      { key: 'staffs', run: function (done) { dbReadCollection(base + '/staffs', null, function (v) { done(v || []); }); } },
+      { key: 'resources', run: function (done) { dbReadCollection(base + '/resources', null, function (v) { done(v || []); }); } }
     ], cb);
   }
   window.dbLoadSalonMenus = dbLoadSalonMenus;
 
-  // ------------------------------------------------------------
-  // dbLoadSalonSettings(cb)
-  //   営業時間・キャンセル規定・スタンプ設定の編集画面用。
-  //   config 3 ドキュメントを並列取得。
-  //   戻り値: { settings, cancelPolicy, stampCard }
-  // ------------------------------------------------------------
   function dbLoadSalonSettings(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
     _parallelLoad([
-      {
-        key: 'settings',
-        run: function (done) {
-          dbSalonGetConfig('settings', function (v) { done(v || null); });
-        }
-      },
-      {
-        key: 'cancelPolicy',
-        run: function (done) {
-          dbSalonGetConfig('cancelPolicy', function (v) { done(v || null); });
-        }
-      },
-      {
-        key: 'stampCard',
-        run: function (done) {
-          dbSalonGetConfig('stampCard', function (v) { done(v || null); });
-        }
-      }
+      { key: 'settings', run: function (done) { dbSalonGetConfig('settings', function (v) { done(v || null); }); } },
+      { key: 'cancelPolicy', run: function (done) { dbSalonGetConfig('cancelPolicy', function (v) { done(v || null); }); } },
+      { key: 'stampCard', run: function (done) { dbSalonGetConfig('stampCard', function (v) { done(v || null); }); } }
     ], cb);
   }
   window.dbLoadSalonSettings = dbLoadSalonSettings;
 
-  // ------------------------------------------------------------
-  // dbLoadCustomerHome(cb)
-  //   顧客アプリの初期表示用。
-  //   設計書 4-2: 起動時は settings + menus(公開のみ) + cancelPolicy。
-  //   サロン名表示のため info も含める (軽量)。
-  //   B-6: メニューは公開のみ (menuListPublic)。
-  //   戻り値: { info, settings, menus, cancelPolicy }
-  // ------------------------------------------------------------
   function dbLoadCustomerHome(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
     _parallelLoad([
-      {
-        key: 'info',
-        run: function (done) {
-          dbCustomerGetSalonInfo(function (v) { done(v || null); });
-        }
-      },
-      {
-        key: 'settings',
-        run: function (done) {
-          dbSalonGetConfig('settings', function (v) { done(v || null); });
-        }
-      },
+      { key: 'info', run: function (done) { dbCustomerGetSalonInfo(function (v) { done(v || null); }); } },
+      { key: 'settings', run: function (done) { dbSalonGetConfig('settings', function (v) { done(v || null); }); } },
       {
         key: 'menus',
         run: function (done) {
@@ -2291,25 +1455,11 @@
           }
         }
       },
-      {
-        key: 'cancelPolicy',
-        run: function (done) {
-          dbSalonGetConfig('cancelPolicy', function (v) { done(v || null); });
-        }
-      }
+      { key: 'cancelPolicy', run: function (done) { dbSalonGetConfig('cancelPolicy', function (v) { done(v || null); }); } }
     ], cb);
   }
   window.dbLoadCustomerHome = dbLoadCustomerHome;
 
-  // ------------------------------------------------------------
-  // dbLoadCustomerBooking(dateStr, cb)
-  //   顧客アプリの予約日時選択用。
-  //   B-6: 指定日の appointments のみ (dateKey == dateStr)。
-  //   実体は shared_db_calendar.js の calendarLoadDay に委譲。
-  //   calendarLoadDay は内部で settings/appointments/closeBlocks を
-  //   並列取得して { settings, appointments, closeBlocks, dateKey } を返す。
-  //   dateStr: "2026-05-14" 形式。
-  // ------------------------------------------------------------
   function dbLoadCustomerBooking(dateStr, cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
@@ -2322,37 +1472,16 @@
   }
   window.dbLoadCustomerBooking = dbLoadCustomerBooking;
 
-  // ------------------------------------------------------------
-  // dbLoadCustomerHistory(cb)
-  //   顧客の予約履歴画面用。
-  //   設計書 B-1 / B-8: current (appointments) + archive
-  //   (appointments_archive) の両方を読む。
-  //   B-6: 自分の予約のみ (authUid == 自分の Auth UID)。
-  //        さらに最近分に絞るため dateKey 降順 + limit。
-  //
-  //   ★ B-8 補足 (DESIGN_NOTES 項目7):
-  //     古い予約を appointments → appointments_archive へ移す
-  //     Cloud Functions バッチは「読む側」より後回し。
-  //     今はバッチがまだ無いので appointments_archive は通常空。
-  //     それでも最初から両方読む実装にしておくことで、将来バッチを
-  //     足したときに顧客履歴のコードを一切変えずに済む (設計書0-2の指針)。
-  //
-  //   戻り値: { current: [...], archive: [...], merged: [...] }
-  //     merged は両方を dateKey 降順で統合済み (画面はこれを使えばよい)。
-  //
-  //   注: appointments_archive の firestore.rules は Phase A-step1 で
-  //       current と同じ読み取り権限で設定済み (allow read: 本人 or staff)。
-  // ------------------------------------------------------------
   function dbLoadCustomerHistory(cb) {
     var sid = getCurrentSalonId();
     var uid = getCurrentUserUid();
     if (!sid || !uid) { _safeCb(cb, null); return; }
 
-    var HISTORY_LIMIT = 50; // current/archive 各 50 件まで
+    var HISTORY_LIMIT = 50;
 
     function _queryMine(col) {
       // 【2026/5/28 D-step3 v8.1化】authUid == 自分 / dateKey 降順 / limit
-      //   旧 customerId フィールドは廃止。本人判定は authUid。
+      //   複合インデックス (authUid Asc, dateKey Desc) は ③で作成済み。
       return col.where('authUid', '==', uid)
                 .orderBy('dateKey', 'desc')
                 .limit(HISTORY_LIMIT);
@@ -2375,19 +1504,13 @@
           dbReadCollection(
             'salons/' + sid + '/appointments_archive',
             _queryMine,
-            function (v) {
-              // archive がまだ存在しない / 空でも [] を返す。
-              // ルール上 read は許可済みだが、万一拒否されても
-              // _logErr 済みで null が来るので [] に正規化。
-              done(v || []);
-            }
+            function (v) { done(v || []); }
           );
         }
       }
     ], function (bundle) {
       var cur = bundle.current || [];
       var arc = bundle.archive || [];
-      // merged: current + archive を dateKey 降順で統合
       var merged = [];
       var i;
       for (i = 0; i < cur.length; i++) { merged.push(cur[i]); }
@@ -2396,7 +1519,6 @@
         var ak = a.dateKey || '';
         var bk = b.dateKey || '';
         if (ak === bk) {
-          // 同日内は start 降順 (新しい時刻が上)
           var as = a.start || '';
           var bs = b.start || '';
           if (as === bs) { return 0; }
@@ -2404,38 +1526,23 @@
         }
         return (ak < bk) ? 1 : -1;
       });
-      _safeCb(cb, {
-        current: cur,
-        archive: arc,
-        merged: merged
-      });
+      _safeCb(cb, { current: cur, archive: arc, merged: merged });
     });
   }
   window.dbLoadCustomerHistory = dbLoadCustomerHistory;
 
-  // ============================================================
-  // デバッグ用 (本番では呼ばれない想定)
-  // ============================================================
-
   window._sharedDbDebug = {
     getUrlSalonId: function () { return _urlSalonId; },
     getReadyState: function () { return _fbReady; },
-    // Phase B-1: 画面別並列取得 API の一覧 (動作確認用)
     loadApis: [
-      'dbLoadSalonDashboard',
-      'dbLoadSalonCalendar',
-      'dbLoadSalonCustomers',
-      'dbLoadSalonMenus',
-      'dbLoadSalonSettings',
-      'dbLoadCustomerHome',
-      'dbLoadCustomerBooking',
-      'dbLoadCustomerHistory'
+      'dbLoadSalonDashboard', 'dbLoadSalonCalendar', 'dbLoadSalonCustomers',
+      'dbLoadSalonMenus', 'dbLoadSalonSettings', 'dbLoadCustomerHome',
+      'dbLoadCustomerBooking', 'dbLoadCustomerHistory'
     ],
-    // Phase B-8: サロン側 顧客詳細の current+archive 統合履歴
     salonCustomerHistoryApi: 'dbSalonGetCustomerHistory'
   };
 
   console.log('[shared_db] loaded. urlSalonId =', _urlSalonId,
-              '(Phase B complete: B-1 8 dbLoad* APIs + B-8 archive-merge ready)');
+              '(F-3: dbSalonGetCustomerHistory orderBy restored)');
 
 })();
