@@ -1,12 +1,15 @@
 # TORITA 販売前提設計書 v6.1
 作成日：2026/5/12（v6：GPTレビュー 12項目反映版）
-最終改訂：2026/5/25（v6.1：claim不成立時の運用フロー方式を A方式（`needsMergeReview`フラグ）で確定）
+最終改訂：2026/6/2（v6.1：F-2 設計書同期。config 3種スキーマに createdAt 追記／appointments A経路スキーマから createdAt 除外。rules v3 と一致）
 方針：**ゼロから作り直し**（既存コードは参考、データは全消去）
 
 ---
 
 ## 改訂履歴
 
+- **F-2 同期（2026/6/2）**：実装（rules v3）と設計書のズレ4箇所を解消。
+  - config/settings・config/cancelPolicy・config/stampCard の3スキーマに `createdAt`（serverTimestamp・省略可）を追記。rules v3 のホワイトリストと一致させる。
+  - 3-3 appointments A経路（顧客アプリ予約）の `hasOnly` ホワイトリストから `createdAt` を除外。createdAt は Functions が serverTimestamp で確定するため顧客は送らない（A-step1-4 ⑥テストで FAIL→除外済み）。B経路（サロン手動登録）の createdAt は意図的に残置。
 - **v6.1（2026/5/25）**：v8.1 文書 2-5「claim 失敗時の運用フロー方針」を A方式で確定。
   - 0-2 customers スキーマに `needsMergeReview` フィールド追加
   - 3-3 customers Firestoreルールの書き換え禁止リストに `needsMergeReview` 追加
@@ -153,6 +156,7 @@ salons/{salonId}/appointments/{appointmentId} {
 
 **なぜ`createdAt` をサーバ確定にするか**：
 顧客が過去日・未来日の createdAt を入れて並べ替えやログを混乱させる攻撃を防ぐ。`serverTimestamp()` で確定。
+★ 2026/6/2 F-2同期：顧客アプリ予約（A経路）では顧客は createdAt を送らない（rules v3 の A経路ホワイトリストから createdAt を除外済み）。Functions が serverTimestamp で確定する。
 
 **status の値域（許可リスト）**：
 - `confirmed`：予約確定（初期値、サーバ側で必ずこの値）
@@ -340,7 +344,8 @@ salons/{salonId}/config/settings {
   weeklyClose: [],            // 毎週の定期クローズ [{dow,start,end}, ...]
   bookingWeeks: 8,            // 何週間先まで予約可
   lastMin: "same1h",          // 直前予約受付：1week/3days/1day/same3h/same1h/same30m
-  deadline: "前日まで"        // 顧客キャンセル受付期限
+  deadline: "前日まで",       // 顧客キャンセル受付期限
+  createdAt: <serverTimestamp> // ★ 2026/6/2 F-2同期：初期化時に確定。rules v3 ホワイトリストに含む（省略可）
 }
 ```
 
@@ -361,6 +366,7 @@ salons/{salonId}/config/cancelPolicy {
   qrMsg: "",                // キャンセル料発生時の自動送信メッセージ
                             // 変数: {顧客名}{予約日時}{メニュー}
                             //       {キャンセル料}{QRリンク}
+  createdAt: <serverTimestamp>, // ★ 2026/6/2 F-2同期：rules v3 ホワイトリストに含む（省略可）
   updatedAt: <serverTimestamp>
 }
 ```
@@ -382,6 +388,7 @@ salons/{salonId}/config/stampCard {
   color: "#b5845a",         // スタンプカード色（hex）
   expiry: "none",           // 有効期限: '3m'|'6m'|'12m'|'none'
                             //   最初のスタンプ取得日から起算
+  createdAt: <serverTimestamp>, // ★ 2026/6/2 F-2同期：rules v3 ホワイトリストに含む（省略可）
   updatedAt: <serverTimestamp>
 }
 ```
@@ -775,14 +782,18 @@ match /salons/{salonId} {
     //     (B) サロン手動登録 = 対象がサロン仮登録カルテなら null 可
     //   end/staffId/priceSnapshot/customerSnapshot/createdAt/status
     //   はサーバ確定（顧客経路）
+    //   ★ 2026/6/2 F-2同期：A経路ホワイトリストから createdAt を除外
+    //     （createdAt は Functions が serverTimestamp で確定。顧客は送らない。
+    //      A-step1-4 ⑥テストで createdAt 偽装が書けてしまい FAIL→除外で全PASS）
+    //     B経路（サロン手動登録）は dbSalonCreateAppointment が createdAt を
+    //     実際に送るため意図的に残置（攻撃対象は自分自身で低リスク）
     allow create: if
       // ── (A) 顧客アプリ予約（pendingCreate=true）──
       ( isSignedIn() &&
         request.resource.data.authUid == request.auth.uid &&
         request.resource.data.keys().hasOnly([
           'dateKey', 'start', 'customerDocId', 'authUid',
-          'menuId', 'optionMenuIds', 'pendingCreate', 'source',
-          'createdAt'
+          'menuId', 'optionMenuIds', 'pendingCreate', 'source'
         ]) &&
         request.resource.data.keys().hasAll([
           'dateKey', 'start', 'customerDocId',
@@ -909,7 +920,6 @@ NG の場合:
 **Phase 2 以降の検討**：
 - 楽観ロック（バージョン番号 or `updatedAt` チェック）
 - 競合予約防止（同じ時間枠を別の顧客が同時に押した場合の処理）
-
 
 
 ---
@@ -1132,6 +1142,10 @@ sendChangeNotification(customerDocId, oldAppointment, newAppointment, cb);
   - 顧客が `price`, `priceSnapshot`, `status` を改ざんできないこと（Firestoreコンソールから直接書き込みテスト）
   - 顧客が `customerAuthUid` を偽装できないこと
   - 顧客が `status` を `cancelled` 以外に変えられないこと
+  - ★ 2026/6/2 ⑥追加実施：A経路予約のサーバ確定フィールド偽装テスト
+    （priceSnapshot/staffId/status/end/authUid/customerDocId/createdAt の
+     偽装は全て拒否、正常予約は成功）。createdAt は当初書けてしまい FAIL
+     → A経路ホワイトリストから createdAt を除外（rules v3）して全 PASS
   - ★ v8.1 identity 関連（`DESIGN_v8_1_customer_identity.md` 6章）：
     - サロンAがサロンBの customers/authIndex/mergeJobs に読み書き → 拒否
     - サロンが作成カルテに `authUid` を入れて作成 → 拒否
@@ -1253,6 +1267,10 @@ sendChangeNotification(customerDocId, oldAppointment, newAppointment, cb);
       販売前に必ず復活させ、(customerDocId Asc, dateKey Desc) の複合
       インデックスを appointments / appointments_archive 両方の
       サブコレクションに明示作成すること。
+    ★ 2026/6/2 ②③ 完了：(customerDocId Asc, dateKey Desc) と
+      (authUid Asc, dateKey Desc) を appointments / appointments_archive
+      両方に作成・有効化済み。dbSalonGetCustomerHistory の orderBy 復活は
+      F-3 で対応予定（index 完成により可能になった）。
   - `(status, dateKey)` 複合：「未完了予約のみ」絞り込み用
   - 後付けは順序が不安定になるので、最初にまとめて作る
 
@@ -1269,211 +1287,31 @@ sendChangeNotification(customerDocId, oldAppointment, newAppointment, cb);
 ### Phase C：サロン管理画面の作り直し（v2）
 - C-1. `salon_auth_v2_new.html` 新規登録/ログイン画面
 - C-2. `salon_dashboard_v1.html` ダッシュボード（新規追加）
-- C-3. `salon_calendar_v8.html` カレンダー
-       ★ 2026/5/22 大改修：週ビュー型に作り直し（旧版v7踏襲）
-         旧版の月グリッド+日詳細リスト方式から、縦軸=時間・横軸=曜日7日の
-         週タイムラインに変更。理由：インターバル時間や時間配分の視認性が
-         圧倒的に向上し、1人サロンの日々の運営に最適化される。
-         構成：
-         - 上部：◀ 今日+6日先 ▶ の週移動 + 表示範囲（例: 5/23〜5/29）
-           ★ 2026/5/23 改訂：日曜始まりではなく「今日始まりローリング」を採用。
-             起動時は本日〜+6日先を表示。「次へ」で表示中の最終日翌日から7日進む。
-             「前へ」で表示中の開始日から7日前。
-             「今日」ボタンで本日始まり7日に戻す。
-             理由：1人サロンは「今日から先」を見ることが運営の中心。
-                   過去予約は C-9 カルテで顧客別履歴を参照する。
-         - 中段：[+予約][+クローズ]ボタン
-         - メイン：7列×時間軸グリッド
-           * 列：日〜土
-           * 行：settings.openTime〜closeTime を 1時間刻みで表示
-             （settings 未設定時は 9:00〜21:00 をフォールバック）
-           * 定休日列：weeklyClose の曜日は灰色表示+「定休日」ラベル
-           * 予約ブロック：top/height を分単位 px 計算で配置
-           * インターバルブロック：予約直後に settings.intervalMin 分の
-             半透明帯（「準備 XX分」）
-           * クローズブロック：別色（赤系）+ 「クローズ」+ 理由表示
-         - 予約タップ：詳細モーダル（顧客名/メニュー/料金/メモ
-           + [カルテへ][編集][キャンセル] ボタン）
-         - クローズタップ：削除確認モーダル
-         ★ 2026/5/23 追加：手動予約・クローズ登録時の重複チェック仕様
-           クライアント側で以下をチェックし、衝突があればエラーで登録不可：
-           1. 既存予約との時間重複（同じ日・時間帯が1分でも被ったらNG）
-              - 予約 vs 予約：完全な禁止（同時施術不可）
-              - 予約 vs インターバル：予約の前後 settings.intervalMin 分も
-                予約不可（準備時間確保）
-              - クローズ vs 予約：クローズ時間中に予約 / 予約中にクローズ
-                どちらも禁止
-              - クローズ vs クローズ：完全な禁止
-           2. 定休日チェック
-              - settings.weeklyClose の曜日と被る日付に予約/クローズを
-                登録しようとしたら禁止
-              - 「定休日には予約できません」エラー
-           3. 営業時間外チェック
-              - 予約終了時刻が settings.closeTime を超える場合は禁止
-              - 予約開始時刻が settings.openTime より前は禁止
-           ※ 重複チェックの完全な競合制御は Cloud Functions の
-             トランザクションが理想だが、フェーズ1ではサロンオーナー1人
-             運用なのでクライアント側チェックで実質十分。
-             Phase D 以降で顧客アプリ予約が増えたら Function 側にも
-             同等のチェックを実装する。
-- C-4. `salon_customers_v1.html` 顧客管理
-       ★ v6.1（2026/5/25）追加：claim 不成立カルテの 🚩 表示
-         `needsMergeReview == true` のカルテに🚩マークを表示し、
-         一覧で「要統合」フィルタで絞り込み可能にする。
-         スタッフが merge 操作を実行すると、merge Function 内で
-         `needsMergeReview` を false に戻す（候補全件）。
+- C-3. `salon_calendar_v8.html` カレンダー（週ビュー型・今日始まりローリング・手動予約/クローズの重複チェック）
+- C-4. `salon_customers_v1.html` 顧客管理（★ v6.1：needsMergeReview 🚩 表示・要統合フィルタ）
 - C-5. `salon_menus_v1.html` メニュー設定
 - C-6. `salon_hours_v1.html` 営業時間
 - C-7. `salon_cancel_v1.html` キャンセル規定
 - C-8. `salon_stamp_v1.html` スタンプ設定
-- C-9. `salon_karte_v1.html` 顧客メモ（カルテ・施術履歴）
-       ★ 2026/5/21 追加：顧客管理(C-4)から「カルテを開く」、
-         ダッシュボードからも独立カードで入れる（C案：両方の入口+互いにリンク）
-         機能：顧客選択 → 来店履歴 / 各回の支払い・訪問メモ・写真（最大3枚） /
-              全体メモ(karteNote) / 統計(来店回数・累計・平均)
-       ★ 2026/5/23 改訂：「自動 visited 判定」+ 「今後の予約」セクション分離
-         予約の分類ルール（status と endAt から計算）:
-           A. 「今後の予約」セクション
-              - status = 'confirmed' かつ endAt >= 今 (未来予約)
-              - 統計の対象外（来店していないため）
-           B. 「来店履歴」セクション
-              - status = 'confirmed' かつ endAt < 今 (過去の confirmed = 自動visited)
-              - status = 'visited' (例外手動変更で visited 化されたもの)
-              - 統計（来店回数・累計支払い・平均単価）の対象
-           C. 表示しない
-              - status = 'cancelled' (キャンセル)
-              - status = 'no_show' (無断キャンセル)
-              - status = 'pendingCreate' (作成中)
-         例外手動変更：
-           - C-3 予約詳細モーダルから「無断キャンセル」「来店済みに変更」
-             「予定に戻す」を選べる（dbSalonUpdateAppointmentStatus 関数）
+- C-9. `salon_karte_v1.html` 顧客メモ（カルテ・施術履歴。自動visited判定・今後の予約/来店履歴分離・写真最大3枚）
 - 全画面が `shared_db.js` / `shared_db_*.js` / `shared_auth.js` / `shared_ui.js` を読み込む
 - 各画面が独立して必要なデータだけ取得する
-- HTML ファイル内の JavaScript は最小限（イベントハンドラと画面固有のロジックだけ）、複雑な処理は `shared_*.js` に切り出す
 
-### Phase D：顧客アプリの作り直し（v2）
-- D-1. `customer_app.html` を新規作成（v8 とは別ファイル名）
-- D-2. 起動時：URL `?salon=xxx` を読み込み、サロン名と settings だけ取得（瞬時表示）
-- D-3. メニュー選択画面：menus 取得（このタイミングで初）
-- D-4. ログイン/新規登録：Firebase メール+パスワード+メール確認
-- D-5. 日時選択画面：appointments + closeBlocks（このタイミングで初）
-- D-6. 予約確定：appointment 追加 + `shared_notify.js` 経由で通知送信
-- D-7. 履歴画面：自分の予約のみ取得（Firestoreルールで保証）
-- D-8. 顧客マイページ：プロフィール表示・パスワード変更・LINE通知設定（フェーズ1では LINE 部分は非表示）
-- 管理画面 HTML とロジックを完全分離（GPT指摘④）
-
-★ Phase D 着手前の事前タスク（claim Function 基盤）：
-  Phase D は claim Function なしでは shared_db.js の dbCustomer* も
-  customer_app.html も書けない（顧客の identity 解決が claim Function
-  の責務）。以下を D-1 より前に実施する：
-
-  - D-step1. **claim Function `resolveOrClaimCustomer` 実装**
-    （functions/index.js への追加）
-    - 入力：認証コンテキスト（uid, email, emailVerified）, salonId,
-            初期プロフィール（name, phone）
-    - 処理：
-      1. emailVerified==true 必須（false なら拒否してエラー返却）
-      2. authIndex/{authUid} 存在確認 → 既存なら customerDocId 返却（冪等）
-      3. 同一サロン内で email 完全一致のカルテ検索
-         （WHERE email == myEmail）
-      4. 該当カルテを authUid==null かつ isMerged==false でフィルタ
-      5. 件数判定：
-         - 1件 → claim 成立：
-           * トランザクションでカルテに authUid 付与 + authIndex 作成
-           * そのカルテ参照の appointments/appointments_archive で
-             authUid==null のものに authUid 後埋め（分割バッチ）
-           * 返却：{result:"claimed", customerDocId, claimedAppointmentCount}
-         - 0件 → 新カルテ作成：
-           * customers 自動採番で作成（authUid=自分のuid,
-             createdSource:"self", needsMergeReview:false, ...）
-           * authIndex 作成
-           * 返却：{result:"created_new", customerDocId}
-         - 2件以上 → claim 不成立・要統合（v6.1 A方式）：
-           * 新カルテ作成（上記と同じ）
-           * 候補カルテ全件の needsMergeReview を true に更新
-             （トランザクション内で）
-           * 返却：{result:"needs_merge_review", customerDocId,
-                   candidateCount:N}
-    - 必須要件：
-      * トランザクション（authIndex作成と customers.authUid 付与の不可分性）
-      * 冪等性（同じユーザーが2回呼んでも安全）
-      * 過去予約 authUid 後埋め（v8.1 2-4）
-      * emailVerified=false 拒否（v8.1 A-step1-4 テスト項目）
-
-  - D-step2. **A-step1-4 identity 関連テストの先行実施**
-    claim Function を作った直後、v8.1 文書 6章の identity 関連テスト
-    だけ先に実施（残りの A-step1-4 は Phase F で）：
-    - サロンA→サロンB の customers/authIndex/mergeJobs 読み書き → 拒否
-    - サロンが authUid 入りでカルテ作成 → 拒否
-    - 顧客本人が他人 authUid でカルテ作成 → 拒否
-    - クライアントから authUid/merge系/createdSource/lockedByJob/
-      needsMergeReview を直接書換 → 拒否
-    - クライアントから authIndex 書込 → 拒否
-    - emailVerified=false の顧客が claim 発動 → claim されない
-    - 同一メール未claimカルテ2件時、自動claimされず needsMergeReview
-      が候補全件に立つこと
-
-  - D-step3. **shared_db.js の dbCustomer* を v8.1 化**【2026/5/28 完了】
-    - 旧 customerId → customerDocId / authUid 命名統一
-      （dbCustomerListMyAppointments・dbLoadCustomerHistory は
-       where('authUid','==',uid) に変更）
-    - dbCustomerResolveMyCard(cb) （authIndex 経由・既存を活用）
-    - dbCustomerClaimMyCard(data, cb) 新設
-      （resolveOrClaimCustomer Function 呼び出しラッパー。
-       カルテ作成 / claim の唯一の正規ルート）
-    - dbCustomerCreateMyProfile は廃止（呼ばれたらエラー返却＝地雷不発化。
-       deprecated コメントだけでは「呼べてしまう地雷」が残るため）
-    - dbCustomerCreateAppointment は customerDocId + authUid:uid を送る方式に
-      （rules appointments create A経路の必須/許可フィールドと 1対1 照合済み）
-    - **_safeCb は「全棚卸し」ではなく可変長引数対応に改修して解決**
-      （GPTレビュー 2026/5/28 採用。案A=125箇所棚卸しより
-       案B=_safeCb 1関数のみ改良が後戻り少なく再発防止力も高い）
-        function _safeCb(cb /*, ...args */) {
-          if (typeof cb === 'function') {
-            var args = Array.prototype.slice.call(arguments, 1);
-            try { cb.apply(null, args); }
-            catch (e) { console.error('[shared_db] cb error', e); }
-          }
-        }
-      ・既存の 1 引数呼び出しは後方互換で無傷
-      ・新規コードは Node 流儀 cb(err, value) に寄せる
-      ・upload/auth/transaction 等の重要関数は必要に応じ
-        ローカル callCb を併用可（_safeCb=インフラ、callCb=業務ロジック専用）
-      ・C-9 写真機能事故（2026/5/24）の根本原因（2引数以降の欠落）を構造的に解消
-    - 【依存】dbCustomerClaimMyCard は Functions を呼ぶため、呼び出し画面に
-      <script src="firebase-functions-compat.js"> が必要（D-step4 で対応）
-    - 【後続】authUid+dateKey 複合インデックス作成が新たに必要
-      （D-step4 顧客アプリ実動時に「index 必要」エラー→ Console リンクから作成。
-       販売前チェックリスト & A-step1-4 とセット実施）
-
-  - D-step4. **customer_app.html v2 作成（D-1〜D-8）**
+### Phase D：顧客アプリの作り直し（v2）【2026/6/1 完全完了】
+- D-1〜D-8 完了。claim Function 基盤（D-step1〜4）含め全フロー動作確認済み。
+- メール変更の同期問題は予約作成時 reload()→customerEmail 保存方式で根本解決。
 
 ### Phase E：通知統一（メール経路の完成）
-- E-1. `shared_notify.js` を新規作成
-  - `sendBookingNotification(customerDocId, appointment, cb)` などの統一API
-  - 内部で顧客の `notifyChannels.email` を見て Functions 経由でメール送信
-  - LINE 分岐は最初から実装するが、フェーズ1ではスキップする条件で動かす
-- E-2. 顧客アプリの予約/変更/キャンセル通知を `shared_notify.js` 経由に
-- E-3. EmailJS 呼び出しコードを完全削除（※customer_app.html v2 は
-  最初から Functions 経由で実装するため、旧 v8 系の EmailJS コードを
-  整理・廃棄するだけ）
-- E-4. EmailJS アカウント解約
-- E-5. `notificationLogs/{logId}` への失敗記録機能を実装
+- E-1〜E-5。EmailJS 撤去・notificationLogs 失敗記録（⑤＝2026/6/1完了）。
 
-### Phase F：Firestoreセキュリティルール最終確認
-- Phase A-step1 + Phase D-step2 でルール基本形は完成しているはず
-- 全機能実装後、Phase F で総合テスト：
-  - F-1. テスト用サロン2つ（A, B）でフル機能動作確認
-  - F-2. サロンAの顧客がURL書き換えてサロンBにアクセス→拒否されること
-  - F-3. サロンAのスタッフがサロンBのデータ読もうとして→拒否されること
-  - F-4. 顧客が他の顧客の予約を読もうとして→拒否されること
-  - F-5. 認証なしユーザーが Firestore に直接アクセス→拒否されること
-  - F-6. 複合インデックス全棚卸し（B-7 のリスト全項目が
-    Firebase Console に存在することを確認、特に
-    `(customerDocId, dateKey desc)` の復活）
-  - F-7. Firestore 初回遅延対処（カレンダー過去月初回・
-    カルテ初回開封・C-4↔C-9 遷移・C-8 編集→キャンセルなど）
-- 必要に応じてルールを微調整
+### Phase F：Firestoreセキュリティルール最終確認（現在ここ）
+- F-1. mergeロック取得失敗テスト（2026/6/2：コードレビューで論理検証済み）
+- F-2. DESIGN.md 同期（2026/6/2：本ファイル。config createdAt 追記・A経路 createdAt 除外）
+- F-3. dbSalonGetCustomerHistory の orderBy 復活（②index 完成で可能に）
+- F-4. notificationLogs 構造整理（type/channel/to 分離）
+- F-5. テスト残予約 9AxmN0nmmhDrc9EsVap8 削除
+- F-6. 古い customerId 複合インデックス（旧名遺物）削除
+- F-7. Firestore 初回遅延 本番データ増加後の再確認（④格下げ分）
 
 ### Phase G：販売準備
 - G-1. サロン新規登録の入り口（ランディング → 登録）
@@ -1483,51 +1321,7 @@ sendChangeNotification(customerDocId, oldAppointment, newAppointment, cb);
 - G-5. サポート体制（問い合わせフォーム）
 
 ### Phase H：LINE連携追加（販売後、PC環境が整ってから）
-- H-1. TORITA 共通の LINE 公式アカウントを作成（モデルB方式）
-- H-2. LINE Messaging API の設定、Channel Access Token を Functions の Secret に登録
-- H-3. `sendBookingLine` Cloud Function を作成（メール用と同じ構造）
-- H-4. LINE Webhook Function を作成（友だち追加 → メール照合 → `lineUserId` 保存）
-- H-5. `shared_notify.js` の LINE 分岐を有効化
-- H-6. 顧客マイページに「LINE通知」設定UIを追加
-- H-7. 顧客アプリのマイページに「公式アカウントを友だち追加」QRコード表示
-- 所要：PC借りた後、1〜2週間程度の追加実装
-- ※フェーズ1のDB・既存コードは一切変更不要（設計書通り箱は最初から用意されている）
-
 ### Phase I：複数人版（フェーズ2）追加
-- I-1. スタッフ登録画面
-- I-2. 設備登録画面
-- I-3. シフト管理画面
-- I-4. メニュー画面に「施術可能スタッフ」「必要設備」UI追加
-- I-5. 予約画面に「指名」UI追加
-- I-6. 予約可能時間計算ロジックを3次元化（フェーズ1で既に実装済みなら不要）
-- I-7. リアルタイム同期（`onSnapshot`）導入
-- I-8. 編集ロック機能の実装
-
-### 旧ファイルの扱い
-- Phase D 完了時点で、旧ファイル（`customer_app_v8.html`, `shared_db.js`, `salon_*_v6/v7.html`）を `legacy/` フォルダに退避
-- GitHub Pages からのリンクも v2 系に切り替え
-- 旧ファイルは数週間残してから削除
-
----
-
-## 8. 進め方
-
-| フェーズ | 内容 | 完了基準 |
-|---|---|---|
-| A | 基盤ファイル新規作成 | shared_*_v2.js 3ファイルが完成し、単体動作確認OK |
-| B | 速度設計実装 | 全 dbLoad* API が3秒以内に完了 |
-| C | サロン管理画面 v2 | 全画面でログイン→操作→保存が動く |
-| D | 顧客アプリ v2 | 起動3秒、予約完了まで一通り動く |
-| E | 通知統一（メール経路） | EmailJS 完全撤去、shared_notify.js 完成 |
-| F | セキュリティルール最終確認 | テスト2サロンで分離確認、全機能でルール動作OK |
-| G | 販売準備 | ランディング・決済・規約 |
-| H | LINE連携追加（販売後） | LINE Function deploy、shared_notify.js の LINE 経路有効化 |
-| I | 複数人版（フェーズ2） | スタッフ・設備・シフト・指名予約・リアルタイム同期 |
-
-各フェーズ完了時に：
-1. **Firestoreデータを空にしてゼロから動作確認**（既存データ依存を排除）
-2. **テスト用サロン2つで分離テスト**
-3. **ZIP でいけさんに渡す → GitHub アップロード → 動作確認 → 次フェーズ**
 
 ---
 
@@ -1536,50 +1330,17 @@ sendChangeNotification(customerDocId, oldAppointment, newAppointment, cb);
 ### 9-1. 優先順位の鉄則
 **機能量より、データ構造・権限・分離の方が100倍重要。**
 販売後にデータ混線・他サロン情報漏洩が起きたら、信用は二度と戻らない。
-だから機能を減らしてでも、土台を正しく作る。「見た目がショボくても壊れない」を優先する。
 
 ### 9-2. 守る作業ルール
-1. **どんなに焦っても、設計書を変えずに実装はしない**。今夜の Claude の失敗（タイムアウト追加）は、設計書なしで応急処置したのが原因。
-
-2. **iPad での編集はもう絶対にしない**。ZIP でファイル渡し、GitHub Web UI ではアップロードだけ。スマートクォート混入で動かなくなる事故が起きる。
-
-3. **Claude も完璧じゃない**。設計書をレビューする時、GPT にも見てもらって、3者で合意してから実装するのが安全。
-
-4. **Phase ごとに動作確認**。1 Phase 終わるごとに「動くかテスト」してから次へ。
-
-5. **DB ルールはコードより先**（GPT指摘）。各 Phase の最初のステップで Firestoreルールを書く・確認する。UIだけ作って後で当てるのは禁止。
-
-6. **「全部入りを最初から目指さない」**（GPT指摘）。販売開始時の最小機能で完璧に動くことが、機能たくさんで不安定よりずっと価値がある。
-
-7. **v8.1 整合性チェック（2026/5/23 実施）**：Phase C 完了時に全ファイルで古い識別子・スキーマ用語の残存を grep で網羅チェック。発見した問題と対応：
-   - `closeBlock.date` 参照バグ → `dateKey` に修正（shared_db_calendar.js:667）
-   - サロン側 `dbSalonListAppointments` で `customerId` フィルタ → `customerDocId` に修正
-   - サロン側 `dbSalonUpdateAppointment` で `customerId` 保護 → `customerDocId` + `authUid` 保護に修正
-   - 顧客側関数（dbCustomer*）は旧 `customerId` のまま残し、Phase D 着手時に claim/merge Function とセットで全面書き換え予定。セクション先頭に大型警告コメントを記載済み。
-   - 旧 `customerId` コメント記述を `customerDocId` に修正
-   - 完全に v8.1 統一済みと確認した項目: `menuName→menuNameSnapshot`, `intervalBefore/intervalAfter→settings.intervalMin`, `requireSalonAuth→requireSalonStaff`, `localStorage→Firestore`
-
-### 9-3. 販売開始時の最小機能（参考）
-
-**オーナー側**
-- ログイン
-- 自店舗だけ閲覧可能
-- メニュー登録
-- 営業時間設定
-- 予約一覧（カレンダー）
-- 顧客管理（一覧・詳細・★ v8.1 サロン側顧客登録・
-  ★ v6.1 `needsMergeReview` 🚩 表示）
-  ※ 顧客統合（merge）はフェーズ1後半。UI の箱だけ先に置く
-
-**顧客側**
-- 店舗URLアクセス
-- 新規登録 / ログイン
-- メニュー選択
-- 日時選択
-- 予約確定
-- 予約履歴
-
-これだけで販売開始できる。LINE 連携・スタッフ管理・設備管理・指名予約・スタンプカードなどは「追加機能」として後から差し込める設計にしておく。
+1. **設計書を変えずに実装はしない**。
+2. **iPad での編集はもう絶対にしない**。ZIP でファイル渡し、GitHub Web UI ではアップロードだけ。
+3. **Claude も完璧じゃない**。GPT にも見てもらって3者合意してから実装。
+4. **Phase ごとに動作確認**。
+5. **DB ルールはコードより先**。
+6. **「全部入りを最初から目指さない」**。
+7. **v8.1 整合性チェック（2026/5/23）**：古い識別子の残存を grep で網羅チェック済み。
+8. ★ 2026/6/2 F-2：**コードと設計書のズレは F-2 のように都度同期する**。
+   今回の同期対象は config 3種の createdAt とappointments A経路の createdAt。
 
 ---
 
