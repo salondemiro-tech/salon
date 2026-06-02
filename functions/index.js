@@ -4,11 +4,12 @@
 //
 // 機能:
 //   1. onAppointmentCreate トリガー (新)
-//      - 顧客が pendingCreate=true で予約作成
-//      - サーバ側で検証 → 確定 or 削除
-//      - 確定時に通知メールを送信
 //   2. sendBookingEmail (既存、互換性のため残置)
-//      - 将来削除予定
+//   3. onAppointmentUpdate (キャンセル通知)
+//   4. getAvailableSlots (callable)
+//   5. resolveOrClaimCustomer (callable)
+//
+// 最終改訂: 2026/6/2 F-4: logNotificationFailure に category 付与
 // ========================================
 
 const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https');
@@ -18,24 +19,20 @@ const { logger } = require('firebase-functions');
 const admin = require('firebase-admin');
 const { Resend } = require('resend');
 
-// Firebase Admin 初期化
 admin.initializeApp();
 const db = admin.firestore();
 
-// グローバル設定
 setGlobalOptions({
   region: 'asia-northeast1',
   maxInstances: 10
 });
 
-// Resend クライアント
 const getResend = () => {
   const apiKey = process.env.RESEND_API_KEY;
   if (!apiKey) throw new Error('RESEND_API_KEY is not configured');
   return new Resend(apiKey);
 };
 
-// 送信元（独自ドメイン認証済み）
 const FROM_EMAIL_DEFAULT = 'TORITA <noreply@torita-app.com>';
 
 // ========================================
@@ -54,31 +51,22 @@ function escapeHtml(s) {
 // ========================================
 // 日時ユーティリティ
 // ========================================
-
-// "2026-05-14" + "10:00" → Date (JST)
-// Firestore Timestamp で扱う際は admin.firestore.Timestamp.fromDate(d) を使う
 function buildJstDate(dateKey, timeStr) {
-  // dateKey: YYYY-MM-DD, timeStr: HH:MM
   const parts = dateKey.split('-');
   const time = timeStr.split(':');
   const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10) - 1; // 0-indexed
+  const month = parseInt(parts[1], 10) - 1;
   const day = parseInt(parts[2], 10);
   const hour = parseInt(time[0], 10);
   const minute = parseInt(time[1], 10);
-  // JST = UTC+9 なので、UTC で「9時間引いた時刻」として作る
-  // toISOString で UTC が返るので、フロント側で +09:00 表示する
   return new Date(Date.UTC(year, month, day, hour - 9, minute));
 }
 
-// Date に分を加算
 function addMinutes(date, minutes) {
   return new Date(date.getTime() + minutes * 60000);
 }
 
-// Date → "HH:MM" (JST)
 function formatJstTime(date) {
-  // UTC の時刻に +9 すれば JST
   const jst = new Date(date.getTime() + 9 * 3600000);
   const hh = String(jst.getUTCHours()).padStart(2, '0');
   const mm = String(jst.getUTCMinutes()).padStart(2, '0');
@@ -88,7 +76,6 @@ function formatJstTime(date) {
 // ========================================
 // メール本文 HTML 生成
 // ========================================
-
 function buildCustomerEmailHtml(salonName, customerName, dateKey, start, end, menuName, optionNames) {
   const dateLabel = formatJpDate(dateKey);
   const optionText = optionNames.length > 0
@@ -128,7 +115,6 @@ function buildSalonEmailHtml(salonName, customerName, customerEmail, customerPho
     + '</div>';
 }
 
-// "2026-05-14" → "5月14日（木）"
 function formatJpDate(dateKey) {
   const parts = dateKey.split('-');
   const year = parseInt(parts[0], 10);
@@ -141,9 +127,7 @@ function formatJpDate(dateKey) {
 
 // ========================================
 // onAppointmentCreate トリガー
-// 設計書 3-4 の pendingCreate 方式の実装
 // ========================================
-
 exports.onAppointmentCreate = onDocumentCreated(
   {
     document: 'salons/{salonId}/appointments/{appointmentId}',
@@ -163,21 +147,12 @@ exports.onAppointmentCreate = onDocumentCreated(
 
     logger.info('onAppointmentCreate fired', { salonId, appointmentId, data });
 
-    // pendingCreate=true でない場合（サロン側からの直接作成など）はスキップ
     if (data.pendingCreate !== true) {
       logger.info('Skip: not pendingCreate', { appointmentId });
       return;
     }
 
     try {
-      // ============================================================
-      // 1. 必須フィールドチェック
-      //   【2026/5/29 v8.1化】customerId → customerDocId + authUid 分離
-      //     クライアント側（shared_db.js D-step3版）は customerDocId と
-      //     authUid を送るようになったため、ここも整合させる。
-      //     authUid は B 経路（サロン手動登録）で null のことがあるので、
-      //     必須からは外す（rules で空文字や型は検証済み）。
-      // ============================================================
       const { dateKey, start, customerDocId, menuId } = data;
       const optionMenuIds = data.optionMenuIds || [];
 
@@ -186,9 +161,6 @@ exports.onAppointmentCreate = onDocumentCreated(
         return;
       }
 
-      // ============================================================
-      // 2. メニュー取得 & duration / price 計算
-      // ============================================================
       const menuDoc = await db.collection('salons').doc(salonId).collection('menus').doc(menuId).get();
       if (!menuDoc.exists) {
         await failAppointment(ref, salonId, 'menu_not_found', { menuId });
@@ -213,33 +185,22 @@ exports.onAppointmentCreate = onDocumentCreated(
         optionMenuNames.push(opt.name || '');
       }
 
-      // インターバル（前後の片付け時間）も加算
       const intervalAfter = menu.intervalAfter || 0;
 
-      // ============================================================
-      // 3. startAt / endAt 計算（サーバ確定）
-      // ============================================================
       const startAt = buildJstDate(dateKey, start);
       const endAt = addMinutes(startAt, totalDuration);
-      const blockedUntil = addMinutes(endAt, intervalAfter); // インターバル含む占有終了
+      const blockedUntil = addMinutes(endAt, intervalAfter);
       const end = formatJstTime(endAt);
 
-      // ============================================================
-      // 4. 過去日チェック
-      // ============================================================
       const now = new Date();
       if (startAt.getTime() < now.getTime()) {
         await failAppointment(ref, salonId, 'past_appointment', { startAt: startAt.toISOString(), now: now.toISOString() });
         return;
       }
 
-      // ============================================================
-      // 5. 営業時間チェック（settings 取得）
-      // ============================================================
       const settingsDoc = await db.collection('salons').doc(salonId).collection('config').doc('settings').get();
       if (settingsDoc.exists) {
         const settings = settingsDoc.data();
-        // 簡略チェック（厳密な営業時間は今後実装）
         const dow = new Date(dateKey + 'T12:00:00+09:00').getDay();
         if (settings.closedDows && settings.closedDows.indexOf(dow) >= 0) {
           await failAppointment(ref, salonId, 'closed_day', { dow });
@@ -247,11 +208,6 @@ exports.onAppointmentCreate = onDocumentCreated(
         }
       }
 
-      // ============================================================
-      // 6. 同時刻の他予約との衝突チェック
-      // ============================================================
-      // フェーズ1: staffId='owner', resourceIds=['default'] 固定
-      // 同じサロンの確定済み予約で、時間が重なるものがないかチェック
       const sameDaySnap = await db.collection('salons').doc(salonId).collection('appointments')
         .where('dateKey', '==', dateKey)
         .where('status', '==', 'confirmed')
@@ -262,12 +218,11 @@ exports.onAppointmentCreate = onDocumentCreated(
 
       let conflict = false;
       sameDaySnap.forEach((d) => {
-        if (d.id === appointmentId) return; // 自分自身は除外
+        if (d.id === appointmentId) return;
         const other = d.data();
         if (!other.startAt || !other.endAt) return;
         const otherStart = other.startAt.toMillis ? other.startAt.toMillis() : new Date(other.startAt).getTime();
         const otherEnd = other.endAt.toMillis ? other.endAt.toMillis() : new Date(other.endAt).getTime();
-        // 区間 [newStart, newEnd) と [otherStart, otherEnd) が重なるか
         if (newStart < otherEnd && otherStart < newEnd) {
           conflict = true;
         }
@@ -278,9 +233,6 @@ exports.onAppointmentCreate = onDocumentCreated(
         return;
       }
 
-      // ============================================================
-      // 7. closeBlocks（臨時休業）との衝突チェック
-      // ============================================================
       const closeBlocksSnap = await db.collection('salons').doc(salonId).collection('closeBlocks')
         .where('dateKey', '==', dateKey)
         .get();
@@ -301,10 +253,6 @@ exports.onAppointmentCreate = onDocumentCreated(
         return;
       }
 
-      // ============================================================
-      // 8. 顧客情報取得（メール用）
-      //   【2026/5/29 v8.1化】customers/{customerDocId} を引く
-      // ============================================================
       const customerDoc = await db.collection('salons').doc(salonId).collection('customers').doc(customerDocId).get();
       if (!customerDoc.exists) {
         await failAppointment(ref, salonId, 'customer_not_found', { customerDocId });
@@ -312,9 +260,6 @@ exports.onAppointmentCreate = onDocumentCreated(
       }
       const customer = customerDoc.data();
 
-      // ============================================================
-      // 9. サロン情報取得（メール用）
-      // ============================================================
       const salonDoc = await db.collection('salons').doc(salonId).get();
       if (!salonDoc.exists) {
         await failAppointment(ref, salonId, 'salon_not_found', { salonId });
@@ -322,11 +267,7 @@ exports.onAppointmentCreate = onDocumentCreated(
       }
       const salon = salonDoc.data();
 
-      // ============================================================
-      // 10. 検証 OK → 予約確定
-      // ============================================================
       await ref.update({
-        // サーバ確定フィールド
         end: end,
         startAt: admin.firestore.Timestamp.fromDate(startAt),
         endAt: admin.firestore.Timestamp.fromDate(endAt),
@@ -339,17 +280,12 @@ exports.onAppointmentCreate = onDocumentCreated(
         menuNameSnapshot: menu.name || '',
         editingBy: null,
         confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
-        // pendingCreate を削除
         pendingCreate: admin.firestore.FieldValue.delete()
       });
 
       logger.info('Appointment confirmed', { salonId, appointmentId });
 
-      // ============================================================
-      // 11. 通知メール送信（顧客 + サロン）
-      // ============================================================
       const notifyChannels = customer.notifyChannels || { email: true, line: false };
-      // 通知先: 予約時点のメール(customerEmail)を最優先、なければカルテのemail
       const notifyTo = data.customerEmail || customer.email || '';
 
       if (notifyChannels.email && notifyTo) {
@@ -358,7 +294,6 @@ exports.onAppointmentCreate = onDocumentCreated(
           const salonName = salon.name || 'サロン';
           const fromName = salonName + ' <noreply@torita-app.com>';
 
-          // 顧客へ
           await resend.emails.send({
             from: fromName,
             to: notifyTo,
@@ -370,7 +305,6 @@ exports.onAppointmentCreate = onDocumentCreated(
             )
           });
 
-          // サロンへ
           if (salon.email) {
             await resend.emails.send({
               from: FROM_EMAIL_DEFAULT,
@@ -388,7 +322,6 @@ exports.onAppointmentCreate = onDocumentCreated(
           logger.info('Notification emails sent', { salonId, appointmentId });
         } catch (mailErr) {
           logger.error('Email send failed', { error: mailErr.message, salonId, appointmentId });
-          // メール失敗してもログだけ残し、予約は確定済みなのでそのまま
           await logNotificationFailure(salonId, appointmentId, 'email_send_failed', mailErr.message);
         }
       }
@@ -410,11 +343,30 @@ async function failAppointment(ref, salonId, reason, details) {
   await logNotificationFailure(salonId, ref.id, reason, JSON.stringify(details));
 }
 
+// ========================================
 // notificationLogs に失敗を記録
+//
+// ★ 2026/6/2 F-4: category を自動付与（シグネチャは不変）。
+//   呼び出し側は一切変更不要。reason から category を判定する。
+//     - 通知系 reason (email_send_failed / cancel_email_failed)
+//       → category='notification'
+//     - それ以外（予約検証エラー：menu_not_found / time_conflict 等）
+//       → category='validation'
+//   管理画面は将来 where('category','==','notification') で
+//   「通知失敗だけ」を絞り込める。既存ログ（category なし）は
+//   そのまま残る（後方互換）。
+//   channel/to は今は入れない（通知系 reason は現状 email のみ。
+//   必要になったら足す＝YAGNI）。
+// ========================================
 async function logNotificationFailure(salonId, appointmentId, reason, details) {
+  const NOTIFICATION_REASONS = ['email_send_failed', 'cancel_email_failed'];
+  const category = (NOTIFICATION_REASONS.indexOf(reason) >= 0)
+    ? 'notification'
+    : 'validation';
   try {
     await db.collection('salons').doc(salonId).collection('notificationLogs').add({
       appointmentId: appointmentId,
+      category: category,
       reason: reason,
       details: details,
       createdAt: admin.firestore.FieldValue.serverTimestamp()
@@ -426,10 +378,7 @@ async function logNotificationFailure(salonId, appointmentId, reason, details) {
 
 // ========================================
 // sendBookingEmail (既存、互換性のため残置)
-// v8 系から呼ばれている可能性があるため当面残す
-// 将来削除予定
 // ========================================
-
 function setCorsHeaders(res) {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -498,14 +447,7 @@ exports.sendBookingEmail = onRequest(
 );
 
 // ========================================
-// ========================================
-// getAvailableSlots (callable Function)
-//   顧客アプリ用：指定日の空き枠を返す。
-//   個人情報は一切返さない。
-// ========================================
-// onAppointmentUpdate トリガー
-// 顧客アプリからのキャンセル（status → 'cancelled_by_customer'）を検知し
-// 顧客・サロン両方にキャンセルメール送信
+// onAppointmentUpdate トリガー（キャンセル通知）
 // ========================================
 exports.onAppointmentUpdate = onDocumentUpdated(
   {
@@ -518,26 +460,22 @@ exports.onAppointmentUpdate = onDocumentUpdated(
     const salonId = event.params.salonId;
     const appointmentId = event.params.appointmentId;
 
-    // cancelled_by_customer への遷移のみ対象
     if (after.status !== 'cancelled_by_customer') return;
-    if (before.status === 'cancelled_by_customer') return; // 冪等
+    if (before.status === 'cancelled_by_customer') return;
 
     logger.info('onAppointmentUpdate: cancel detected', { salonId, appointmentId });
 
     try {
       const { dateKey, start, end, customerDocId, menuNameSnapshot, priceSnapshot } = after;
 
-      // 顧客情報取得
       const customerDoc = await db.collection('salons').doc(salonId)
         .collection('customers').doc(customerDocId).get();
       const customer = customerDoc.exists ? customerDoc.data() : {};
 
-      // サロン情報取得
       const salonDoc = await db.collection('salons').doc(salonId).get();
       const salon = salonDoc.exists ? salonDoc.data() : {};
       const salonName = salon.name || 'サロン';
 
-      // キャンセル料計算（cancelPolicy取得）
       const policyDoc = await db.collection('salons').doc(salonId)
         .collection('config').doc('cancelPolicy').get();
       const pol = policyDoc.exists ? policyDoc.data() : {};
@@ -563,7 +501,6 @@ exports.onAppointmentUpdate = onDocumentUpdated(
         cancelFee = Math.round(priceSnapshot * cancelPercent / 100);
       }
 
-      // メール本文生成（キャンセル用）
       const dateLabel = formatJpDate(dateKey);
       const menuName  = menuNameSnapshot || '';
       const feeText   = cancelFee > 0
@@ -605,7 +542,6 @@ exports.onAppointmentUpdate = onDocumentUpdated(
         const resend = getResend();
         const fromName = salonName + ' <noreply@torita-app.com>';
 
-        // 顧客へ
         await resend.emails.send({
           from: fromName,
           to: cancelNotifyTo,
@@ -613,7 +549,6 @@ exports.onAppointmentUpdate = onDocumentUpdated(
           html: buildCancelCustomerHtml()
         });
 
-        // サロンへ
         if (salon.email) {
           await resend.emails.send({
             from: FROM_EMAIL_DEFAULT,
@@ -638,14 +573,12 @@ exports.onAppointmentUpdate = onDocumentUpdated(
 // ========================================
 exports.getAvailableSlots = onCall(
   async (request) => {
-    // 認証チェック
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'ログインが必要です。');
     }
 
     const { salonId, dateKey, menuId, optionMenuIds } = request.data || {};
 
-    // 入力バリデーション
     if (!salonId || typeof salonId !== 'string') {
       throw new HttpsError('invalid-argument', 'salonId が不正です。');
     }
@@ -657,7 +590,6 @@ exports.getAvailableSlots = onCall(
     }
     const optIds = Array.isArray(optionMenuIds) ? optionMenuIds : [];
 
-    // ---- 並列取得 ----
     const salonRef = db.collection('salons').doc(salonId);
 
     const [settingsDoc, menuDoc, apptSnap, closeBlockSnap] = await Promise.all([
@@ -667,12 +599,10 @@ exports.getAvailableSlots = onCall(
       salonRef.collection('closeBlocks').get()
     ]);
 
-    // オプションメニューを並列取得
     const optDocs = await Promise.all(
       optIds.map(id => salonRef.collection('menus').doc(id).get())
     );
 
-    // ---- 所要時間計算 ----
     if (!menuDoc.exists) {
       throw new HttpsError('not-found', 'メニューが見つかりません。');
     }
@@ -683,7 +613,6 @@ exports.getAvailableSlots = onCall(
     }
     const intervalAfter = menu.intervalAfter || 0;
 
-    // ---- settings ----
     const settings = settingsDoc.exists ? settingsDoc.data() : {};
     const openMin  = hhmmToMin(settings.openTime  || '10:00');
     const closeMin = hhmmToMin(settings.closeTime || '19:00');
@@ -692,9 +621,6 @@ exports.getAvailableSlots = onCall(
     const needMin  = totalDuration > 0 ? totalDuration : slotMin;
     const latestStart = closeMin - needMin;
 
-    // ---- ブロック済み区間を収集 ----
-    // ブロック対象: status==='confirmed' または pendingCreate===true
-    // ブロックしない: キャンセル系(cancelled/cancelled_by_customer/cancelled_by_salon/no_show/time_conflict/failed)
     const CANCEL_STATUSES = new Set([
       'cancelled', 'cancelled_by_customer', 'cancelled_by_salon',
       'no_show', 'time_conflict', 'failed'
@@ -705,31 +631,26 @@ exports.getAvailableSlots = onCall(
       const a = doc.data();
       const isConfirmed  = a.status === 'confirmed';
       const isPending    = a.pendingCreate === true;
-      if (CANCEL_STATUSES.has(a.status)) return; // キャンセル系は除外
+      if (CANCEL_STATUSES.has(a.status)) return;
       if (!isConfirmed && !isPending) return;
 
-      // startAt/endAt (Timestamp) が使えればそちら優先、なければ start/end 文字列
       let s, e;
       if (a.startAt && a.startAt.toMillis) {
         s = a.startAt.toMillis();
-        // blockedUntil があればインターバル込みの終了時刻として使う
         const endTs = a.blockedUntil || a.endAt;
         e = endTs && endTs.toMillis ? endTs.toMillis() : (s + needMin * 60000);
       } else {
-        // フォールバック: start/end 文字列
         const sMin = hhmmToMin(a.start);
         if (isNaN(sMin)) return;
         const eMin = a.end ? hhmmToMin(a.end) : (sMin + (a.durationSnapshot || slotMin));
         s = sMin;
-        e = eMin + intervalMin; // ミリ秒ではなく分単位で揃える（後で判定時に統一）
-        // 分単位フラグ
+        e = eMin + intervalMin;
         busy.push({ startMin: sMin - intervalMin, endMin: eMin + intervalMin, isMin: true });
         return;
       }
       busy.push({ startMs: s, endMs: e, isMin: false });
     });
 
-    // closeBlocks
     closeBlockSnap.forEach(doc => {
       const b = doc.data();
       if (b.dateKey && b.dateKey !== dateKey) return;
@@ -738,7 +659,6 @@ exports.getAvailableSlots = onCall(
       busy.push({ startMin: bs, endMin: be, isMin: true });
     });
 
-    // 定休日（曜日）
     const dObj = new Date(dateKey + 'T12:00:00+09:00');
     const dow = dObj.getDay();
     const weeklyClose = settings.weeklyClose || [];
@@ -748,15 +668,11 @@ exports.getAvailableSlots = onCall(
       }
     }
 
-    // 定休曜日チェック
     const closedDows = settings.closedDows || [];
     if (closedDows.indexOf(dow) >= 0) {
-      // 終日クローズ
       return { dateKey, slots: [] };
     }
 
-    // ---- スロット生成 ----
-    // 現在時刻（当日のみ過去スロット除外）
     const now = new Date();
     const todayKey = [
       now.getFullYear(),
@@ -771,21 +687,16 @@ exports.getAvailableSlots = onCall(
       const slotEnd   = t + needMin + intervalAfter;
       let available = true;
 
-      // 過去スロット除外
       if (nowMin >= 0 && slotStart <= nowMin) { available = false; }
 
       if (available) {
-        // startAt/endAt (ms) で記録されたブロックとの衝突チェック
-        // ミリ秒系は dateKey+時刻→ms に変換して比較
         const slotStartMs = new Date(dateKey + 'T' + minToHHMM(slotStart) + ':00+09:00').getTime();
         const slotEndMs   = new Date(dateKey + 'T' + minToHHMM(slotEnd)   + ':00+09:00').getTime();
 
         for (const b of busy) {
           if (b.isMin) {
-            // 分単位比較
             if (slotStart < b.endMin && slotEnd > b.startMin) { available = false; break; }
           } else {
-            // ms単位比較
             if (slotStartMs < b.endMs && slotEndMs > b.startMs) { available = false; break; }
           }
         }
@@ -798,55 +709,24 @@ exports.getAvailableSlots = onCall(
   }
 );
 
-// hhmm→分 変換（Functions内ユーティリティ）
 function hhmmToMin(s) {
   if (!s) return NaN;
   const parts = String(s).split(':');
   if (parts.length < 2) return NaN;
   return parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
 }
-// 分→hhmm変換
 function minToHHMM(m) {
   const h  = Math.floor(m / 60);
   const mi = m % 60;
   return String(h).padStart(2, '0') + ':' + String(mi).padStart(2, '0');
 }
 
-// resolveOrClaimCustomer (callable Function)
-// 設計書 DESIGN_v8_1_customer_identity.md 2-4 に1対1照合
-//
-// 用途:
-//   顧客アプリ登録後の初回ログイン時に呼び出される。
-//   顧客の identity（authUid）を customerDocId に解決する。
-//   - 既に authIndex に登録済みなら冪等に返す
-//   - 同一サロン内の email 一致カルテが
-//       * 0件 → 新カルテ作成
-//       * 1件 → 既存カルテに claim
-//       * 2件以上 → 新カルテ作成 + 候補に needsMergeReview=true
-//
-// 呼び出し方（クライアント側 JS）:
-//   const fn = firebase.functions('asia-northeast1')
-//                .httpsCallable('resolveOrClaimCustomer');
-//   const result = await fn({ salonId, name, phone });
-//   // result.data: { result: '...', customerDocId, ... }
-//
-// 認証コンテキストは Firebase SDK が自動付与（uid, token.email,
-// token.email_verified）。
-//
-// 必須要件（v8.1 2-4）:
-//   1. トランザクション必須（authIndex 作成と customers.authUid 付与の不可分性）
-//   2. 冪等性（同じユーザーが2回呼んでも安全）
-//   3. emailVerified=false 拒否
-//   4. claim 成立時の過去予約 authUid 後埋め（分割バッチ）
-//   5. エラー時の挙動：トランザクション失敗時はクライアントにエラーを返す
 // ========================================
-
+// resolveOrClaimCustomer (callable Function)
+// ========================================
 exports.resolveOrClaimCustomer = onCall(
   { region: 'asia-northeast1' },
   async (request) => {
-    // ============================================================
-    // 1. 認証チェック
-    // ============================================================
     if (!request.auth) {
       throw new HttpsError('unauthenticated', 'ログインが必要です');
     }
@@ -861,15 +741,9 @@ exports.resolveOrClaimCustomer = onCall(
       );
     }
     if (!email) {
-      throw new HttpsError(
-        'failed-precondition',
-        'メールアドレスが取得できませんでした'
-      );
+      throw new HttpsError('failed-precondition', 'メールアドレスが取得できませんでした');
     }
 
-    // ============================================================
-    // 2. 入力バリデーション
-    // ============================================================
     const data = request.data || {};
     const salonId = data.salonId;
     const name = (data.name || '').trim();
@@ -880,10 +754,7 @@ exports.resolveOrClaimCustomer = onCall(
     }
 
     logger.info('resolveOrClaimCustomer called', { uid, email, salonId });
-    
-    // ================================================================
-    // 2-5. salon 本体ドキュメント存在チェック（再発防止・O/0事故対策）
-    // ================================================================
+
     const salonDocRef = db.collection('salons').doc(salonId);
     const salonDocSnap = await salonDocRef.get();
     if (!salonDocSnap.exists) {
@@ -894,10 +765,6 @@ exports.resolveOrClaimCustomer = onCall(
       );
     }
 
-
-    // ============================================================
-    // 3. 冪等性チェック: 既に authIndex にあれば即返却
-    // ============================================================
     const authIndexRef = db.collection('salons').doc(salonId)
       .collection('authIndex').doc(uid);
     const existingIndex = await authIndexRef.get();
@@ -910,10 +777,6 @@ exports.resolveOrClaimCustomer = onCall(
       };
     }
 
-    // ============================================================
-    // 4. メール一致候補検索
-    //    （未 claim = authUid==null かつ isMerged==false）
-    // ============================================================
     const customersRef = db.collection('salons').doc(salonId).collection('customers');
     const emailMatchSnap = await customersRef.where('email', '==', email).get();
 
@@ -931,30 +794,21 @@ exports.resolveOrClaimCustomer = onCall(
       unclaimedCount: unclaimedCandidates.length
     });
 
-    // ============================================================
-    // 5. 件数判定 → トランザクション実行
-    // ============================================================
-
-    // -------- 4-A: 候補=1件 → claim 成立 --------
     if (unclaimedCandidates.length === 1) {
       const candidateId = unclaimedCandidates[0].id;
       const candidateRef = customersRef.doc(candidateId);
 
       try {
         await db.runTransaction(async (tx) => {
-          // トランザクション内で再 get（楽観ロック）
           const freshDoc = await tx.get(candidateRef);
           if (!freshDoc.exists) {
             throw new HttpsError('not-found', '候補カルテが見つかりません');
           }
           const fresh = freshDoc.data();
           if (fresh.authUid != null || fresh.isMerged === true) {
-            // 直前で他者が claim した / merge された
-            // → 候補なし扱いで新カルテ作成に切り替え（後続処理に委ねる）
             throw new HttpsError('aborted', 'CANDIDATE_STATE_CHANGED');
           }
 
-          // claim 実行
           tx.update(candidateRef, {
             authUid: uid,
             updatedAt: admin.firestore.FieldValue.serverTimestamp()
@@ -966,7 +820,6 @@ exports.resolveOrClaimCustomer = onCall(
         });
       } catch (txErr) {
         if (txErr.code === 'aborted' && txErr.message === 'CANDIDATE_STATE_CHANGED') {
-          // リトライ: 4-B / 4-C の経路に流し直す（簡易リトライ）
           logger.warn('Candidate state changed during tx, retrying as new', { uid, salonId });
           return await createNewCustomerAndReturn(
             db, salonId, customersRef, authIndexRef, uid, email, name, phone, false, []
@@ -976,14 +829,12 @@ exports.resolveOrClaimCustomer = onCall(
         throw new HttpsError('internal', 'claim 処理に失敗しました: ' + txErr.message);
       }
 
-      // 過去予約の authUid 後埋め（トランザクション外・分割バッチ）
       let claimedCount = 0;
       try {
         claimedCount = await backfillAuthUidOnPastAppointments(
           db, salonId, candidateId, uid
         );
       } catch (backfillErr) {
-        // 後埋め失敗は claim 自体は成立しているのでログのみ
         logger.error('backfillAuthUidOnPastAppointments failed', {
           uid, salonId, candidateId, error: backfillErr.message
         });
@@ -997,50 +848,36 @@ exports.resolveOrClaimCustomer = onCall(
       };
     }
 
-    // -------- 4-B: 候補=0件 → 新カルテ作成 --------
     if (unclaimedCandidates.length === 0) {
       return await createNewCustomerAndReturn(
         db, salonId, customersRef, authIndexRef,
-        uid, email, name, phone,
-        /* needsMergeReview */ false,
-        /* candidateIdsToFlag */ []
+        uid, email, name, phone, false, []
       );
     }
 
-    // -------- 4-C: 候補=2件以上 → 新カルテ作成 + 候補に needsMergeReview --------
     const candidateIds = unclaimedCandidates.map((c) => c.id);
     return await createNewCustomerAndReturn(
       db, salonId, customersRef, authIndexRef,
-      uid, email, name, phone,
-      /* needsMergeReview */ true,
-      /* candidateIdsToFlag */ candidateIds
+      uid, email, name, phone, true, candidateIds
     );
   }
 );
 
-// ========================================
-// 新カルテ作成共通処理（4-B/4-C で使う）
-// 4-C の場合: needsMergeReview=true で新カルテ作成 +
-//             候補カルテ全件に needsMergeReview=true を立てる
-// ========================================
 async function createNewCustomerAndReturn(
   db, salonId, customersRef, authIndexRef,
   uid, email, name, phone,
   needsMergeReview, candidateIdsToFlag
 ) {
-  const newDocRef = customersRef.doc(); // 自動採番
+  const newDocRef = customersRef.doc();
   const newDocId = newDocRef.id;
 
   try {
     await db.runTransaction(async (tx) => {
-      // authIndex の二重チェック（4-A から落ちてきた場合の保険）
       const freshIndex = await tx.get(authIndexRef);
       if (freshIndex.exists) {
-        // 既に他のパスで作られた → 既存値を返す（後続で読み直す）
         throw new HttpsError('aborted', 'INDEX_ALREADY_EXISTS');
       }
 
-      // 候補カルテ全件を再 get（4-C 経路）
       const candidateRefs = candidateIdsToFlag.map((id) => customersRef.doc(id));
       const candidateDocs = [];
       for (let i = 0; i < candidateRefs.length; i++) {
@@ -1048,7 +885,6 @@ async function createNewCustomerAndReturn(
         candidateDocs.push(d);
       }
 
-      // 新カルテ作成
       tx.set(newDocRef, {
         name: name,
         phone: phone,
@@ -1072,13 +908,11 @@ async function createNewCustomerAndReturn(
         updatedAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
-      // authIndex 作成
       tx.set(authIndexRef, {
         customerDocId: newDocId,
         createdAt: admin.firestore.FieldValue.serverTimestamp()
       });
 
-      // 4-C: 候補カルテ全件に needsMergeReview=true を立てる
       for (let i = 0; i < candidateDocs.length; i++) {
         const d = candidateDocs[i];
         if (d.exists && d.data().isMerged !== true) {
@@ -1091,7 +925,6 @@ async function createNewCustomerAndReturn(
     });
   } catch (txErr) {
     if (txErr.code === 'aborted' && txErr.message === 'INDEX_ALREADY_EXISTS') {
-      // 他のパスで authIndex が作られた → 既存を返す
       const re = await authIndexRef.get();
       if (re.exists) {
         return {
@@ -1124,14 +957,6 @@ async function createNewCustomerAndReturn(
   }
 }
 
-// ========================================
-// 過去予約の authUid 後埋め（claim 成立時）
-// 設計書 v8.1 2-4 必須要件 4
-//
-// 分割バッチで appointments / appointments_archive 両方を処理
-// 1バッチ ≤ 500件（Firestore バッチ上限対策）
-// 失敗時は logger に記録、claim 自体の成立は維持
-// ========================================
 async function backfillAuthUidOnPastAppointments(db, salonId, customerDocId, uid) {
   const collectionsToProcess = ['appointments', 'appointments_archive'];
   let totalUpdated = 0;
@@ -1140,11 +965,6 @@ async function backfillAuthUidOnPastAppointments(db, salonId, customerDocId, uid
     const colName = collectionsToProcess[ci];
     const colRef = db.collection('salons').doc(salonId).collection(colName);
 
-    // customerDocId 一致 かつ authUid==null のものを取得
-    // ※ Firestore は != null クエリができないので、
-    //   customerDocId 一致を取り → クライアント側で authUid==null をフィルタ
-    //   件数が多いサロンでは複合インデックス（customerDocId, authUid）で
-    //   将来最適化するが、フェーズ1では十分
     const snap = await colRef.where('customerDocId', '==', customerDocId).get();
 
     let batch = db.batch();
@@ -1152,7 +972,7 @@ async function backfillAuthUidOnPastAppointments(db, salonId, customerDocId, uid
 
     for (const doc of snap.docs) {
       const a = doc.data();
-      if (a.authUid != null) continue; // 既に埋まっている
+      if (a.authUid != null) continue;
 
       batch.update(doc.ref, {
         authUid: uid,
@@ -1161,7 +981,6 @@ async function backfillAuthUidOnPastAppointments(db, salonId, customerDocId, uid
       opsInBatch++;
       totalUpdated++;
 
-      // 500件ごとにコミット（Firestore バッチ上限 500）
       if (opsInBatch >= 450) {
         await batch.commit();
         batch = db.batch();
