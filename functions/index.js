@@ -627,6 +627,8 @@ exports.onAppointmentUpdate = onDocumentUpdated(
       }
     } catch (err) {
       logger.error('onAppointmentUpdate error', { error: err.message, stack: err.stack });
+      // ★ 2026/6/1 ⑤：キャンセル通知失敗も notificationLogs に記録
+      await logNotificationFailure(salonId, appointmentId, 'cancel_email_failed', err.message);
     }
   }
 );
