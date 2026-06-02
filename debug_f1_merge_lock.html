@@ -12,86 +12,122 @@ h1 { font-size: 18px; color: #333; }
 .card p { font-size: 13px; color: #666; margin: 4px 0 10px; line-height: 1.6; }
 button { padding: 10px 18px; border: none; border-radius: 6px; cursor: pointer; font-size: 14px; margin-right: 8px; margin-top: 4px; }
 .btn-run { background: #4a90d9; color: #fff; }
+.btn-orange { background: #e67e22; color: #fff; }
 .btn-reset { background: #e0e0e0; color: #333; }
-.btn-run:disabled { background: #aaa; }
+.btn-danger { background: #e74c3c; color: #fff; }
+button:disabled { background: #aaa !important; }
 .result { margin-top: 12px; padding: 10px 14px; border-radius: 6px; font-size: 13px; white-space: pre-wrap; word-break: break-all; }
 .pass { background: #e8f5e9; border-left: 4px solid #4caf50; }
 .fail { background: #ffebee; border-left: 4px solid #f44336; }
 .info { background: #e3f2fd; border-left: 4px solid #2196f3; }
 .warn { background: #fff8e1; border-left: 4px solid #ff9800; }
-#auth-status { font-size: 13px; padding: 8px 12px; border-radius: 6px; margin-bottom: 16px; }
+#auth-bar { font-size: 13px; padding: 10px 14px; border-radius: 6px; margin-bottom: 16px; }
 .uid-chars { font-size: 11px; color: #888; margin-top: 4px; word-break: break-all; }
+input[type=text], input[type=email], input[type=password] {
+  width: 100%; max-width: 400px; padding: 8px; font-size: 14px;
+  border: 1px solid #ccc; border-radius: 4px; margin-top: 4px; box-sizing: border-box;
+}
+#login-section { background: #fff; border-radius: 8px; padding: 16px; margin-bottom: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.1); }
+#test-sections { display: none; }
 </style>
 </head>
 <body>
-<h1>F-1 mergeロック取得失敗テスト</h1>
-<p style="font-size:13px;color:#666;">
-テストアカウント: torita.test+12345678912@gmail.com (taro123)<br>
-URLに ?salon=[YOUR_SALON_ID] を付けて開くこと。
-</p>
+<h1>F-1 mergeロックテスト</h1>
 
-<div id="auth-status" class="info">認証確認中...</div>
+<div id="auth-bar" class="info">Firebase 初期化中...</div>
 
-<!-- T0: 正常系 -->
-<div class="card">
-  <h2>T0: 正常系（冪等性確認）</h2>
-  <p>
-    既に authIndex が存在する状態で呼び出す。<br>
-    期待結果: <strong>already_resolved</strong>（customerDocId が返る）
-  </p>
-  <button class="btn-run" id="btn-t0">T0 実行</button>
-  <div id="result-t0"></div>
-</div>
-
-<!-- T1: CANDIDATE_STATE_CHANGED -->
-<div class="card">
-  <h2>T1: CANDIDATE_STATE_CHANGED（楽観ロック失敗）</h2>
-  <p>
-    手順:<br>
-    1. Firebase Console で customers コレクションに未 claim カルテを手動作成<br>
-    　（email = torita.test+12345678912@gmail.com、authUid = null）<br>
-    2. 下の「カルテID確認」に作成した docId を入力<br>
-    3. 「authUid を手動セット」ボタンで claim 済み状態を再現<br>
-    4. 「T1 実行」でフォールバック確認<br>
-    期待結果: <strong>created_new</strong>（新カルテ作成にフォールバック）
+<!-- ログインフォーム -->
+<div id="login-section">
+  <h2 style="font-size:15px;margin:0 0 8px;color:#555;">ログイン</h2>
+  <p style="font-size:13px;color:#666;margin:0 0 10px;">
+    テストアカウント: torita.test+12345678912@gmail.com / taro123
   </p>
   <div style="margin-bottom:8px;">
-    <label style="font-size:13px;">未 claim カルテの docId:</label><br>
-    <input id="t1-doc-id" type="text" placeholder="例: abc123xyz..." style="width:100%;max-width:400px;padding:6px;font-size:13px;border:1px solid #ccc;border-radius:4px;margin-top:4px;">
-    <div class="uid-chars" id="t1-doc-chars"></div>
+    <label style="font-size:13px;">メール</label><br>
+    <input type="email" id="login-email" value="torita.test+12345678912@gmail.com">
   </div>
-  <button class="btn-run" id="btn-t1-prep">① authUid を手動セット（claim済み状態を再現）</button>
-  <button class="btn-run" id="btn-t1" style="background:#e67e22;">② T1 実行（resolveOrClaimCustomer 呼び出し）</button>
-  <div id="result-t1"></div>
-</div>
-
-<!-- T2: INDEX_ALREADY_EXISTS -->
-<div class="card">
-  <h2>T2: INDEX_ALREADY_EXISTS（authIndex 二重チェック）</h2>
-  <p>
-    T0 と同様に authIndex が存在する状態。<br>
-    createNewCustomerAndReturn 内の INDEX_ALREADY_EXISTS パスを確認する。<br>
-    ※ このケースは T0 と同じ呼び出しで内部的に通過する（冪等性チェックで早期返却）。<br>
-    期待結果: <strong>already_resolved</strong>
-  </p>
-  <button class="btn-run" id="btn-t2">T2 実行</button>
-  <div id="result-t2"></div>
-</div>
-
-<!-- クリーンアップ -->
-<div class="card">
-  <h2>テスト後クリーンアップ</h2>
-  <p>T1 で作成された新カルテ・authIndex を削除する。<br>
-  削除対象の customerDocId を入力してください。</p>
-  <div style="margin-bottom:8px;">
-    <label style="font-size:13px;">削除する customerDocId:</label><br>
-    <input id="cleanup-doc-id" type="text" placeholder="T1 結果に表示された customerDocId" style="width:100%;max-width:400px;padding:6px;font-size:13px;border:1px solid #ccc;border-radius:4px;margin-top:4px;">
+  <div style="margin-bottom:12px;">
+    <label style="font-size:13px;">パスワード</label><br>
+    <input type="password" id="login-password" value="taro123">
   </div>
-  <button class="btn-reset" id="btn-cleanup">削除実行（カルテ + authIndex）</button>
-  <div id="result-cleanup"></div>
+  <button class="btn-run" id="btn-login">ログイン</button>
+  <div id="result-login"></div>
 </div>
 
-<!-- Firebase SDK -->
+<!-- テストセクション（ログイン後に表示） -->
+<div id="test-sections">
+
+  <!-- T0 -->
+  <div class="card">
+    <h2>T0: 正常系（冪等性確認）</h2>
+    <p>既に authIndex が存在する状態で呼び出す。<br>期待結果: <strong>already_resolved</strong></p>
+    <button class="btn-run" id="btn-t0">T0 実行</button>
+    <div id="result-t0"></div>
+  </div>
+
+  <!-- T1 -->
+  <div class="card">
+    <h2>T1: CANDIDATE_STATE_CHANGED（楽観ロック失敗）</h2>
+    <p>
+      手順:<br>
+      1. Firebase Console で customers に未 claim カルテを手動作成<br>
+      　（email = torita.test+12345678912@gmail.com、authUid = null）<br>
+      2. 作成した docId を下に入力<br>
+      3. 「① authUid をセット」で claim 済み状態を再現<br>
+      4. 「② T1 実行」でフォールバック確認<br>
+      期待結果: <strong>created_new</strong>（新カルテ作成にフォールバック）<br>
+      ※ T1 実行前に authIndex が残っている場合は already_resolved になります。
+      その場合は先に T1 前準備（authIndex 削除）を実行してください。
+    </p>
+    <div style="margin-bottom:8px;">
+      <label style="font-size:13px;">未 claim カルテの docId:</label><br>
+      <input type="text" id="t1-doc-id" placeholder="例: abc123xyz...">
+      <div class="uid-chars" id="t1-doc-chars"></div>
+    </div>
+    <button class="btn-run" id="btn-t1-prep">① authUid をセット（claim済み状態を再現）</button>
+    <button class="btn-orange" id="btn-t1">② T1 実行</button>
+    <div id="result-t1"></div>
+  </div>
+
+  <!-- T1前準備：authIndex削除 -->
+  <div class="card">
+    <h2>T1 前準備: authIndex 削除（必要な場合のみ）</h2>
+    <p>
+      T1 を正しく動かすには authIndex が存在しない状態が必要です。<br>
+      T0 実行済みの場合はここで一度削除してから T1 を実行してください。<br>
+      ※ T1 完了後は必ず「クリーンアップ」で authIndex を再作成してください。
+    </p>
+    <button class="btn-danger" id="btn-delete-auth-index">authIndex を削除</button>
+    <div id="result-delete-auth-index"></div>
+  </div>
+
+  <!-- T2 -->
+  <div class="card">
+    <h2>T2: INDEX_ALREADY_EXISTS（authIndex 二重チェック）</h2>
+    <p>authIndex が存在する状態で呼び出す。<br>期待結果: <strong>already_resolved</strong></p>
+    <button class="btn-run" id="btn-t2">T2 実行</button>
+    <div id="result-t2"></div>
+  </div>
+
+  <!-- クリーンアップ -->
+  <div class="card">
+    <h2>テスト後クリーンアップ</h2>
+    <p>T1 で作成された新カルテと authIndex を削除します。</p>
+    <div style="margin-bottom:8px;">
+      <label style="font-size:13px;">削除する customerDocId（T1 結果に表示されたもの）:</label><br>
+      <input type="text" id="cleanup-doc-id" placeholder="T1 結果の customerDocId">
+    </div>
+    <button class="btn-reset" id="btn-cleanup">削除実行（カルテ + authIndex）</button>
+    <div id="result-cleanup"></div>
+  </div>
+
+  <!-- ログアウト -->
+  <div class="card">
+    <button class="btn-reset" id="btn-logout">ログアウト</button>
+  </div>
+
+</div><!-- /test-sections -->
+
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore-compat.js"></script>
@@ -101,254 +137,218 @@ URLに ?salon=[YOUR_SALON_ID] を付けて開くこと。
 (function () {
   'use strict';
 
-  // URL から salonId 取得
   function getSalonId() {
     var params = new URLSearchParams(window.location.search);
-    var sid = (params.get('salon') || '').replace(/\s/g, '');
-    return sid;
+    return (params.get('salon') || '').replace(/\s/g, '');
   }
 
   var salonId = getSalonId();
-  var authEl = document.getElementById('auth-status');
+  var currentUser = null;
 
-  // salonId チェック
-  if (!salonId) {
-    authEl.className = 'fail';
-    authEl.textContent = 'URLに ?salon=[YOUR_SALON_ID] を付けてください。';
-  }
-
-  // charCodeAt 表示
-  document.getElementById('t1-doc-id').addEventListener('input', function () {
-    var v = this.value;
-    var codes = [];
-    for (var i = 0; i < v.length; i++) {
-      codes.push(v.charCodeAt(i));
-    }
-    document.getElementById('t1-doc-chars').textContent =
-      v.length > 0 ? 'codes: [' + codes.join(', ') + ']' : '';
-  });
-
-  // 結果表示
   function showResult(elId, cls, text) {
     var el = document.getElementById(elId);
     el.className = 'result ' + cls;
     el.textContent = text;
   }
 
-  // 現在ユーザー取得（Promise）
-  function getUser() {
-    return new Promise(function (resolve, reject) {
-      var unsub = firebase.auth().onAuthStateChanged(function (u) {
-        unsub();
-        if (u) { resolve(u); }
-        else { reject(new Error('未ログイン')); }
-      });
-    });
-  }
-
-  // Functions callable 取得
   function getFn(name) {
     return firebase.app().functions('asia-northeast1').httpsCallable(name);
   }
 
-  // 認証状態表示
+  function charCodes(s) {
+    var codes = [];
+    for (var i = 0; i < s.length; i++) { codes.push(s.charCodeAt(i)); }
+    return '[' + codes.join(', ') + ']';
+  }
+
+  // charCodeAt 表示
+  document.getElementById('t1-doc-id').addEventListener('input', function () {
+    var v = this.value;
+    document.getElementById('t1-doc-chars').textContent = v.length > 0 ? 'codes: ' + charCodes(v) : '';
+  });
+
+  // 認証状態監視
   firebase.auth().onAuthStateChanged(function (user) {
-    if (!salonId) return;
+    var authBar = document.getElementById('auth-bar');
+    var loginSection = document.getElementById('login-section');
+    var testSections = document.getElementById('test-sections');
+
     if (user) {
-      authEl.className = 'pass';
-      authEl.innerHTML =
+      currentUser = user;
+      authBar.className = 'pass';
+      authBar.innerHTML =
         'ログイン中: ' + user.email +
         '<br>UID: ' + user.uid +
-        '<div class="uid-chars">codes: [' +
-        user.uid.split('').map(function(c){return c.charCodeAt(0);}).join(', ') +
-        ']</div>' +
-        '<br>salonId: ' + salonId +
-        '<div class="uid-chars">codes: [' +
-        salonId.split('').map(function(c){return c.charCodeAt(0);}).join(', ') +
-        ']</div>';
+        '<div class="uid-chars">codes: ' + charCodes(user.uid) + '</div>' +
+        '<br>salonId: ' + (salonId || '(未設定)') +
+        (salonId ? '<div class="uid-chars">codes: ' + charCodes(salonId) + '</div>' : '');
+      loginSection.style.display = 'none';
+      testSections.style.display = 'block';
+      if (!salonId) {
+        authBar.className = 'warn';
+        authBar.innerHTML += '<br><strong>⚠ URLに ?salon=[YOUR_SALON_ID] が必要です</strong>';
+      }
     } else {
-      authEl.className = 'warn';
-      authEl.textContent = '未ログインです。Firebase Auth でログインしてください。';
+      currentUser = null;
+      authBar.className = 'warn';
+      authBar.textContent = '未ログインです。下のフォームでログインしてください。';
+      loginSection.style.display = 'block';
+      testSections.style.display = 'none';
     }
   });
 
-  // ============================================================
-  // T0: 正常系（already_resolved）
-  // ============================================================
+  // ログイン
+  document.getElementById('btn-login').addEventListener('click', function () {
+    var btn = this;
+    var email = document.getElementById('login-email').value.trim();
+    var pass = document.getElementById('login-password').value;
+    btn.disabled = true;
+    showResult('result-login', 'info', 'ログイン中...');
+    firebase.auth().signInWithEmailAndPassword(email, pass)
+      .then(function () {
+        showResult('result-login', 'pass', '✅ ログイン成功');
+      })
+      .catch(function (err) {
+        showResult('result-login', 'fail', '❌ ' + err.message);
+        btn.disabled = false;
+      });
+  });
+
+  // ログアウト
+  document.getElementById('btn-logout').addEventListener('click', function () {
+    firebase.auth().signOut();
+  });
+
+  // T0
   document.getElementById('btn-t0').addEventListener('click', function () {
     var btn = this;
     btn.disabled = true;
     showResult('result-t0', 'info', '実行中...');
-
-    getUser().then(function () {
-      var fn = getFn('resolveOrClaimCustomer');
-      return fn({ salonId: salonId, name: '', phone: '' });
-    }).then(function (result) {
-      var d = result.data;
-      var expected = 'already_resolved';
-      var pass = d.result === expected;
-      showResult(
-        'result-t0',
-        pass ? 'pass' : 'fail',
-        (pass ? '✅ PASS' : '❌ FAIL') + '\n' +
-        '期待: ' + expected + '\n' +
-        '結果: ' + d.result + '\n' +
-        'customerDocId: ' + (d.customerDocId || '(なし)') + '\n' +
-        '全データ: ' + JSON.stringify(d, null, 2)
-      );
-    }).catch(function (err) {
-      showResult('result-t0', 'fail', '❌ エラー\n' + err.message);
-    }).finally(function () {
-      btn.disabled = false;
-    });
+    getFn('resolveOrClaimCustomer')({ salonId: salonId, name: '', phone: '' })
+      .then(function (result) {
+        var d = result.data;
+        var pass = d.result === 'already_resolved';
+        showResult('result-t0', pass ? 'pass' : 'fail',
+          (pass ? '✅ PASS' : '❌ FAIL') + '\n期待: already_resolved\n結果: ' + d.result +
+          '\ncustomerDocId: ' + (d.customerDocId || '(なし)') +
+          '\n全データ: ' + JSON.stringify(d, null, 2));
+      })
+      .catch(function (err) { showResult('result-t0', 'fail', '❌ ' + err.message); })
+      .finally(function () { btn.disabled = false; });
   });
 
-  // ============================================================
-  // T1-prep: 未 claim カルテの authUid を手動セット
-  // ============================================================
+  // T1 前準備: authIndex 削除
+  document.getElementById('btn-delete-auth-index').addEventListener('click', function () {
+    var btn = this;
+    if (!currentUser) { showResult('result-delete-auth-index', 'warn', '未ログイン'); return; }
+    if (!window.confirm('authIndex/' + currentUser.uid + ' を削除します。よいですか？')) return;
+    btn.disabled = true;
+    showResult('result-delete-auth-index', 'info', '削除中...');
+    firebase.firestore()
+      .collection('salons').doc(salonId)
+      .collection('authIndex').doc(currentUser.uid)
+      .delete()
+      .then(function () {
+        showResult('result-delete-auth-index', 'pass',
+          '✅ authIndex 削除完了。\n次: T1 カードの手順を実行してください。');
+      })
+      .catch(function (err) {
+        showResult('result-delete-auth-index', 'fail', '❌ ' + err.message +
+          '\n\nFirestoreルールで拒否された場合は Console から手動削除してください。');
+      })
+      .finally(function () { btn.disabled = false; });
+  });
+
+  // T1 prep: authUid を手動セット
   document.getElementById('btn-t1-prep').addEventListener('click', function () {
     var btn = this;
     var docId = document.getElementById('t1-doc-id').value.trim();
-    if (!docId) {
-      showResult('result-t1', 'warn', '⚠ カルテの docId を入力してください。');
-      return;
-    }
+    if (!docId) { showResult('result-t1', 'warn', '⚠ docId を入力してください。'); return; }
     btn.disabled = true;
-    showResult('result-t1', 'info', '手動 authUid セット中...');
-
-    // dummy uid を書き込んで「既に claim 済み」状態を再現
-    var dummyUid = 'DUMMY_UID_FOR_TEST_' + Date.now();
+    showResult('result-t1', 'info', 'authUid セット中...');
+    var dummyUid = 'DUMMY_UID_TEST_' + Date.now();
     firebase.firestore()
       .collection('salons').doc(salonId)
       .collection('customers').doc(docId)
       .update({ authUid: dummyUid })
       .then(function () {
         showResult('result-t1', 'pass',
-          '✅ authUid をセットしました。\n' +
-          'docId: ' + docId + '\n' +
-          'authUid: ' + dummyUid + '\n\n' +
-          '次: 「② T1 実行」ボタンを押してください。'
-        );
-      }).catch(function (err) {
+          '✅ authUid セット完了。\ndocId: ' + docId + '\nセットした authUid: ' + dummyUid +
+          '\n\n次: 「② T1 実行」を押してください。');
+      })
+      .catch(function (err) {
         showResult('result-t1', 'fail', '❌ セット失敗\n' + err.message +
-          '\n\n※ このHTMLからの直接書き込みはFirestoreルールで拒否される場合があります。\n' +
-          'その場合は Firebase Console から手動で authUid を書き込んでください。'
-        );
-      }).finally(function () {
-        btn.disabled = false;
-      });
+          '\n\nFirestoreルールで拒否の場合は Console から手動で authUid に任意文字列を書き込んでください。');
+      })
+      .finally(function () { btn.disabled = false; });
   });
 
-  // ============================================================
-  // T1: CANDIDATE_STATE_CHANGED フォールバック確認
-  // ============================================================
+  // T1 実行
   document.getElementById('btn-t1').addEventListener('click', function () {
     var btn = this;
     var docId = document.getElementById('t1-doc-id').value.trim();
-    if (!docId) {
-      showResult('result-t1', 'warn', '⚠ カルテの docId を入力してください。');
-      return;
-    }
+    if (!docId) { showResult('result-t1', 'warn', '⚠ docId を入力してください。'); return; }
     btn.disabled = true;
     showResult('result-t1', 'info', 'resolveOrClaimCustomer 呼び出し中...');
-
-    getUser().then(function () {
-      var fn = getFn('resolveOrClaimCustomer');
-      return fn({ salonId: salonId, name: 'テスト太郎', phone: '09000000001' });
-    }).then(function (result) {
-      var d = result.data;
-      // CANDIDATE_STATE_CHANGED → created_new にフォールバックするはず
-      var pass = d.result === 'created_new' || d.result === 'already_resolved';
-      var note = d.result === 'already_resolved'
-        ? '（authIndex が既にあったため already_resolved で返却）'
-        : '';
-      showResult(
-        'result-t1',
-        pass ? 'pass' : 'fail',
-        (pass ? '✅ PASS' : '❌ FAIL') + ' ' + note + '\n' +
-        '期待: created_new または already_resolved\n' +
-        '結果: ' + d.result + '\n' +
-        'customerDocId: ' + (d.customerDocId || '(なし)') + '\n\n' +
-        '全データ: ' + JSON.stringify(d, null, 2) + '\n\n' +
-        '⚠ テスト後クリーンアップ欄に customerDocId を入力して削除してください。'
-      );
-    }).catch(function (err) {
-      showResult('result-t1', 'fail', '❌ エラー\n' + err.message);
-    }).finally(function () {
-      btn.disabled = false;
-    });
+    getFn('resolveOrClaimCustomer')({ salonId: salonId, name: 'テスト太郎', phone: '09000000001' })
+      .then(function (result) {
+        var d = result.data;
+        var pass = d.result === 'created_new' || d.result === 'already_resolved';
+        var note = d.result === 'already_resolved' ? '（authIndex が残っていた → already_resolved）' : '';
+        showResult('result-t1', pass ? 'pass' : 'fail',
+          (pass ? '✅ PASS' : '❌ FAIL') + ' ' + note +
+          '\n期待: created_new（または already_resolved）\n結果: ' + d.result +
+          '\ncustomerDocId: ' + (d.customerDocId || '(なし)') +
+          '\n全データ: ' + JSON.stringify(d, null, 2) +
+          '\n\n⚠ 下のクリーンアップ欄に customerDocId を入力して後始末してください。');
+      })
+      .catch(function (err) { showResult('result-t1', 'fail', '❌ ' + err.message); })
+      .finally(function () { btn.disabled = false; });
   });
 
-  // ============================================================
-  // T2: INDEX_ALREADY_EXISTS（T0 と同経路・冪等性）
-  // ============================================================
+  // T2
   document.getElementById('btn-t2').addEventListener('click', function () {
     var btn = this;
     btn.disabled = true;
     showResult('result-t2', 'info', '実行中...');
-
-    getUser().then(function () {
-      var fn = getFn('resolveOrClaimCustomer');
-      return fn({ salonId: salonId, name: '', phone: '' });
-    }).then(function (result) {
-      var d = result.data;
-      var pass = d.result === 'already_resolved';
-      showResult(
-        'result-t2',
-        pass ? 'pass' : 'fail',
-        (pass ? '✅ PASS' : '❌ FAIL') + '\n' +
-        '期待: already_resolved\n' +
-        '結果: ' + d.result + '\n' +
-        'customerDocId: ' + (d.customerDocId || '(なし)') + '\n' +
-        '全データ: ' + JSON.stringify(d, null, 2)
-      );
-    }).catch(function (err) {
-      showResult('result-t2', 'fail', '❌ エラー\n' + err.message);
-    }).finally(function () {
-      btn.disabled = false;
-    });
+    getFn('resolveOrClaimCustomer')({ salonId: salonId, name: '', phone: '' })
+      .then(function (result) {
+        var d = result.data;
+        var pass = d.result === 'already_resolved';
+        showResult('result-t2', pass ? 'pass' : 'fail',
+          (pass ? '✅ PASS' : '❌ FAIL') + '\n期待: already_resolved\n結果: ' + d.result +
+          '\ncustomerDocId: ' + (d.customerDocId || '(なし)') +
+          '\n全データ: ' + JSON.stringify(d, null, 2));
+      })
+      .catch(function (err) { showResult('result-t2', 'fail', '❌ ' + err.message); })
+      .finally(function () { btn.disabled = false; });
   });
 
-  // ============================================================
-  // クリーンアップ: カルテ + authIndex 削除
-  // ============================================================
+  // クリーンアップ
   document.getElementById('btn-cleanup').addEventListener('click', function () {
     var btn = this;
     var docId = document.getElementById('cleanup-doc-id').value.trim();
-    if (!docId) {
-      showResult('result-cleanup', 'warn', '⚠ 削除する customerDocId を入力してください。');
-      return;
-    }
-    if (!window.confirm('customerDocId: ' + docId + '\nのカルテと authIndex を削除します。よいですか？')) {
-      return;
-    }
+    if (!docId) { showResult('result-cleanup', 'warn', '⚠ customerDocId を入力してください。'); return; }
+    if (!currentUser) { showResult('result-cleanup', 'warn', '未ログイン'); return; }
+    if (!window.confirm('customerDocId: ' + docId + ' のカルテと authIndex を削除します。')) return;
     btn.disabled = true;
     showResult('result-cleanup', 'info', '削除中...');
-
-    getUser().then(function (user) {
-      var db = firebase.firestore();
-      var salonRef = db.collection('salons').doc(salonId);
-      var customerRef = salonRef.collection('customers').doc(docId);
-      var authIndexRef = salonRef.collection('authIndex').doc(user.uid);
-
-      // 並列削除
-      return Promise.all([
-        customerRef.delete(),
-        authIndexRef.delete()
-      ]);
-    }).then(function () {
-      showResult('result-cleanup', 'pass',
-        '✅ 削除完了\ncustomerDocId: ' + docId + '\n' +
-        'authIndex (uid) も削除しました。\n\n' +
-        '⚠ T1 で claim 前カルテに書いた DUMMY_UID は Console から手動削除してください。'
-      );
-    }).catch(function (err) {
-      showResult('result-cleanup', 'fail', '❌ 削除失敗\n' + err.message +
-        '\n\nFirestoreルールで拒否された場合はConsoleから手動削除してください。'
-      );
-    }).finally(function () {
-      btn.disabled = false;
-    });
+    var db = firebase.firestore();
+    var salonRef = db.collection('salons').doc(salonId);
+    Promise.all([
+      salonRef.collection('customers').doc(docId).delete(),
+      salonRef.collection('authIndex').doc(currentUser.uid).delete()
+    ])
+      .then(function () {
+        showResult('result-cleanup', 'pass',
+          '✅ 削除完了\nカルテ: ' + docId + '\nauthIndex: ' + currentUser.uid +
+          '\n\n⚠ T1 prep でセットした DUMMY_UID カルテは Console から手動削除してください。');
+      })
+      .catch(function (err) {
+        showResult('result-cleanup', 'fail', '❌ ' + err.message +
+          '\n\nFirestoreルールで拒否の場合は Console から手動削除してください。');
+      })
+      .finally(function () { btn.disabled = false; });
   });
 
 })();
