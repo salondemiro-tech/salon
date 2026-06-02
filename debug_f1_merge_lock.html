@@ -134,8 +134,22 @@ input[type=text], input[type=email], input[type=password] {
 <script src="https://www.gstatic.com/firebasejs/9.22.2/firebase-functions-compat.js"></script>
 <script src="../firebase-init.js"></script>
 <script>
-(function () {
+window.addEventListener('load', function () {
   'use strict';
+
+  var authBar = document.getElementById('auth-bar');
+
+  // firebase が読めているか即チェック
+  if (typeof firebase === 'undefined' || !firebase.apps) {
+    authBar.className = 'fail';
+    authBar.textContent = 'firebase SDK が読み込めていません。ページを再読み込みしてください。';
+    return;
+  }
+  if (firebase.apps.length === 0) {
+    authBar.className = 'fail';
+    authBar.textContent = 'firebase-init.js が初期化していません（apps.length=0）。';
+    return;
+  }
 
   function getSalonId() {
     var params = new URLSearchParams(window.location.search);
@@ -147,6 +161,7 @@ input[type=text], input[type=email], input[type=password] {
 
   function showResult(elId, cls, text) {
     var el = document.getElementById(elId);
+    if (!el) return;
     el.className = 'result ' + cls;
     el.textContent = text;
   }
@@ -162,14 +177,17 @@ input[type=text], input[type=email], input[type=password] {
   }
 
   // charCodeAt 表示
-  document.getElementById('t1-doc-id').addEventListener('input', function () {
-    var v = this.value;
-    document.getElementById('t1-doc-chars').textContent = v.length > 0 ? 'codes: ' + charCodes(v) : '';
-  });
+  var t1docInput = document.getElementById('t1-doc-id');
+  if (t1docInput) {
+    t1docInput.addEventListener('input', function () {
+      var v = this.value;
+      var el = document.getElementById('t1-doc-chars');
+      if (el) el.textContent = v.length > 0 ? 'codes: ' + charCodes(v) : '';
+    });
+  }
 
   // 認証状態監視
   firebase.auth().onAuthStateChanged(function (user) {
-    var authBar = document.getElementById('auth-bar');
     var loginSection = document.getElementById('login-section');
     var testSections = document.getElementById('test-sections');
 
@@ -186,7 +204,7 @@ input[type=text], input[type=email], input[type=password] {
       testSections.style.display = 'block';
       if (!salonId) {
         authBar.className = 'warn';
-        authBar.innerHTML += '<br><strong>⚠ URLに ?salon=[YOUR_SALON_ID] が必要です</strong>';
+        authBar.innerHTML += '<br><strong>警告: URLに ?salon=[YOUR_SALON_ID] が必要です</strong>';
       }
     } else {
       currentUser = null;
@@ -206,10 +224,10 @@ input[type=text], input[type=email], input[type=password] {
     showResult('result-login', 'info', 'ログイン中...');
     firebase.auth().signInWithEmailAndPassword(email, pass)
       .then(function () {
-        showResult('result-login', 'pass', '✅ ログイン成功');
+        showResult('result-login', 'pass', 'ログイン成功');
       })
       .catch(function (err) {
-        showResult('result-login', 'fail', '❌ ' + err.message);
+        showResult('result-login', 'fail', 'エラー: ' + err.message);
         btn.disabled = false;
       });
   });
@@ -229,11 +247,11 @@ input[type=text], input[type=email], input[type=password] {
         var d = result.data;
         var pass = d.result === 'already_resolved';
         showResult('result-t0', pass ? 'pass' : 'fail',
-          (pass ? '✅ PASS' : '❌ FAIL') + '\n期待: already_resolved\n結果: ' + d.result +
+          (pass ? 'PASS' : 'FAIL') + '\n期待: already_resolved\n結果: ' + d.result +
           '\ncustomerDocId: ' + (d.customerDocId || '(なし)') +
           '\n全データ: ' + JSON.stringify(d, null, 2));
       })
-      .catch(function (err) { showResult('result-t0', 'fail', '❌ ' + err.message); })
+      .catch(function (err) { showResult('result-t0', 'fail', 'エラー: ' + err.message); })
       .finally(function () { btn.disabled = false; });
   });
 
@@ -250,10 +268,10 @@ input[type=text], input[type=email], input[type=password] {
       .delete()
       .then(function () {
         showResult('result-delete-auth-index', 'pass',
-          '✅ authIndex 削除完了。\n次: T1 カードの手順を実行してください。');
+          'authIndex 削除完了。\n次: T1 カードの手順を実行してください。');
       })
       .catch(function (err) {
-        showResult('result-delete-auth-index', 'fail', '❌ ' + err.message +
+        showResult('result-delete-auth-index', 'fail', 'エラー: ' + err.message +
           '\n\nFirestoreルールで拒否された場合は Console から手動削除してください。');
       })
       .finally(function () { btn.disabled = false; });
@@ -263,7 +281,7 @@ input[type=text], input[type=email], input[type=password] {
   document.getElementById('btn-t1-prep').addEventListener('click', function () {
     var btn = this;
     var docId = document.getElementById('t1-doc-id').value.trim();
-    if (!docId) { showResult('result-t1', 'warn', '⚠ docId を入力してください。'); return; }
+    if (!docId) { showResult('result-t1', 'warn', 'docId を入力してください。'); return; }
     btn.disabled = true;
     showResult('result-t1', 'info', 'authUid セット中...');
     var dummyUid = 'DUMMY_UID_TEST_' + Date.now();
@@ -273,11 +291,11 @@ input[type=text], input[type=email], input[type=password] {
       .update({ authUid: dummyUid })
       .then(function () {
         showResult('result-t1', 'pass',
-          '✅ authUid セット完了。\ndocId: ' + docId + '\nセットした authUid: ' + dummyUid +
-          '\n\n次: 「② T1 実行」を押してください。');
+          'authUid セット完了。\ndocId: ' + docId + '\nセットした authUid: ' + dummyUid +
+          '\n\n次: T1 実行を押してください。');
       })
       .catch(function (err) {
-        showResult('result-t1', 'fail', '❌ セット失敗\n' + err.message +
+        showResult('result-t1', 'fail', 'セット失敗: ' + err.message +
           '\n\nFirestoreルールで拒否の場合は Console から手動で authUid に任意文字列を書き込んでください。');
       })
       .finally(function () { btn.disabled = false; });
@@ -287,7 +305,7 @@ input[type=text], input[type=email], input[type=password] {
   document.getElementById('btn-t1').addEventListener('click', function () {
     var btn = this;
     var docId = document.getElementById('t1-doc-id').value.trim();
-    if (!docId) { showResult('result-t1', 'warn', '⚠ docId を入力してください。'); return; }
+    if (!docId) { showResult('result-t1', 'warn', 'docId を入力してください。'); return; }
     btn.disabled = true;
     showResult('result-t1', 'info', 'resolveOrClaimCustomer 呼び出し中...');
     getFn('resolveOrClaimCustomer')({ salonId: salonId, name: 'テスト太郎', phone: '09000000001' })
@@ -296,13 +314,13 @@ input[type=text], input[type=email], input[type=password] {
         var pass = d.result === 'created_new' || d.result === 'already_resolved';
         var note = d.result === 'already_resolved' ? '（authIndex が残っていた → already_resolved）' : '';
         showResult('result-t1', pass ? 'pass' : 'fail',
-          (pass ? '✅ PASS' : '❌ FAIL') + ' ' + note +
+          (pass ? 'PASS' : 'FAIL') + ' ' + note +
           '\n期待: created_new（または already_resolved）\n結果: ' + d.result +
           '\ncustomerDocId: ' + (d.customerDocId || '(なし)') +
           '\n全データ: ' + JSON.stringify(d, null, 2) +
-          '\n\n⚠ 下のクリーンアップ欄に customerDocId を入力して後始末してください。');
+          '\n\n下のクリーンアップ欄に customerDocId を入力して後始末してください。');
       })
-      .catch(function (err) { showResult('result-t1', 'fail', '❌ ' + err.message); })
+      .catch(function (err) { showResult('result-t1', 'fail', 'エラー: ' + err.message); })
       .finally(function () { btn.disabled = false; });
   });
 
@@ -316,11 +334,11 @@ input[type=text], input[type=email], input[type=password] {
         var d = result.data;
         var pass = d.result === 'already_resolved';
         showResult('result-t2', pass ? 'pass' : 'fail',
-          (pass ? '✅ PASS' : '❌ FAIL') + '\n期待: already_resolved\n結果: ' + d.result +
+          (pass ? 'PASS' : 'FAIL') + '\n期待: already_resolved\n結果: ' + d.result +
           '\ncustomerDocId: ' + (d.customerDocId || '(なし)') +
           '\n全データ: ' + JSON.stringify(d, null, 2));
       })
-      .catch(function (err) { showResult('result-t2', 'fail', '❌ ' + err.message); })
+      .catch(function (err) { showResult('result-t2', 'fail', 'エラー: ' + err.message); })
       .finally(function () { btn.disabled = false; });
   });
 
@@ -328,7 +346,7 @@ input[type=text], input[type=email], input[type=password] {
   document.getElementById('btn-cleanup').addEventListener('click', function () {
     var btn = this;
     var docId = document.getElementById('cleanup-doc-id').value.trim();
-    if (!docId) { showResult('result-cleanup', 'warn', '⚠ customerDocId を入力してください。'); return; }
+    if (!docId) { showResult('result-cleanup', 'warn', 'customerDocId を入力してください。'); return; }
     if (!currentUser) { showResult('result-cleanup', 'warn', '未ログイン'); return; }
     if (!window.confirm('customerDocId: ' + docId + ' のカルテと authIndex を削除します。')) return;
     btn.disabled = true;
@@ -341,17 +359,17 @@ input[type=text], input[type=email], input[type=password] {
     ])
       .then(function () {
         showResult('result-cleanup', 'pass',
-          '✅ 削除完了\nカルテ: ' + docId + '\nauthIndex: ' + currentUser.uid +
-          '\n\n⚠ T1 prep でセットした DUMMY_UID カルテは Console から手動削除してください。');
+          '削除完了\nカルテ: ' + docId + '\nauthIndex: ' + currentUser.uid +
+          '\n\nT1 prep でセットした DUMMY_UID カルテは Console から手動削除してください。');
       })
       .catch(function (err) {
-        showResult('result-cleanup', 'fail', '❌ ' + err.message +
+        showResult('result-cleanup', 'fail', 'エラー: ' + err.message +
           '\n\nFirestoreルールで拒否の場合は Console から手動削除してください。');
       })
       .finally(function () { btn.disabled = false; });
   });
 
-})();
+});
 </script>
 </body>
 </html>
