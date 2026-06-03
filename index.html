@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>TORITA — 個人サロンのための予約管理システム</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+:root {
+  --navy: #1a2744;
+  --navy-mid: #243260;
+  --navy-light: #e8ecf5;
+  --gold: #b5845a;
+  --gold-light: #f5ede4;
+  --white: #ffffff;
+  --gray: #f4f5f8;
+  --text: #1a1a2e;
+  --muted: #6b7280;
+  --border: rgba(26,39,68,.10);
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: 'Noto Sans JP', sans-serif;
+  color: var(--text);
+  background: var(--white);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ===== NAV ===== */
+nav {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 40px;
+  height: 64px;
+  background: rgba(255,255,255,.92);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border);
+}
+.nav-logo {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 22px; font-weight: 600; letter-spacing: .12em;
+  color: var(--navy);
+  text-decoration: none;
+}
+.nav-logo span { color: var(--gold); }
+.nav-cta {
+  display: inline-flex; align-items: center;
+  padding: 9px 22px;
+  background: var(--navy);
+  color: var(--white);
+  border-radius: 6px;
+  font-size: 13px; font-weight: 500; letter-spacing: .04em;
+  text-decoration: none;
+  transition: background .2s;
+}
+.nav-cta:hover { background: var(--navy-mid); }
+
+/* ===== HERO ===== */
+.hero {
+  min-height: 100vh;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center;
+  padding: 100px 24px 80px;
+  background: linear-gradient(160deg, #f8f9fc 0%, var(--navy-light) 60%, #e4e9f5 100%);
+  position: relative; overflow: hidden;
+}
+.hero::before {
+  content: '';
+  position: absolute; top: -120px; right: -80px;
+  width: 520px; height: 520px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(181,132,90,.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero::after {
+  content: '';
+  position: absolute; bottom: -100px; left: -60px;
+  width: 400px; height: 400px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(26,39,68,.07) 0%, transparent 70%);
+  pointer-events: none;
+}
+.hero-badge {
+  display: inline-block;
+  padding: 5px 16px;
+  background: var(--gold-light);
+  color: var(--gold);
+  border-radius: 20px;
+  font-size: 12px; font-weight: 700; letter-spacing: .08em;
+  margin-bottom: 28px;
+}
+.hero h1 {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: clamp(38px, 6vw, 64px);
+  font-weight: 600; line-height: 1.25;
+  color: var(--navy);
+  letter-spacing: .02em;
+  margin-bottom: 10px;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--gold);
+}
+.hero-sub {
+  font-size: clamp(15px, 2vw, 18px);
+  color: var(--muted);
+  line-height: 1.8;
+  max-width: 560px;
+  margin: 16px auto 40px;
+}
+.hero-actions {
+  display: flex; flex-direction: column; align-items: center; gap: 12px;
+}
+.btn-primary {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 16px 40px;
+  background: var(--navy);
+  color: var(--white);
+  border-radius: 8px;
+  font-size: 15px; font-weight: 700; letter-spacing: .04em;
+  text-decoration: none;
+  transition: background .2s, transform .15s;
+  box-shadow: 0 4px 20px rgba(26,39,68,.22);
+}
+.btn-primary:hover { background: var(--navy-mid); transform: translateY(-2px); }
+.btn-primary svg { width: 16px; height: 16px; }
+.hero-note {
+  font-size: 12px; color: var(--muted); letter-spacing: .03em;
+}
+.hero-price-hint {
+  margin-top: 32px;
+  display: inline-block;
+  padding: 10px 24px;
+  background: rgba(255,255,255,.7);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 13px; color: var(--navy);
+}
+.hero-price-hint strong { color: var(--gold); font-size: 18px; }
+
+/* ===== FEATURES ===== */
+.section {
+  padding: 96px 24px;
+}
+.section-inner {
+  max-width: 1040px; margin: 0 auto;
+}
+.section-label {
+  font-size: 11px; font-weight: 700; letter-spacing: .14em;
+  color: var(--gold); text-transform: uppercase;
+  margin-bottom: 12px;
+}
+.section-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: clamp(28px, 4vw, 42px); font-weight: 600;
+  color: var(--navy); line-height: 1.3;
+  margin-bottom: 16px;
+}
+.section-desc {
+  font-size: 15px; color: var(--muted); line-height: 1.9;
+  max-width: 560px;
+}
+
+.features-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 24px;
+  margin-top: 56px;
+}
+.feature-card {
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 32px 28px;
+  transition: box-shadow .2s, transform .2s;
+}
+.feature-card:hover {
+  box-shadow: 0 8px 32px rgba(26,39,68,.10);
+  transform: translateY(-3px);
+}
+.feature-icon {
+  width: 44px; height: 44px;
+  background: var(--navy-light);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 18px;
+}
+.feature-icon svg { width: 22px; height: 22px; color: var(--navy); }
+.feature-card h3 {
+  font-size: 15px; font-weight: 700;
+  color: var(--navy); margin-bottom: 8px;
+}
+.feature-card p {
+  font-size: 13.5px; color: var(--muted); line-height: 1.8;
+}
+.feature-card .tag {
+  display: inline-block; margin-top: 12px;
+  padding: 3px 10px;
+  background: var(--gold-light); color: var(--gold);
+  border-radius: 4px; font-size: 11px; font-weight: 700;
+}
+
+/* ===== PRICE ===== */
+.price-section {
+  background: var(--gray);
+}
+.price-card {
+  max-width: 480px; margin: 56px auto 0;
+  background: var(--white);
+  border: 2px solid var(--navy);
+  border-radius: 18px;
+  padding: 48px 40px;
+  text-align: center;
+  box-shadow: 0 12px 48px rgba(26,39,68,.12);
+}
+.price-card .plan-name {
+  font-size: 12px; font-weight: 700; letter-spacing: .12em;
+  color: var(--gold); text-transform: uppercase; margin-bottom: 8px;
+}
+.price-card .amount {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 64px; font-weight: 600; color: var(--navy);
+  line-height: 1;
+}
+.price-card .amount sup { font-size: 24px; vertical-align: super; }
+.price-card .amount-note {
+  font-size: 13px; color: var(--muted); margin-top: 4px; margin-bottom: 28px;
+}
+.price-divider {
+  border: none; border-top: 1px solid var(--border); margin: 28px 0;
+}
+.price-list {
+  list-style: none; text-align: left;
+}
+.price-list li {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 14px; color: var(--text); padding: 7px 0;
+  line-height: 1.6;
+}
+.price-list li::before {
+  content: '✓';
+  color: var(--navy); font-weight: 700; flex-shrink: 0;
+  margin-top: 1px;
+}
+.price-trial {
+  margin-top: 32px;
+  padding: 14px;
+  background: var(--navy-light);
+  border-radius: 8px;
+  font-size: 13px; color: var(--navy); font-weight: 500;
+}
+.btn-price {
+  display: block; margin-top: 28px;
+  padding: 16px;
+  background: var(--navy);
+  color: var(--white);
+  border-radius: 8px;
+  font-size: 15px; font-weight: 700; letter-spacing: .04em;
+  text-decoration: none;
+  transition: background .2s;
+}
+.btn-price:hover { background: var(--navy-mid); }
+.price-cancel {
+  margin-top: 12px; font-size: 12px; color: var(--muted);
+}
+
+/* ===== HOW IT WORKS ===== */
+.steps {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 0;
+  margin-top: 56px;
+  position: relative;
+}
+.step {
+  padding: 32px 24px;
+  text-align: center;
+  position: relative;
+}
+.step-num {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 48px; font-weight: 600;
+  color: var(--navy-light);
+  line-height: 1; margin-bottom: 16px;
+}
+.step h3 { font-size: 14px; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
+.step p { font-size: 13px; color: var(--muted); line-height: 1.8; }
+
+/* ===== CTA FOOTER ===== */
+.cta-section {
+  background: var(--navy);
+  padding: 96px 24px;
+  text-align: center;
+}
+.cta-section h2 {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: clamp(28px, 4vw, 44px); font-weight: 600;
+  color: var(--white); margin-bottom: 16px;
+}
+.cta-section p {
+  font-size: 15px; color: rgba(255,255,255,.65); margin-bottom: 36px;
+}
+.btn-cta-white {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 16px 44px;
+  background: var(--white);
+  color: var(--navy);
+  border-radius: 8px;
+  font-size: 15px; font-weight: 700; letter-spacing: .04em;
+  text-decoration: none;
+  transition: opacity .2s;
+}
+.btn-cta-white:hover { opacity: .9; }
+.cta-note { margin-top: 16px; font-size: 12px; color: rgba(255,255,255,.45); }
+
+/* ===== FOOTER ===== */
+footer {
+  padding: 32px 24px;
+  text-align: center;
+  border-top: 1px solid var(--border);
+  font-size: 12px; color: var(--muted);
+}
+footer a { color: var(--muted); text-decoration: none; }
+footer a:hover { color: var(--navy); }
+.footer-links { display: flex; justify-content: center; gap: 24px; margin-bottom: 12px; }
+
+/* ===== ANIMATIONS ===== */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.hero-badge { animation: fadeUp .5s ease both; }
+.hero h1    { animation: fadeUp .5s .1s ease both; }
+.hero-sub   { animation: fadeUp .5s .2s ease both; }
+.hero-actions { animation: fadeUp .5s .3s ease both; }
+.hero-price-hint { animation: fadeUp .5s .4s ease both; }
+
+/* ===== RESPONSIVE ===== */
+@media (max-width: 640px) {
+  nav { padding: 0 20px; }
+  .price-card { padding: 36px 24px; }
+  .step { padding: 24px 16px; }
+}
+</style>
+</head>
+<body>
+
+<!-- NAV -->
+<nav>
+  <a class="nav-logo" href="#">TOR<span>I</span>TA</a>
+  <a class="nav-cta" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">
+    無料で始める
+  </a>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-badge">個人サロン専用 予約管理システム</div>
+  <h1>施術に集中できる<br><em>予約管理</em>を。</h1>
+  <p class="hero-sub">
+    写真付き顧客カルテ、インターバル自動設定、一括ブロック。<br>
+    個人サロンのオーナー様が本当に必要な機能だけを、<br>シンプルに揃えました。
+  </p>
+  <div class="hero-actions">
+    <a class="btn-primary" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+      14日間無料トライアルを始める
+    </a>
+    <span class="hero-note">クレジットカード登録後、14日間は無料です</span>
+  </div>
+  <div class="hero-price-hint">
+    トライアル終了後は <strong>¥1,500</strong>/月（税別）で全機能をご利用いただけます
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="section">
+  <div class="section-inner">
+    <div class="section-label">Features</div>
+    <h2 class="section-title">他社にはない機能が、<br>標準装備です。</h2>
+    <p class="section-desc">
+      高額なオプションや複雑な設定は不要。最初から全機能が使えます。
+    </p>
+
+    <div class="features-grid">
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
+          </svg>
+        </div>
+        <h3>写真付き顧客カルテ</h3>
+        <p>施術写真をカルテに直接記録。来店ごとの変化が一目でわかり、丁寧なカウンセリングに活かせます。</p>
+        <span class="tag">標準装備</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+          </svg>
+        </div>
+        <h3>インターバル自動設定</h3>
+        <p>施術後の片付けや準備時間を自動でブロック。ダブルブッキングの心配がなくなります。</p>
+        <span class="tag">標準装備</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
+          </svg>
+        </div>
+        <h3>曜日・時間の一括ブロック</h3>
+        <p>定休日や固定の予約不可時間をまとめて設定。毎週の手作業がゼロになります。</p>
+        <span class="tag">標準装備</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
+          </svg>
+        </div>
+        <h3>顧客統合機能</h3>
+        <p>同じお客様が複数の経路から予約してもカルテを一つに統合。履歴が分散しません。</p>
+        <span class="tag">標準装備</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
+          </svg>
+        </div>
+        <h3>スタンプカード機能</h3>
+        <p>デジタルスタンプカードでリピーター獲得。お客様アプリから確認できます。</p>
+        <span class="tag">標準装備</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.22h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.92-.92a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/>
+          </svg>
+        </div>
+        <h3>予約・キャンセル通知メール</h3>
+        <p>予約確定・変更・キャンセルを自動でメール通知。連絡の手間が省けます。</p>
+        <span class="tag">標準装備</span>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="section" style="background: var(--gray);">
+  <div class="section-inner">
+    <div class="section-label">How it works</div>
+    <h2 class="section-title">始め方は、4ステップ。</h2>
+
+    <div class="steps">
+      <div class="step">
+        <div class="step-num">01</div>
+        <h3>アカウント登録</h3>
+        <p>メールアドレスとパスワードだけで登録完了。サロン名を入れるだけで準備OK。</p>
+      </div>
+      <div class="step">
+        <div class="step-num">02</div>
+        <h3>基本設定</h3>
+        <p>営業時間・メニュー・スタッフ情報をサクッと設定。15分もあれば完了します。</p>
+      </div>
+      <div class="step">
+        <div class="step-num">03</div>
+        <h3>お客様にURLを共有</h3>
+        <p>専用の予約URLをLINEやInstagramで共有するだけ。お客様はアプリ不要で予約できます。</p>
+      </div>
+      <div class="step">
+        <div class="step-num">04</div>
+        <h3>あとは自動で管理</h3>
+        <p>予約が入るたびに通知。カレンダーで一目確認。カルテは来店ごとに自動で蓄積されます。</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICE -->
+<section class="section price-section">
+  <div class="section-inner" style="text-align:center;">
+    <div class="section-label">Pricing</div>
+    <h2 class="section-title">シンプルな料金体系。</h2>
+    <p class="section-desc" style="margin: 0 auto;">プランは1つだけ。全機能が使えます。</p>
+
+    <div class="price-card">
+      <div class="plan-name">Standard Plan</div>
+      <div class="amount"><sup>¥</sup>1,500</div>
+      <div class="amount-note">/ 月（税別）· いつでも解約可能</div>
+      <hr class="price-divider">
+      <ul class="price-list">
+        <li>写真付き顧客カルテ（無制限）</li>
+        <li>オンライン予約受付・管理</li>
+        <li>インターバル自動設定</li>
+        <li>曜日・時間の一括ブロック</li>
+        <li>顧客統合機能</li>
+        <li>デジタルスタンプカード</li>
+        <li>予約・キャンセル通知メール</li>
+        <li>お客様専用予約アプリ（ブラウザ）</li>
+      </ul>
+      <div class="price-trial">
+        🎁 最初の14日間は完全無料でお試しいただけます
+      </div>
+      <a class="btn-price" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">
+        無料トライアルを始める
+      </a>
+      <p class="price-cancel">いつでも解約できます · 違約金なし</p>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <h2>まずは14日間、<br>無料でお試しください。</h2>
+  <p>クレジットカードを登録するだけ。14日間は一切費用はかかりません。</p>
+  <a class="btn-cta-white" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
+    無料トライアルを始める
+  </a>
+  <p class="cta-note">個人サロンのオーナー様向け · 1サロン1アカウント</p>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="footer-links">
+    <a href="#">利用規約</a>
+    <a href="#">プライバシーポリシー</a>
+    <a href="#">お問い合わせ</a>
+  </div>
+  <p>&copy; 2026 TORITA. All rights reserved.</p>
+</footer>
+
+</body>
+</html>
