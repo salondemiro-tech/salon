@@ -331,6 +331,34 @@
     return el ? String(el.value || '').trim() : '';
   }
 
+  // ===== 認証後の振り分け =====
+  // planStatus を確認し、契約済み(trial/active)ならダッシュボード、
+  // 未契約ならカード登録ページ(billing)へ送る。
+  function goAfterAuth() {
+    var user = firebase.auth().currentUser;
+    if (!user) {
+      window.location.href = 'salon_auth_v2_new.html';
+      return;
+    }
+    firebase.firestore()
+      .collection('salons').doc(user.uid)
+      .collection('config').doc('settings')
+      .get()
+      .then(function (doc) {
+        var st = doc.exists ? (doc.data().planStatus || null) : null;
+        if (st === 'trial' || st === 'active') {
+          window.location.href = 'salon_dashboard_v1.html';
+        } else {
+          // 未契約 / past_due / canceled → カード登録へ
+          window.location.href = 'salon_billing_v1.html';
+        }
+      })
+      .catch(function () {
+        // 判定できない場合は安全側 = カード登録へ
+        window.location.href = 'salon_billing_v1.html';
+      });
+  }
+
   // ===== ログイン =====
   function doLogin() {
     var email = val('loginEmail');
@@ -346,9 +374,9 @@
 
     authSalonLogin(email, pw, function (res) {
       if (res && res.ok) {
-        // 成功 → ダッシュボードへ
+        // 成功 → planStatus に応じて振り分け
         uiToast('ログインしました');
-        window.location.href = 'salon_dashboard_v1.html';
+        goAfterAuth();
         return;
       }
       setBusy('loginBtn', false, 'ログイン中...', 'ログイン');
@@ -454,8 +482,8 @@
   onFbReady(function () {
     requireSalonStaff(function (isStaff) {
       if (isStaff) {
-        // 既にログイン済みのオーナー → 自動遷移
-        window.location.href = 'salon_dashboard_v1.html';
+        // 既にログイン済みのオーナー → planStatus に応じて振り分け
+        goAfterAuth();
       }
     });
   });

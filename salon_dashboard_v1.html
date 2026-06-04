@@ -310,17 +310,46 @@
         window.location.href = 'salon_auth_v2_new.html';
         return;
       }
-      // ログイン済み → ダッシュボードのデータ取得
+
+      // ===== 契約状態ガード =====
+      // planStatus が trial/active でなければカード登録ページへ送り返す。
+      // (URL を直接叩いて未契約のままダッシュボードに入るのを防ぐ)
+      var user = firebase.auth().currentUser;
+      var uid = user ? user.uid : null;
+      if (!uid) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+
       uiShowLoading('読み込み中...');
-      dbLoadSalonDashboard(function (data) {
-        uiHideLoading();
-        if (!data) {
-          uiToast('サロン情報の取得に失敗しました');
-          renderSalon(null);
-          return;
-        }
-        renderSalon(data);
-      });
+      firebase.firestore()
+        .collection('salons').doc(uid)
+        .collection('config').doc('settings')
+        .get()
+        .then(function (doc) {
+          var st = doc.exists ? (doc.data().planStatus || null) : null;
+          if (st !== 'trial' && st !== 'active') {
+            // 未契約 / past_due / canceled → カード登録へ
+            uiHideLoading();
+            window.location.href = 'salon_billing_v1.html';
+            return;
+          }
+          // 契約済み → ダッシュボードのデータ取得
+          dbLoadSalonDashboard(function (data) {
+            uiHideLoading();
+            if (!data) {
+              uiToast('サロン情報の取得に失敗しました');
+              renderSalon(null);
+              return;
+            }
+            renderSalon(data);
+          });
+        })
+        .catch(function () {
+          // 判定できない場合は安全側 = カード登録へ
+          uiHideLoading();
+          window.location.href = 'salon_billing_v1.html';
+        });
     });
   });
 
