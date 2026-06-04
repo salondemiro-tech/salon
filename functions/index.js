@@ -1000,3 +1000,245 @@ async function backfillAuthUidOnPastAppointments(db, salonId, customerDocId, uid
 
   return totalUpdated;
 }
+
+// ========================================
+// ========================================
+// Stripe 課金（Phase G / G-3）
+//   追加日: 2026/6/4
+//
+//   関数:
+//     A. createSalonCheckoutSession (callable)
+//        - ログイン済みサロンオーナーが呼ぶ
+//        - 14日トライアル付きサブスクの Checkout ページURLを返す
+//     B. stripeWebhook (onRequest)
+//        - Stripe からの通知を受けて config/settings の
+//          planStatus / stripeCustomerId / stripeSubscriptionId を更新
+//
+//   設計方針:
+//     - トライアル期間(14日)は Stripe 側 (trial_period_days) が管理。
+//       TORITA 側で日付計算しない。
+//     - salonId == Auth UID (Phase1)。client_reference_id に salonId を入れ、
+//       Webhook で受け取って salons/{salonId}/config/settings に書き戻す。
+//     - planStatus の値:
+//         'trial'    … トライアル中（カード登録済み・未課金）
+//         'active'   … 課金中（正常）
+//         'past_due' … 支払い失敗
+//         'canceled' … 解約済み
+//
+//   必要な Secret:
+//     STRIPE_SECRET_KEY        … sk_test_... / sk_live_...
+//     STRIPE_WEBHOOK_SECRET    … whsec_...（Webhook 登録後に取得して登録）
+//
+//   環境変数（GitHub Actions / functions のデプロイ時に設定）:
+//     STRIPE_PRICE_ID          … price_...（テスト/本番で切替）
+//     APP_BASE_URL             … https://torita-app.com
+// ========================================
+
+const Stripe = require('stripe');
+
+// ----- 設定値（秘密情報ではないので直書き）-----
+//   ★ 本番リリース時に TEST → LIVE の price_ID へ1行差し替える。
+//      テスト: price_1TeJD5L5ab685f4daJW8vvOh
+//      本番:   price_1TeJ3BL5ab685f4d1EkdnmuT
+const STRIPE_PRICE_ID = 'price_1TeJD5L5ab685f4daJW8vvOh'; // ← テスト用
+const APP_BASE_URL = 'https://torita-app.com';
+
+function getStripe() {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) throw new Error('STRIPE_SECRET_KEY is not configured');
+  return new Stripe(key, { apiVersion: '2024-06-20' });
+}
+
+// --- A. Checkout セッション作成 (callable) ---
+exports.createSalonCheckoutSession = onCall(
+  { secrets: ['STRIPE_SECRET_KEY'] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'ログインが必要です。');
+    }
+    const uid = request.auth.uid;
+    const email = (request.auth.token && request.auth.token.email) || '';
+
+    // salonId == Auth UID (Phase1)
+    const salonId = uid;
+
+    const priceId = STRIPE_PRICE_ID;
+    if (!priceId) {
+      throw new HttpsError('failed-precondition', 'STRIPE_PRICE_ID が未設定です。');
+    }
+    const baseUrl = APP_BASE_URL;
+
+    const stripe = getStripe();
+
+    try {
+      // 既に stripeCustomerId があれば再利用する
+      const settingsRef = db.collection('salons').doc(salonId)
+        .collection('config').doc('settings');
+      const settingsSnap = await settingsRef.get();
+      const settings = settingsSnap.exists ? settingsSnap.data() : {};
+
+      let customerId = settings.stripeCustomerId || null;
+
+      if (!customerId) {
+        const customer = await stripe.customers.create({
+          email: email,
+          metadata: { salonId: salonId }
+        });
+        customerId = customer.id;
+        // この時点で customerId だけ先に保存（重複作成防止）
+        await settingsRef.set(
+          { stripeCustomerId: customerId },
+          { merge: true }
+        );
+      }
+
+      const session = await stripe.checkout.sessions.create({
+        mode: 'subscription',
+        customer: customerId,
+        client_reference_id: salonId,
+        line_items: [{ price: priceId, quantity: 1 }],
+        subscription_data: {
+          trial_period_days: 14,
+          metadata: { salonId: salonId }
+        },
+        success_url: baseUrl + '/salon_dashboard_v1.html?checkout=success',
+        cancel_url: baseUrl + '/salon_billing_v1.html?checkout=cancel'
+      });
+
+      logger.info('Checkout session created', { salonId, sessionId: session.id });
+      return { url: session.url };
+    } catch (err) {
+      logger.error('createSalonCheckoutSession error', { error: err.message, salonId });
+      throw new HttpsError('internal', '決済ページの作成に失敗しました: ' + err.message);
+    }
+  }
+);
+
+// --- B. Stripe Webhook 受信 (onRequest) ---
+exports.stripeWebhook = onRequest(
+  { secrets: ['STRIPE_SECRET_KEY', 'STRIPE_WEBHOOK_SECRET'] },
+  async (req, res) => {
+    const stripe = getStripe();
+    const webhookSecret = process.env.STRIPE_WEBHOOK_SECRET;
+
+    let event;
+    try {
+      // 署名検証には raw body が必要。v2 onRequest は req.rawBody を提供する。
+      const sig = req.headers['stripe-signature'];
+      event = stripe.webhooks.constructEvent(req.rawBody, sig, webhookSecret);
+    } catch (err) {
+      logger.error('Webhook signature verification failed', { error: err.message });
+      res.status(400).send('Webhook Error: ' + err.message);
+      return;
+    }
+
+    try {
+      switch (event.type) {
+
+        // サブスク作成・更新（トライアル開始/課金/状態変化）
+        case 'customer.subscription.created':
+        case 'customer.subscription.updated': {
+          const sub = event.data.object;
+          const salonId = (sub.metadata && sub.metadata.salonId) || null;
+          if (salonId) {
+            await applySubscriptionState(salonId, sub);
+          } else {
+            logger.warn('subscription event without salonId metadata', { id: sub.id });
+          }
+          break;
+        }
+
+        // サブスク解約
+        case 'customer.subscription.deleted': {
+          const sub = event.data.object;
+          const salonId = (sub.metadata && sub.metadata.salonId) || null;
+          if (salonId) {
+            await db.collection('salons').doc(salonId)
+              .collection('config').doc('settings')
+              .set({
+                planStatus: 'canceled',
+                stripeSubscriptionId: sub.id,
+                planUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+              }, { merge: true });
+            logger.info('subscription canceled', { salonId });
+          }
+          break;
+        }
+
+        // 支払い失敗
+        case 'invoice.payment_failed': {
+          const invoice = event.data.object;
+          const salonId = await salonIdFromCustomer(invoice.customer);
+          if (salonId) {
+            await db.collection('salons').doc(salonId)
+              .collection('config').doc('settings')
+              .set({
+                planStatus: 'past_due',
+                planUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+              }, { merge: true });
+            logger.info('payment failed', { salonId });
+          }
+          break;
+        }
+
+        default:
+          // 他イベントは無視
+          break;
+      }
+
+      res.status(200).json({ received: true });
+    } catch (err) {
+      logger.error('stripeWebhook handler error', { error: err.message, type: event.type });
+      res.status(500).send('Handler Error');
+    }
+  }
+);
+
+// サブスクの status を planStatus に反映する
+async function applySubscriptionState(salonId, sub) {
+  // Stripe status: trialing / active / past_due / canceled / unpaid / incomplete...
+  let planStatus;
+  if (sub.status === 'trialing') {
+    planStatus = 'trial';
+  } else if (sub.status === 'active') {
+    planStatus = 'active';
+  } else if (sub.status === 'past_due' || sub.status === 'unpaid') {
+    planStatus = 'past_due';
+  } else if (sub.status === 'canceled' || sub.status === 'incomplete_expired') {
+    planStatus = 'canceled';
+  } else {
+    planStatus = sub.status; // incomplete 等はそのまま
+  }
+
+  const update = {
+    planStatus: planStatus,
+    stripeSubscriptionId: sub.id,
+    stripeCustomerId: sub.customer,
+    planUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
+  };
+  // トライアル終了予定（参考表示用。判定には使わない）
+  if (sub.trial_end) {
+    update.trialEndsAt = admin.firestore.Timestamp.fromMillis(sub.trial_end * 1000);
+  }
+
+  await db.collection('salons').doc(salonId)
+    .collection('config').doc('settings')
+    .set(update, { merge: true });
+
+  logger.info('subscription state applied', { salonId, planStatus });
+}
+
+// stripeCustomerId から salonId を逆引き（metadata 優先、無ければ Firestore 検索）
+async function salonIdFromCustomer(customerId) {
+  if (!customerId) return null;
+  try {
+    const stripe = getStripe();
+    const customer = await stripe.customers.retrieve(customerId);
+    if (customer && customer.metadata && customer.metadata.salonId) {
+      return customer.metadata.salonId;
+    }
+  } catch (e) {
+    logger.warn('salonIdFromCustomer retrieve failed', { error: e.message });
+  }
+  return null;
+}
