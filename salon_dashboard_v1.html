@@ -322,34 +322,62 @@
       }
 
       uiShowLoading('読み込み中...');
-      firebase.firestore()
-        .collection('salons').doc(uid)
-        .collection('config').doc('settings')
-        .get()
-        .then(function (doc) {
-          var st = doc.exists ? (doc.data().planStatus || null) : null;
-          if (st !== 'trial' && st !== 'active') {
-            // 未契約 / past_due / canceled → カード登録へ
-            uiHideLoading();
-            window.location.href = 'salon_billing_v1.html';
-            return;
-          }
-          // 契約済み → ダッシュボードのデータ取得
-          dbLoadSalonDashboard(function (data) {
-            uiHideLoading();
-            if (!data) {
-              uiToast('サロン情報の取得に失敗しました');
-              renderSalon(null);
+
+      // 決済直後 (?checkout=success) かどうか
+      var isJustCheckedOut =
+        window.location.search.indexOf('checkout=success') >= 0;
+
+      // planStatus を確認する。決済直後で未確定なら数秒リトライする
+      // (Stripe Webhook の書き込みに数秒のラグがあるため)
+      function checkPlan(retriesLeft) {
+        firebase.firestore()
+          .collection('salons').doc(uid)
+          .collection('config').doc('settings')
+          .get()
+          .then(function (doc) {
+            var st = doc.exists ? (doc.data().planStatus || null) : null;
+
+            if (st === 'trial' || st === 'active') {
+              // 契約済み → ダッシュボード表示
+              dbLoadSalonDashboard(function (data) {
+                uiHideLoading();
+                if (!data) {
+                  uiToast('サロン情報の取得に失敗しました');
+                  renderSalon(null);
+                  return;
+                }
+                renderSalon(data);
+              });
               return;
             }
-            renderSalon(data);
+
+            // 未契約。決済直後でリトライ回数が残っていれば待って再確認
+            if (isJustCheckedOut && retriesLeft > 0) {
+              uiShowLoading('契約情報を確認しています...');
+              setTimeout(function () {
+                checkPlan(retriesLeft - 1);
+              }, 2000);
+              return;
+            }
+
+            // 未契約確定 → カード登録へ
+            uiHideLoading();
+            window.location.href = 'salon_billing_v1.html';
+          })
+          .catch(function () {
+            if (isJustCheckedOut && retriesLeft > 0) {
+              setTimeout(function () {
+                checkPlan(retriesLeft - 1);
+              }, 2000);
+              return;
+            }
+            uiHideLoading();
+            window.location.href = 'salon_billing_v1.html';
           });
-        })
-        .catch(function () {
-          // 判定できない場合は安全側 = カード登録へ
-          uiHideLoading();
-          window.location.href = 'salon_billing_v1.html';
-        });
+      }
+
+      // 決済直後は最大5回(=最長約10秒)リトライ、通常は0回
+      checkPlan(isJustCheckedOut ? 5 : 0);
     });
   });
 
