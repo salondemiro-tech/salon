@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TORITA - 無料トライアルを始める</title>
+<!--
+  salon_billing_v1.html  -  TORITA Phase G / G-3
+  作成: 2026/6/4
+
+  役割:
+    ログイン済みサロンオーナーに対し、Stripe Checkout への入口を表示する。
+    「14日間無料トライアルを始める」ボタンで createSalonCheckoutSession
+    (callable Function) を呼び、返ってきた URL へリダイレクトする。
+
+  ロード順序 (shared_auth.js ヘッダ契約):
+    firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js → shared_ui.js
+    ※ Stripe 呼び出しのため firebase-functions-compat.js を追加で読み込む。
+
+  画面遷移:
+    - 未ログイン                 → salon_auth_v2_new.html へ
+    - 既に planStatus=trial/active → salon_dashboard_v1.html へ
+    - Checkout 完了 (Stripe)      → success_url = salon_dashboard_v1.html?checkout=success
+    - Checkout 中断 (Stripe)      → cancel_url  = salon_billing_v1.html?checkout=cancel
+
+  ES5 互換: var / function のみ
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --gn:#7b9e87; --gl:#eef3ef;
+    --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2);
+    display:flex; align-items:center; justify-content:center;
+    min-height:100vh; padding:20px; color:var(--tx);
+    -webkit-text-size-adjust:100%;
+  }
+  .card{
+    width:100%; max-width:440px; background:#fff;
+    border-radius:18px; box-shadow:0 10px 38px rgba(0,0,0,.13);
+    padding:34px 30px;
+  }
+  .logo{text-align:center; margin-bottom:8px;}
+  .logo img{height:46px; width:auto;}
+  .logo-sub{font-size:11px; color:var(--mu); margin-top:6px; letter-spacing:.04em;}
+  .badge{
+    display:inline-block; background:var(--al); color:var(--ad);
+    font-size:11px; font-weight:600; padding:3px 12px;
+    border-radius:20px; margin-bottom:8px;
+  }
+  h2{
+    font-size:17px; font-weight:600; color:var(--ad);
+    text-align:center; margin-bottom:6px;
+  }
+  .lead{
+    font-size:13px; color:var(--mu); text-align:center;
+    line-height:1.8; margin-bottom:20px;
+  }
+  .plan{
+    background:var(--sf); border:1px solid var(--bd);
+    border-radius:14px; padding:22px; margin-bottom:18px;
+  }
+  .plan-name{
+    font-size:12px; font-weight:600; letter-spacing:.08em;
+    color:var(--ac); text-align:center; margin-bottom:8px;
+  }
+  .plan-price{
+    text-align:center; margin-bottom:4px;
+  }
+  .plan-price .amt{ font-size:38px; font-weight:600; color:var(--tx); }
+  .plan-price .amt sup{ font-size:18px; }
+  .plan-price .per{ font-size:13px; color:var(--mu); }
+  .plan-note{
+    font-size:12px; color:var(--mu); text-align:center; margin-bottom:16px;
+  }
+  .plan-list{ list-style:none; }
+  .plan-list li{
+    font-size:13px; color:var(--tx); padding:5px 0 5px 24px;
+    position:relative; line-height:1.6;
+  }
+  .plan-list li::before{
+    content:'✓'; position:absolute; left:4px; top:5px;
+    color:var(--ac); font-weight:700;
+  }
+  .trial-banner{
+    background:var(--al); color:var(--ad);
+    border-radius:10px; padding:12px 14px; margin:16px 0;
+    font-size:13px; text-align:center; font-weight:600; line-height:1.6;
+  }
+  .msg{
+    font-size:12.5px; border-radius:9px; padding:10px 12px;
+    margin:6px 0 12px; display:none; line-height:1.6;
+  }
+  .msg.err{color:var(--rt); background:var(--rl);}
+  .msg.show{display:block;}
+  .btn{
+    width:100%; padding:15px; background:var(--ac); color:#fff;
+    border:none; border-radius:11px; font-size:15px; font-weight:600;
+    cursor:pointer; font-family:inherit; margin-top:6px;
+    transition:background .15s;
+  }
+  .btn:hover{background:var(--ad);}
+  .btn:disabled{background:#dcdcdc; color:#a5a5a5; cursor:not-allowed;}
+  .fine{
+    font-size:11px; color:var(--mu); text-align:center;
+    line-height:1.7; margin-top:14px;
+  }
+  .text-link{
+    background:none; border:none; font-size:12.5px; color:var(--mu);
+    cursor:pointer; font-family:inherit; text-decoration:underline;
+    display:block; text-align:center; margin-top:18px; width:100%;
+  }
+  .loading{
+    text-align:center; color:var(--mu); font-size:13px; padding:40px 0;
+  }
+  .hidden{display:none;}
+  footer{
+    text-align:center; font-size:10.5px; color:var(--mu);
+    margin-top:18px; letter-spacing:.03em;
+  }
+</style>
+</head>
+<body>
+
+<div class="card">
+
+  <div class="logo">
+    <img src="torita_logo.png" alt="TORITA">
+    <div class="logo-sub">SALON RESERVATION SYSTEM</div>
+  </div>
+
+  <!-- 読み込み中 -->
+  <div id="viewLoading" class="loading">読み込み中...</div>
+
+  <!-- メイン (カード登録案内) -->
+  <div id="viewMain" class="hidden">
+    <div style="text-align:center;"><span class="badge">無料トライアル</span></div>
+    <h2>14日間、無料でお試しください</h2>
+    <p class="lead">
+      まずはすべての機能を14日間無料で。<br>
+      気に入らなければ、いつでも解約できます。
+    </p>
+
+    <div class="plan">
+      <div class="plan-name">1人サロン向けプラン</div>
+      <div class="plan-price">
+        <span class="amt"><sup>¥</sup>1,500</span>
+        <span class="per">/ 月（税別）</span>
+      </div>
+      <div class="plan-note">トライアル終了後・税込 ¥1,650</div>
+      <ul class="plan-list">
+        <li>写真付き顧客カルテ（無制限）</li>
+        <li>オンライン予約受付・管理</li>
+        <li>インターバル自動設定</li>
+        <li>曜日・時間の一括ブロック</li>
+        <li>顧客統合・スタンプカード</li>
+        <li>予約・キャンセル通知メール</li>
+      </ul>
+    </div>
+
+    <div class="trial-banner">
+      🎁 最初の14日間は一切費用がかかりません
+    </div>
+
+    <div id="errMsg" class="msg"></div>
+
+    <button id="startBtn" class="btn" onclick="startCheckout()">
+      無料トライアルを始める（カード登録へ）
+    </button>
+
+    <p class="fine">
+      ボタンを押すと安全な決済ページ（Stripe）に移動します。<br>
+      トライアル期間中の請求はありません。期間終了後、自動的に月額プランが開始されます。<br>
+      解約はいつでも可能です。
+    </p>
+
+    <button class="text-link" onclick="doLogout()">ログアウト</button>
+  </div>
+
+  <footer>&copy; TORITA</footer>
+</div>
+
+<!-- ===== Firebase SDK (compat) ===== -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<!-- ★ Stripe callable のため functions SDK を追加 -->
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
+
+<!-- ===== TORITA 共通ファイル ===== -->
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_ui.js"></script>
+
+<!-- ===== 画面固有スクリプト ===== -->
+<script>
+(function () {
+
+  function show(id) {
+    var el = document.getElementById(id);
+    if (el) { el.classList.remove('hidden'); }
+  }
+  function hide(id) {
+    var el = document.getElementById(id);
+    if (el) { el.classList.add('hidden'); }
+  }
+  function showErr(text) {
+    var el = document.getElementById('errMsg');
+    if (!el) { return; }
+    el.textContent = text;
+    el.className = 'msg err show';
+  }
+  function hideErr() {
+    var el = document.getElementById('errMsg');
+    if (el) { el.className = 'msg'; }
+  }
+  function setBusy(busy) {
+    var b = document.getElementById('startBtn');
+    if (!b) { return; }
+    b.disabled = busy;
+    b.textContent = busy
+      ? '決済ページを準備しています...'
+      : '無料トライアルを始める（カード登録へ）';
+  }
+
+  // ===== トライアル開始（Checkout へ） =====
+  function startCheckout() {
+    hideErr();
+    setBusy(true);
+
+    if (!firebase.functions) {
+      setBusy(false);
+      showErr('決済機能の読み込みに失敗しました。ページを再読み込みしてください。');
+      return;
+    }
+
+    var fns = firebase.app().functions('asia-northeast1');
+    var callable = fns.httpsCallable('createSalonCheckoutSession');
+
+    callable({}).then(function (res) {
+      var url = res && res.data && res.data.url;
+      if (url) {
+        window.location.href = url;   // Stripe Checkout へ
+      } else {
+        setBusy(false);
+        showErr('決済ページのURLを取得できませんでした。時間をおいて再度お試しください。');
+      }
+    }).catch(function (err) {
+      setBusy(false);
+      var msg = (err && err.message) ? err.message
+        : '決済ページの作成に失敗しました。時間をおいて再度お試しください。';
+      showErr(msg);
+    });
+  }
+  window.startCheckout = startCheckout;
+
+  // ===== ログアウト =====
+  function doLogout() {
+    if (typeof authSalonLogout === 'function') {
+      authSalonLogout(function () {
+        window.location.href = 'salon_auth_v2_new.html';
+      });
+    } else {
+      // フォールバック
+      firebase.auth().signOut().then(function () {
+        window.location.href = 'salon_auth_v2_new.html';
+      });
+    }
+  }
+  window.doLogout = doLogout;
+
+  // ===== 起動処理 =====
+  // 1. ログイン済みのサロンオーナーか確認
+  // 2. 既に契約済み (planStatus=trial/active) ならダッシュボードへ
+  // 3. それ以外はカード登録案内を表示
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (!isStaff) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+
+      // planStatus を確認
+      var uid = firebase.auth().currentUser
+        ? firebase.auth().currentUser.uid : null;
+      if (!uid) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+
+      firebase.firestore()
+        .collection('salons').doc(uid)
+        .collection('config').doc('settings')
+        .get()
+        .then(function (doc) {
+          var st = doc.exists ? (doc.data().planStatus || null) : null;
+          if (st === 'trial' || st === 'active') {
+            // 既に契約済み → ダッシュボードへ
+            window.location.href = 'salon_dashboard_v1.html';
+            return;
+          }
+          // 未契約 / past_due / canceled → カード登録案内を表示
+          hide('viewLoading');
+          show('viewMain');
+        })
+        .catch(function () {
+          // 読めなくても案内は出す
+          hide('viewLoading');
+          show('viewMain');
+        });
+    });
+  });
+
+})();
+</script>
+</body>
+</html>
