@@ -3,31 +3,32 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TORITA — 個人サロンのための予約管理システム</title>
+<title>とりた。— 個人サロンのための予約管理アプリ</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;600&family=Noto+Sans+JP:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic:wght@400;500;700;900&display=swap" rel="stylesheet">
 <style>
 :root {
-  --navy: #1a2744;
-  --navy-mid: #243260;
-  --navy-light: #e8ecf5;
-  --gold: #b5845a;
-  --gold-light: #f5ede4;
-  --white: #ffffff;
-  --gray: #f4f5f8;
-  --text: #1a1a2e;
-  --muted: #6b7280;
-  --border: rgba(26,39,68,.10);
+  --cream:    #fff9f4;
+  --beige:    #fdf0e4;
+  --beige2:   #f5e3ce;
+  --brown:    #8b6347;
+  --brown-d:  #5c3d22;
+  --brown-l:  #c9a07a;
+  --green:    #3d8a62;
+  --green-l:  #e0f2e9;
+  --black:    #2c1f14;
+  --white:    #ffffff;
+  --muted:    #9a7e6a;
+  --border:   rgba(139,99,71,.14);
+  --shadow:   rgba(139,99,71,.12);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
 html { scroll-behavior: smooth; }
-
 body {
-  font-family: 'Noto Sans JP', sans-serif;
-  color: var(--text);
-  background: var(--white);
+  font-family: 'Zen Maru Gothic', sans-serif;
+  color: var(--black);
+  background: var(--cream);
   -webkit-font-smoothing: antialiased;
 }
 
@@ -36,315 +37,328 @@ nav {
   position: fixed; top: 0; left: 0; right: 0; z-index: 100;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 40px;
-  height: 64px;
-  background: rgba(255,255,255,.92);
-  backdrop-filter: blur(12px);
-  border-bottom: 1px solid var(--border);
+  height: 66px;
+  background: rgba(255,249,244,.96);
+  backdrop-filter: blur(14px);
+  border-bottom: 1.5px solid var(--border);
 }
-.nav-logo {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 22px; font-weight: 600; letter-spacing: .12em;
-  color: var(--navy);
-  text-decoration: none;
-}
-.nav-logo span { color: var(--gold); }
+.nav-logo img { height: 34px; width: auto; display: block; }
 .nav-cta {
-  display: inline-flex; align-items: center;
-  padding: 9px 22px;
-  background: var(--navy);
-  color: var(--white);
-  border-radius: 6px;
-  font-size: 13px; font-weight: 500; letter-spacing: .04em;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 10px 26px;
+  background: var(--green);
+  color: #fff;
+  border-radius: 50px;
+  font-size: 13px; font-weight: 700; letter-spacing: .04em;
   text-decoration: none;
-  transition: background .2s;
+  transition: background .2s, transform .15s;
+  box-shadow: 0 3px 14px rgba(61,138,98,.3);
 }
-.nav-cta:hover { background: var(--navy-mid); }
+.nav-cta:hover { background: #2e6e4d; transform: translateY(-1px); }
 
 /* ===== HERO ===== */
 .hero {
   min-height: 100vh;
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   text-align: center;
-  padding: 100px 24px 80px;
-  background: linear-gradient(160deg, #f8f9fc 0%, var(--navy-light) 60%, #e4e9f5 100%);
+  padding: 110px 24px 80px;
+  background: linear-gradient(160deg, var(--cream) 0%, var(--beige) 55%, #fde8d2 100%);
   position: relative; overflow: hidden;
 }
+/* 背景の丸デコ */
 .hero::before {
   content: '';
-  position: absolute; top: -120px; right: -80px;
-  width: 520px; height: 520px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(181,132,90,.12) 0%, transparent 70%);
+  position: absolute; top: -100px; right: -80px;
+  width: 500px; height: 500px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(201,160,122,.2) 0%, transparent 68%);
   pointer-events: none;
 }
 .hero::after {
   content: '';
-  position: absolute; bottom: -100px; left: -60px;
-  width: 400px; height: 400px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(26,39,68,.07) 0%, transparent 70%);
+  position: absolute; bottom: -80px; left: -60px;
+  width: 380px; height: 380px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(61,138,98,.13) 0%, transparent 68%);
   pointer-events: none;
 }
+/* 水玉 */
+.dot { position: absolute; border-radius: 50%; pointer-events: none; }
+.dot1 { width:14px; height:14px; background:var(--brown-l); opacity:.45; top:17%; left:7%; }
+.dot2 { width:9px;  height:9px;  background:var(--green);   opacity:.35; top:32%; right:9%; }
+.dot3 { width:18px; height:18px; background:var(--beige2);  opacity:.7;  bottom:24%; right:13%; border:2px solid var(--brown-l); }
+.dot4 { width:7px;  height:7px;  background:var(--brown);   opacity:.3;  bottom:18%; left:12%; }
+
+.hero-logo-main {
+  margin-bottom: 18px; position: relative; z-index: 1;
+}
+.hero-logo-main img { height: 60px; width: auto; display: block; margin: 0 auto; }
+
 .hero-badge {
-  display: inline-block;
-  padding: 5px 16px;
-  background: var(--gold-light);
-  color: var(--gold);
-  border-radius: 20px;
-  font-size: 12px; font-weight: 700; letter-spacing: .08em;
-  margin-bottom: 28px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 20px;
+  background: var(--green-l);
+  color: var(--green);
+  border-radius: 50px;
+  font-size: 12px; font-weight: 700; letter-spacing: .06em;
+  margin-bottom: 22px; position: relative; z-index: 1;
+  border: 1.5px solid rgba(61,138,98,.2);
 }
+
 .hero h1 {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: clamp(38px, 6vw, 64px);
-  font-weight: 600; line-height: 1.25;
-  color: var(--navy);
-  letter-spacing: .02em;
-  margin-bottom: 10px;
+  font-size: clamp(21px, 3.8vw, 36px);
+  font-weight: 900; line-height: 1.6;
+  color: var(--black);
+  max-width: 680px;
+  margin-bottom: 8px; position: relative; z-index: 1;
 }
-.hero h1 em {
-  font-style: normal;
-  color: var(--gold);
+.hero h1 .hl {
+  color: var(--green);
+  background: linear-gradient(180deg, transparent 58%, rgba(61,138,98,.18) 58%);
+  padding: 0 2px;
 }
+
 .hero-sub {
-  font-size: clamp(15px, 2vw, 18px);
+  font-size: clamp(13px, 1.7vw, 14.5px);
   color: var(--muted);
-  line-height: 1.8;
-  max-width: 560px;
-  margin: 16px auto 40px;
+  line-height: 2.1;
+  max-width: 540px;
+  margin: 14px auto 34px; position: relative; z-index: 1;
 }
+
 .hero-actions {
-  display: flex; flex-direction: column; align-items: center; gap: 12px;
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  position: relative; z-index: 1;
 }
 .btn-primary {
-  display: inline-flex; align-items: center; gap: 8px;
-  padding: 16px 40px;
-  background: var(--navy);
-  color: var(--white);
-  border-radius: 8px;
-  font-size: 15px; font-weight: 700; letter-spacing: .04em;
+  display: inline-flex; align-items: center; gap: 10px;
+  padding: 17px 48px;
+  background: var(--brown-d);
+  color: #fff;
+  border-radius: 50px;
+  font-size: 15px; font-weight: 900; letter-spacing: .05em;
   text-decoration: none;
   transition: background .2s, transform .15s;
-  box-shadow: 0 4px 20px rgba(26,39,68,.22);
+  box-shadow: 0 6px 28px rgba(92,61,34,.28);
 }
-.btn-primary:hover { background: var(--navy-mid); transform: translateY(-2px); }
-.btn-primary svg { width: 16px; height: 16px; }
-.hero-note {
-  font-size: 12px; color: var(--muted); letter-spacing: .03em;
-}
+.btn-primary:hover { background: var(--brown); transform: translateY(-2px); }
+
+.hero-note { font-size: 11.5px; color: var(--muted); }
+
 .hero-price-hint {
-  margin-top: 32px;
+  margin-top: 26px; position: relative; z-index: 1;
   display: inline-block;
-  padding: 10px 24px;
-  background: rgba(255,255,255,.7);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  font-size: 13px; color: var(--navy);
+  padding: 11px 26px;
+  background: rgba(255,255,255,.85);
+  border: 1.5px solid var(--border);
+  border-radius: 14px;
+  font-size: 13px; color: var(--black);
+  backdrop-filter: blur(6px);
 }
-.hero-price-hint strong { color: var(--gold); font-size: 18px; }
+.hero-price-hint strong { color: var(--green); font-size: 17px; font-weight: 900; }
+
+/* ひらがなロゴ背景装飾 */
+.hero-jp-bg {
+  position: absolute; bottom: -10px; right: -10px;
+  opacity: .06; pointer-events: none; z-index: 0;
+}
+.hero-jp-bg img { height: 220px; width: auto; }
+
+/* ===== SECTION BASE ===== */
+.section { padding: 88px 24px; }
+.section-inner { max-width: 1060px; margin: 0 auto; }
+.section-label {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11px; font-weight: 700; letter-spacing: .14em;
+  color: var(--green); text-transform: uppercase; margin-bottom: 12px;
+}
+.section-label::before { content: '✦'; font-size: 9px; }
+.section-title {
+  font-size: clamp(25px, 3.6vw, 40px); font-weight: 900;
+  color: var(--black); line-height: 1.38; margin-bottom: 14px;
+}
+.section-desc { font-size: 14px; color: var(--muted); line-height: 2; max-width: 540px; }
 
 /* ===== FEATURES ===== */
-.section {
-  padding: 96px 24px;
-}
-.section-inner {
-  max-width: 1040px; margin: 0 auto;
-}
-.section-label {
-  font-size: 11px; font-weight: 700; letter-spacing: .14em;
-  color: var(--gold); text-transform: uppercase;
-  margin-bottom: 12px;
-}
-.section-title {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: clamp(28px, 4vw, 42px); font-weight: 600;
-  color: var(--navy); line-height: 1.3;
-  margin-bottom: 16px;
-}
-.section-desc {
-  font-size: 15px; color: var(--muted); line-height: 1.9;
-  max-width: 560px;
-}
-
+.features-bg { background: var(--beige); }
 .features-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-  gap: 24px;
-  margin-top: 56px;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 20px; margin-top: 50px;
 }
 .feature-card {
   background: var(--white);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  padding: 32px 28px;
-  transition: box-shadow .2s, transform .2s;
+  border: 1.5px solid var(--border);
+  border-radius: 22px;
+  padding: 30px 26px;
+  transition: box-shadow .25s, transform .25s;
+  position: relative; overflow: hidden;
 }
-.feature-card:hover {
-  box-shadow: 0 8px 32px rgba(26,39,68,.10);
-  transform: translateY(-3px);
+.feature-card-accent {
+  position: absolute; top: 0; left: 0; right: 0; height: 4px;
+  background: linear-gradient(90deg, var(--brown-l), var(--green));
+  border-radius: 22px 22px 0 0;
+  opacity: 0; transition: opacity .25s;
 }
+.feature-card:hover { box-shadow: 0 10px 40px var(--shadow); transform: translateY(-4px); }
+.feature-card:hover .feature-card-accent { opacity: 1; }
+
 .feature-icon {
-  width: 44px; height: 44px;
-  background: var(--navy-light);
-  border-radius: 10px;
+  width: 50px; height: 50px;
+  background: var(--beige);
+  border-radius: 15px;
   display: flex; align-items: center; justify-content: center;
-  margin-bottom: 18px;
+  margin-bottom: 16px; font-size: 22px;
+  border: 1.5px solid var(--border);
 }
-.feature-icon svg { width: 22px; height: 22px; color: var(--navy); }
-.feature-card h3 {
-  font-size: 15px; font-weight: 700;
-  color: var(--navy); margin-bottom: 8px;
-}
-.feature-card p {
-  font-size: 13.5px; color: var(--muted); line-height: 1.8;
-}
-.feature-card .tag {
-  display: inline-block; margin-top: 12px;
-  padding: 3px 10px;
-  background: var(--gold-light); color: var(--gold);
-  border-radius: 4px; font-size: 11px; font-weight: 700;
+.feature-card h3 { font-size: 15px; font-weight: 900; color: var(--black); margin-bottom: 8px; }
+.feature-card p { font-size: 13px; color: var(--muted); line-height: 1.95; }
+.feature-tag {
+  display: inline-block; margin-top: 14px;
+  padding: 3px 14px;
+  background: var(--green-l); color: var(--green);
+  border-radius: 50px; font-size: 11px; font-weight: 700;
 }
 
-/* ===== PRICE ===== */
-.price-section {
-  background: var(--gray);
-}
-.price-card {
-  max-width: 480px; margin: 56px auto 0;
-  background: var(--white);
-  border: 2px solid var(--navy);
-  border-radius: 18px;
-  padding: 48px 40px;
-  text-align: center;
-  box-shadow: 0 12px 48px rgba(26,39,68,.12);
-}
-.price-card .plan-name {
-  font-size: 12px; font-weight: 700; letter-spacing: .12em;
-  color: var(--gold); text-transform: uppercase; margin-bottom: 8px;
-}
-.price-card .amount {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 64px; font-weight: 600; color: var(--navy);
-  line-height: 1;
-}
-.price-card .amount sup { font-size: 24px; vertical-align: super; }
-.price-card .amount-note {
-  font-size: 13px; color: var(--muted); margin-top: 4px; margin-bottom: 28px;
-}
-.price-divider {
-  border: none; border-top: 1px solid var(--border); margin: 28px 0;
-}
-.price-list {
-  list-style: none; text-align: left;
-}
-.price-list li {
-  display: flex; align-items: flex-start; gap: 10px;
-  font-size: 14px; color: var(--text); padding: 7px 0;
-  line-height: 1.6;
-}
-.price-list li::before {
-  content: '✓';
-  color: var(--navy); font-weight: 700; flex-shrink: 0;
-  margin-top: 1px;
-}
-.price-trial {
-  margin-top: 32px;
-  padding: 14px;
-  background: var(--navy-light);
-  border-radius: 8px;
-  font-size: 13px; color: var(--navy); font-weight: 500;
-}
-.btn-price {
-  display: block; margin-top: 28px;
-  padding: 16px;
-  background: var(--navy);
-  color: var(--white);
-  border-radius: 8px;
-  font-size: 15px; font-weight: 700; letter-spacing: .04em;
-  text-decoration: none;
-  transition: background .2s;
-}
-.btn-price:hover { background: var(--navy-mid); }
-.price-cancel {
-  margin-top: 12px; font-size: 12px; color: var(--muted);
-}
-
-/* ===== HOW IT WORKS ===== */
+/* ===== STEPS ===== */
 .steps {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-  gap: 0;
-  margin-top: 56px;
-  position: relative;
+  gap: 0; margin-top: 52px; position: relative;
 }
-.step {
-  padding: 32px 24px;
-  text-align: center;
-  position: relative;
+.steps::before {
+  content: '';
+  position: absolute; top: 27px; left: 12%; right: 12%;
+  height: 2px;
+  background: linear-gradient(90deg, var(--beige2), var(--brown-l), var(--green));
+  z-index: 0;
 }
-.step-num {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: 48px; font-weight: 600;
-  color: var(--navy-light);
-  line-height: 1; margin-bottom: 16px;
+.step { padding: 0 18px 32px; position: relative; z-index: 1; text-align: center; }
+.step-num-wrap {
+  width: 54px; height: 54px; border-radius: 50%;
+  background: var(--white);
+  border: 2.5px solid var(--brown-l);
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 18px;
+  font-size: 17px; font-weight: 900; color: var(--brown);
+  box-shadow: 0 2px 10px var(--shadow);
 }
-.step h3 { font-size: 14px; font-weight: 700; color: var(--navy); margin-bottom: 8px; }
-.step p { font-size: 13px; color: var(--muted); line-height: 1.8; }
+.step h3 { font-size: 14px; font-weight: 700; color: var(--black); margin-bottom: 8px; }
+.step p { font-size: 12.5px; color: var(--muted); line-height: 1.9; }
 
-/* ===== CTA FOOTER ===== */
-.cta-section {
-  background: var(--navy);
-  padding: 96px 24px;
+/* ===== PRICE ===== */
+.price-section { background: var(--beige); }
+.price-card {
+  max-width: 480px; margin: 52px auto 0;
+  background: var(--white);
+  border: 2px solid var(--brown-l);
+  border-radius: 26px;
+  padding: 52px 42px;
   text-align: center;
+  box-shadow: 0 16px 56px rgba(139,99,71,.13);
+  position: relative;
+}
+.price-card-ribbon {
+  position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+  background: var(--green);
+  color: #fff; font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  padding: 6px 22px; border-radius: 0 0 14px 14px;
+}
+.plan-name {
+  font-size: 11px; font-weight: 700; letter-spacing: .14em;
+  color: var(--brown); text-transform: uppercase;
+  margin-bottom: 10px; margin-top: 18px;
+}
+.price-amount {
+  font-size: 68px; font-weight: 900; color: var(--black); line-height: 1;
+}
+.price-amount sup { font-size: 26px; vertical-align: super; }
+.amount-note { font-size: 13px; color: var(--muted); margin-top: 6px; margin-bottom: 28px; }
+.price-divider { border: none; border-top: 1.5px solid var(--border); margin: 24px 0; }
+.price-list { list-style: none; text-align: left; }
+.price-list li {
+  display: flex; align-items: flex-start; gap: 10px;
+  font-size: 14px; color: var(--black); padding: 7px 0; line-height: 1.6;
+}
+.price-list li::before { content: '✓'; color: var(--green); font-weight: 900; flex-shrink: 0; margin-top: 1px; }
+.price-trial {
+  margin-top: 24px; padding: 14px;
+  background: var(--green-l); border-radius: 12px;
+  font-size: 13px; color: var(--green); font-weight: 700;
+}
+.btn-price {
+  display: block; margin-top: 24px; padding: 16px;
+  background: var(--brown-d); color: #fff; border-radius: 50px;
+  font-size: 15px; font-weight: 900; letter-spacing: .04em;
+  text-decoration: none; transition: background .2s;
+  box-shadow: 0 4px 18px rgba(92,61,34,.25);
+}
+.btn-price:hover { background: var(--brown); }
+.price-cancel { margin-top: 12px; font-size: 11px; color: var(--muted); }
+
+/* ===== CTA ===== */
+.cta-section {
+  background: linear-gradient(145deg, var(--brown-d) 0%, #3a2412 100%);
+  padding: 96px 24px; text-align: center;
+  position: relative; overflow: hidden;
+}
+.cta-section::before {
+  content: '';
+  position: absolute; top: -120px; right: -80px;
+  width: 420px; height: 420px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(201,160,122,.12) 0%, transparent 70%);
+  pointer-events: none;
+}
+.cta-jp-logo { margin-bottom: 22px; }
+.cta-jp-logo img {
+  height: 50px; width: auto; display: block; margin: 0 auto;
+  filter: brightness(0) invert(1); opacity: .8;
 }
 .cta-section h2 {
-  font-family: 'Cormorant Garamond', serif;
-  font-size: clamp(28px, 4vw, 44px); font-weight: 600;
-  color: var(--white); margin-bottom: 16px;
+  font-size: clamp(26px, 4vw, 42px); font-weight: 900;
+  color: #fff; margin-bottom: 14px; line-height: 1.45;
 }
-.cta-section p {
-  font-size: 15px; color: rgba(255,255,255,.65); margin-bottom: 36px;
-}
+.cta-section p { font-size: 14px; color: rgba(255,255,255,.65); margin-bottom: 36px; line-height: 2; }
 .btn-cta-white {
   display: inline-flex; align-items: center; gap: 8px;
-  padding: 16px 44px;
-  background: var(--white);
-  color: var(--navy);
-  border-radius: 8px;
-  font-size: 15px; font-weight: 700; letter-spacing: .04em;
-  text-decoration: none;
-  transition: opacity .2s;
+  padding: 17px 50px;
+  background: #fff; color: var(--brown-d);
+  border-radius: 50px;
+  font-size: 15px; font-weight: 900; letter-spacing: .04em;
+  text-decoration: none; transition: opacity .2s, transform .15s;
+  box-shadow: 0 6px 28px rgba(0,0,0,.15);
 }
-.btn-cta-white:hover { opacity: .9; }
-.cta-note { margin-top: 16px; font-size: 12px; color: rgba(255,255,255,.45); }
+.btn-cta-white:hover { opacity: .92; transform: translateY(-2px); }
+.cta-note { margin-top: 16px; font-size: 11.5px; color: rgba(255,255,255,.4); }
 
 /* ===== FOOTER ===== */
 footer {
-  padding: 32px 24px;
-  text-align: center;
-  border-top: 1px solid var(--border);
+  padding: 36px 24px; text-align: center;
+  border-top: 1.5px solid var(--border);
   font-size: 12px; color: var(--muted);
+  background: var(--white);
 }
+.footer-logo img { height: 26px; width: auto; margin: 0 auto 14px; display: block; opacity: .55; }
 footer a { color: var(--muted); text-decoration: none; }
-footer a:hover { color: var(--navy); }
-.footer-links { display: flex; justify-content: center; gap: 24px; margin-bottom: 12px; }
+footer a:hover { color: var(--brown); }
+.footer-links { display: flex; justify-content: center; gap: 24px; margin-bottom: 12px; flex-wrap: wrap; }
 
 /* ===== ANIMATIONS ===== */
 @keyframes fadeUp {
-  from { opacity: 0; transform: translateY(24px); }
+  from { opacity: 0; transform: translateY(18px); }
   to   { opacity: 1; transform: translateY(0); }
 }
-.hero-badge { animation: fadeUp .5s ease both; }
-.hero h1    { animation: fadeUp .5s .1s ease both; }
-.hero-sub   { animation: fadeUp .5s .2s ease both; }
-.hero-actions { animation: fadeUp .5s .3s ease both; }
-.hero-price-hint { animation: fadeUp .5s .4s ease both; }
+.hero-logo-main { animation: fadeUp .5s ease both; }
+.hero-badge      { animation: fadeUp .5s .08s ease both; }
+.hero h1         { animation: fadeUp .5s .16s ease both; }
+.hero-sub        { animation: fadeUp .5s .24s ease both; }
+.hero-actions    { animation: fadeUp .5s .32s ease both; }
+.hero-price-hint { animation: fadeUp .5s .40s ease both; }
 
 /* ===== RESPONSIVE ===== */
 @media (max-width: 640px) {
-  nav { padding: 0 20px; }
-  .price-card { padding: 36px 24px; }
-  .step { padding: 24px 16px; }
+  nav { padding: 0 18px; }
+  .steps::before { display: none; }
+  .price-card { padding: 40px 22px; }
+  .step { padding: 0 10px 28px; }
 }
 </style>
 </head>
@@ -352,107 +366,109 @@ footer a:hover { color: var(--navy); }
 
 <!-- NAV -->
 <nav>
-  <a class="nav-logo" href="#">TOR<span>I</span>TA</a>
+  <a href="#" style="display:block;line-height:0;">
+    <img src="torita_log.png" alt="TORITA" style="height:32px;width:auto;">
+  </a>
   <a class="nav-cta" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">
-    無料で始める
+    無料で始める ✦
   </a>
 </nav>
 
 <!-- HERO -->
 <section class="hero">
-  <div class="hero-badge">個人サロン専用 予約管理システム</div>
-  <h1>施術に集中できる<br><em>予約管理</em>を。</h1>
+  <div class="dot dot1"></div>
+  <div class="dot dot2"></div>
+  <div class="dot dot3"></div>
+  <div class="dot dot4"></div>
+
+  <div class="hero-logo-main">
+    <img src="torita_log.png" alt="TORITA">
+  </div>
+
+  <div class="hero-badge">✦ 個人サロン専用 予約管理アプリ</div>
+
+  <h1>
+    サロンオーナーが作ったからわかる！<br>
+    <span class="hl">痒いところに手が届く</span><br>
+    シンプル&amp;便利な予約管理アプリ
+  </h1>
+
   <p class="hero-sub">
-    写真付き顧客カルテ、インターバル自動設定、一括ブロック。<br>
-    個人サロンのオーナー様が本当に必要な機能だけを、<br>シンプルに揃えました。
+    予約と連動する写真付きカルテ、休憩や準備の時間が自動で付けられるカレンダー、<br>
+    毎週決まった予定のある時間帯を一括ブロック。<br>
+    個人サロンオーナーが本当に必要な機能をシンプルに揃えました。
   </p>
+
   <div class="hero-actions">
     <a class="btn-primary" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-      14日間無料トライアルを始める
+      → 14日間無料トライアルを始める
     </a>
     <span class="hero-note">クレジットカード登録後、14日間は無料です</span>
   </div>
+
   <div class="hero-price-hint">
     トライアル終了後は <strong>¥1,500</strong>/月（税別）で全機能をご利用いただけます
+  </div>
+
+  <div class="hero-jp-bg">
+    <img src="torita_log_jp.png" alt="">
   </div>
 </section>
 
 <!-- FEATURES -->
-<section class="section">
+<section class="section features-bg">
   <div class="section-inner">
     <div class="section-label">Features</div>
     <h2 class="section-title">他社にはない機能が、<br>標準装備です。</h2>
-    <p class="section-desc">
-      高額なオプションや複雑な設定は不要。最初から全機能が使えます。
-    </p>
-
+    <p class="section-desc">高額なオプションや複雑な設定は不要。最初から全機能が使えます。</p>
     <div class="features-grid">
 
       <div class="feature-card">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>
-          </svg>
-        </div>
+        <div class="feature-card-accent"></div>
+        <div class="feature-icon">📸</div>
         <h3>写真付き顧客カルテ</h3>
-        <p>施術写真をカルテに直接記録。来店ごとの変化が一目でわかり、丁寧なカウンセリングに活かせます。</p>
-        <span class="tag">標準装備</span>
+        <p>施術写真をカルテに直接記録。来店ごとの変化が一目でわかり、丁寧なカウンセリングに活かせます。お客様とも変化を共有して効果を感じていただきましょう！</p>
+        <span class="feature-tag">標準装備</span>
       </div>
 
       <div class="feature-card">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
-          </svg>
-        </div>
+        <div class="feature-card-accent"></div>
+        <div class="feature-icon">⏱️</div>
         <h3>インターバル自動設定</h3>
-        <p>施術後の片付けや準備時間を自動でブロック。ダブルブッキングの心配がなくなります。</p>
-        <span class="tag">標準装備</span>
+        <p>施術後の片付けや準備時間を自動でブロック。就寝中やトリートメント中に予約が隙間なく入っていてお客様に時間調整のお電話…そんな手間はもう要りません。</p>
+        <span class="feature-tag">標準装備</span>
       </div>
 
       <div class="feature-card">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>
-          </svg>
-        </div>
+        <div class="feature-card-accent"></div>
+        <div class="feature-icon">📅</div>
         <h3>曜日・時間の一括ブロック</h3>
-        <p>定休日や固定の予約不可時間をまとめて設定。毎週の手作業がゼロになります。</p>
-        <span class="tag">標準装備</span>
+        <p>定休日や固定の予約不可時間をまとめて設定。1人サロンは予定調整も大変。毎週決まった時間にお店を閉めなければならない時に便利な機能です。</p>
+        <span class="feature-tag">標準装備</span>
       </div>
 
       <div class="feature-card">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>
-          </svg>
-        </div>
+        <div class="feature-card-accent"></div>
+        <div class="feature-icon">🔗</div>
         <h3>顧客統合機能</h3>
         <p>同じお客様が複数の経路から予約してもカルテを一つに統合。履歴が分散しません。</p>
-        <span class="tag">標準装備</span>
+        <span class="feature-tag">標準装備</span>
       </div>
 
       <div class="feature-card">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/>
-          </svg>
-        </div>
+        <div class="feature-card-accent"></div>
+        <div class="feature-icon">⭐</div>
         <h3>スタンプカード機能</h3>
         <p>デジタルスタンプカードでリピーター獲得。お客様アプリから確認できます。</p>
-        <span class="tag">標準装備</span>
+        <span class="feature-tag">標準装備</span>
       </div>
 
       <div class="feature-card">
-        <div class="feature-icon">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.61 3.4 2 2 0 0 1 3.6 1.22h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.91 8.91a16 16 0 0 0 6 6l.92-.92a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21.73 16.92z"/>
-          </svg>
-        </div>
-        <h3>予約・キャンセル通知メール</h3>
-        <p>予約確定・変更・キャンセルを自動でメール通知。連絡の手間が省けます。</p>
-        <span class="tag">標準装備</span>
+        <div class="feature-card-accent"></div>
+        <div class="feature-icon">💌</div>
+        <h3>キャンセル料を自動で計算・通知</h3>
+        <p>キャンセル料が発生する場合は自動でキャンセル料を計算して通知メールを送ります。決済リンクを貼ることも可能です。お客様との間の気まずいやり取りもおまかせ。</p>
+        <span class="feature-tag">標準装備</span>
       </div>
 
     </div>
@@ -460,31 +476,30 @@ footer a:hover { color: var(--navy); }
 </section>
 
 <!-- HOW IT WORKS -->
-<section class="section" style="background: var(--gray);">
+<section class="section" style="background:var(--cream);">
   <div class="section-inner">
     <div class="section-label">How it works</div>
     <h2 class="section-title">始め方は、4ステップ。</h2>
-
     <div class="steps">
       <div class="step">
-        <div class="step-num">01</div>
+        <div class="step-num-wrap">01</div>
         <h3>アカウント登録</h3>
         <p>メールアドレスとパスワードだけで登録完了。サロン名を入れるだけで準備OK。</p>
       </div>
       <div class="step">
-        <div class="step-num">02</div>
+        <div class="step-num-wrap">02</div>
         <h3>基本設定</h3>
         <p>営業時間・メニュー・スタッフ情報をサクッと設定。15分もあれば完了します。</p>
       </div>
       <div class="step">
-        <div class="step-num">03</div>
+        <div class="step-num-wrap">03</div>
         <h3>お客様にURLを共有</h3>
-        <p>専用の予約URLをLINEやInstagramで共有するだけ。お客様はアプリ不要で予約できます。</p>
+        <p>専用の予約URLをLINEやInstagramで共有するだけ。アプリ不要で予約できます。</p>
       </div>
       <div class="step">
-        <div class="step-num">04</div>
+        <div class="step-num-wrap">04</div>
         <h3>あとは自動で管理</h3>
-        <p>予約が入るたびに通知。カレンダーで一目確認。カルテは来店ごとに自動で蓄積されます。</p>
+        <p>予約が入るたびに通知。カレンダーで一目確認。カルテは来店ごとに自動で蓄積。</p>
       </div>
     </div>
   </div>
@@ -495,11 +510,11 @@ footer a:hover { color: var(--navy); }
   <div class="section-inner" style="text-align:center;">
     <div class="section-label">Pricing</div>
     <h2 class="section-title">シンプルな料金体系。</h2>
-    <p class="section-desc" style="margin: 0 auto;">プランは1つだけ。全機能が使えます。</p>
-
+    <p class="section-desc" style="margin:0 auto;">プランは1つだけ。全機能が使えます。</p>
     <div class="price-card">
+      <div class="price-card-ribbon">✦ 全機能込み</div>
       <div class="plan-name">Standard Plan</div>
-      <div class="amount"><sup>¥</sup>1,500</div>
+      <div class="price-amount"><sup>¥</sup>1,500</div>
       <div class="amount-note">/ 月（税別）· いつでも解約可能</div>
       <hr class="price-divider">
       <ul class="price-list">
@@ -509,15 +524,11 @@ footer a:hover { color: var(--navy); }
         <li>曜日・時間の一括ブロック</li>
         <li>顧客統合機能</li>
         <li>デジタルスタンプカード</li>
-        <li>予約・キャンセル通知メール</li>
+        <li>キャンセル料自動計算・通知メール</li>
         <li>お客様専用予約アプリ（ブラウザ）</li>
       </ul>
-      <div class="price-trial">
-        🎁 最初の14日間は完全無料でお試しいただけます
-      </div>
-      <a class="btn-price" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">
-        無料トライアルを始める
-      </a>
+      <div class="price-trial">🎁 最初の14日間は完全無料でお試しいただけます</div>
+      <a class="btn-price" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">無料トライアルを始める</a>
       <p class="price-cancel">いつでも解約できます · 違約金なし</p>
     </div>
   </div>
@@ -525,17 +536,22 @@ footer a:hover { color: var(--navy); }
 
 <!-- CTA -->
 <section class="cta-section">
+  <div class="cta-jp-logo">
+    <img src="torita_log_jp.png" alt="とりた。">
+  </div>
   <h2>まずは14日間、<br>無料でお試しください。</h2>
-  <p>クレジットカードを登録するだけ。14日間は一切費用はかかりません。</p>
+  <p>クレジットカードを登録するだけ。<br>14日間は一切費用はかかりません。</p>
   <a class="btn-cta-white" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-    無料トライアルを始める
+    → 無料トライアルを始める
   </a>
   <p class="cta-note">個人サロンのオーナー様向け · 1サロン1アカウント</p>
 </section>
 
 <!-- FOOTER -->
 <footer>
+  <div class="footer-logo">
+    <img src="torita_log.png" alt="TORITA">
+  </div>
   <div class="footer-links">
     <a href="#">利用規約</a>
     <a href="#">プライバシーポリシー</a>
