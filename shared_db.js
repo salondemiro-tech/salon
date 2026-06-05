@@ -290,16 +290,13 @@
   function dbSalonListCustomers(cb) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, null); return; }
-    dbReadCollection('salons/' + sid + '/customers', null, function (list) {
-      if (!list) { _safeCb(cb, null); return; }
-      var out = [];
-      var i;
-      for (i = 0; i < list.length; i++) {
-        if (list[i] && list[i].isMerged === true) { continue; }
-        out.push(list[i]);
-      }
-      _safeCb(cb, out);
-    });
+    // isMerged フィルタを Firestore 側に移して転送データ量を削減
+    // （JS 側でのループフィルタは廃止）
+    dbReadCollection(
+      'salons/' + sid + '/customers',
+      function (ref) { return ref.where('isMerged', '==', false); },
+      function (list) { _safeCb(cb, list || []); }
+    );
   }
   window.dbSalonListCustomers = dbSalonListCustomers;
 
@@ -1530,6 +1527,46 @@
     });
   }
   window.dbLoadCustomerHistory = dbLoadCustomerHistory;
+
+  // ------------------------------------------------------------
+  // 顧客側: スタンプカード表示用の統合取得
+  //   stampCard設定 (config/stampCard) と自分の stampCount を並列取得して返す。
+  //   マイページは本関数1本で完結させ、dbCustomerResolveMyCard との二重取得を避ける。
+  //   戻り値: { customer, customerDocId, stampCard } | null
+  //     customer   : customers ドキュメント（name/phone/email/stampCount 等）
+  //     customerDocId : Firestore doc ID
+  //     stampCard  : config/stampCard ドキュメント（enabled/goal/reward 等）
+  // ------------------------------------------------------------
+  function dbCustomerGetMyStampInfo(cb) {
+    var sid = getCurrentSalonId();
+    var uid = getCurrentUserUid();
+    if (!sid || !uid) { _safeCb(cb, null); return; }
+
+    var _res = { customer: null, customerDocId: null, stampCard: null };
+    var _done = { cust: false, card: false };
+
+    function _tryDone() {
+      if (_done.cust && _done.card) { _safeCb(cb, _res); }
+    }
+
+    // stampCard 設定（config/stampCard）
+    dbGetStampCard(function (card) {
+      _res.stampCard = card || null;
+      _done.card = true;
+      _tryDone();
+    });
+
+    // authIndex → customers（stampCount を含む）
+    dbCustomerResolveMyCard(function (resolved) {
+      if (resolved) {
+        _res.customer      = resolved.customer      || null;
+        _res.customerDocId = resolved.customerDocId || null;
+      }
+      _done.cust = true;
+      _tryDone();
+    });
+  }
+  window.dbCustomerGetMyStampInfo = dbCustomerGetMyStampInfo;
 
   window._sharedDbDebug = {
     getUrlSalonId: function () { return _urlSalonId; },

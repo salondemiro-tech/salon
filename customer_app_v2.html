@@ -64,19 +64,6 @@
   .menu-meta{font-size:12px;color:var(--mu);margin-top:6px;display:flex;gap:14px;}
   .menu-price{font-size:15px;font-weight:600;color:var(--ad);}
   .menu-desc{font-size:12px;color:var(--mu);margin-top:8px;line-height:1.5;}
-  .menu-contra-btn{
-    display:inline-block; margin-top:10px;
-    font-size:11.5px; color:var(--rd); font-weight:600;
-    background:var(--rl); border:1px solid var(--rd);
-    border-radius:20px; padding:4px 12px;
-    cursor:pointer; font-family:inherit;
-    line-height:1.6;
-  }
-  .contra-modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:300;display:flex;align-items:center;justify-content:center;padding:20px;}
-  .contra-modal-box{background:var(--bg);border-radius:16px;padding:22px;max-width:440px;width:100%;max-height:75vh;overflow-y:auto;}
-  .contra-modal-title{font-size:15px;font-weight:600;color:var(--rt);margin-bottom:10px;}
-  .contra-modal-text{font-size:13px;color:var(--tx);line-height:1.8;white-space:pre-wrap;}
-  .contra-modal-close{width:100%;padding:12px;background:var(--s2);border:none;border-radius:10px;font-size:14px;cursor:pointer;margin-top:16px;font-family:inherit;}
 
   /* オプション */
   .opt-row{display:flex;align-items:center;gap:12px;padding:12px;border:1.5px solid var(--bd);
@@ -176,6 +163,39 @@
   .mypage-msg{font-size:13px;padding:10px 12px;border-radius:8px;margin-bottom:10px;}
   .mypage-msg.ok{background:var(--gl);color:var(--gt);}
   .mypage-msg.err{background:var(--rl);color:var(--rt);}
+  /* スタンプカード（顧客マイページ） */
+  .mp-stamp-card{
+    border-radius:14px; overflow:hidden;
+    margin-bottom:14px; box-shadow:0 4px 16px rgba(0,0,0,.10);
+  }
+  .mp-stamp-header{
+    padding:14px 16px 12px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .mp-stamp-title{font-size:12px;font-weight:700;color:#fff;letter-spacing:.05em;opacity:.9;}
+  .mp-stamp-count-wrap{display:flex;align-items:baseline;gap:3px;}
+  .mp-stamp-num{font-size:28px;font-weight:700;color:#fff;line-height:1;}
+  .mp-stamp-goal{font-size:12px;color:rgba(255,255,255,.75);}
+  .mp-stamp-dots{
+    display:flex;flex-wrap:wrap;gap:7px;
+    padding:10px 16px 14px;
+    background:rgba(255,255,255,.15);
+  }
+  .mp-stamp-dot{
+    width:22px;height:22px;border-radius:50%;
+    background:rgba(255,255,255,.3);flex-shrink:0;
+  }
+  .mp-stamp-dot.on{background:#fff;}
+  .mp-stamp-reward{
+    padding:10px 16px;
+    background:rgba(0,0,0,.15);
+    font-size:12px;color:#fff;line-height:1.5;
+  }
+  .mp-stamp-bonus{
+    padding:4px 16px 10px;
+    background:rgba(0,0,0,.08);
+    font-size:11.5px;color:#fff;
+  }
 
   /* キャンセルモーダル */
   .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100;display:flex;align-items:flex-end;justify-content:center;}
@@ -495,20 +515,37 @@ function loadSalonInfo_then(nextStep){
   if (typeof dbCustomerGetSalonInfo !== 'function'){
     goStep(nextStep); return;
   }
-  dbCustomerGetSalonInfo(function(info){
-    appState.salonInfo = info || null;
-    var name = (info && info.name) ? info.name : 'サロン';
-    $('hdrSalon').textContent = name;
-    $('hdrSub').textContent = 'ご予約';
-    if (typeof dbSalonGetConfig === 'function'){
-      var loaded = { settings: false, cancel: false };
-      function checkDone(){ if (loaded.settings && loaded.cancel) goStep(nextStep); }
-      dbSalonGetConfig('settings', function(s){ appState.settings = s || null; loaded.settings = true; checkDone(); });
-      dbSalonGetConfig('cancelPolicy', function(p){ appState.cancelPolicy = p || null; loaded.cancel = true; checkDone(); });
-    } else {
+  // salonInfo / settings / cancelPolicy を3並列で取得
+  var _got = { info: false, settings: false, cancel: false };
+  function _checkDone(){
+    if (_got.info && _got.settings && _got.cancel) {
+      var name = (appState.salonInfo && appState.salonInfo.name)
+                   ? appState.salonInfo.name : 'サロン';
+      $('hdrSalon').textContent = name;
+      $('hdrSub').textContent = 'ご予約';
       goStep(nextStep);
     }
+  }
+  dbCustomerGetSalonInfo(function(info){
+    appState.salonInfo = info || null;
+    _got.info = true;
+    _checkDone();
   });
+  if (typeof dbSalonGetConfig === 'function'){
+    dbSalonGetConfig('settings', function(s){
+      appState.settings = s || null;
+      _got.settings = true;
+      _checkDone();
+    });
+    dbSalonGetConfig('cancelPolicy', function(p){
+      appState.cancelPolicy = p || null;
+      _got.cancel = true;
+      _checkDone();
+    });
+  } else {
+    _got.settings = true;
+    _got.cancel = true;
+  }
 }
 
 function loadSalonInfo(){
@@ -599,9 +636,6 @@ function renderMenuStep(){
                 '<span>約' + esc(menu.duration) + '分</span>' +
               '</div>' +
               (menu.description ? '<div class="menu-desc">' + esc(menu.description) + '</div>' : '') +
-              (menu.contraindications
-                ? '<button class="menu-contra-btn" data-contra-mid="' + esc(menu._id) + '" onclick="event.stopPropagation();showContraModal(this)">⚠ 禁忌・注意事項</button>'
-                : '') +
             '</div>';
   }
   setBody(html);
@@ -1513,12 +1547,63 @@ function renderCompleteStep(){
 // ============================================================
 // D-8 マイページ
 // ============================================================
+function buildStampCardHtml(stampInfo){
+  // stampInfo = { customer, customerDocId, stampCard }
+  var card = stampInfo ? stampInfo.stampCard : null;
+  if (!card || !card.enabled) { return ''; }
+
+  var goal  = (typeof card.goal === 'number') ? card.goal : 10;
+  var count = (stampInfo.customer && typeof stampInfo.customer.stampCount === 'number')
+                ? stampInfo.customer.stampCount : 0;
+  var color = card.color || '#b5845a';
+
+  // ドット HTML
+  var dots = '';
+  var i;
+  var total = Math.max(goal, count);
+  for (i = 0; i < total; i++) {
+    dots += '<div class="mp-stamp-dot' + (i < count ? ' on' : '') + '"></div>';
+  }
+
+  // ボーナスメッセージ
+  var bonus = '';
+  if (Array.isArray(card.bonusStamps)) {
+    var j;
+    for (j = 0; j < card.bonusStamps.length; j++) {
+      var b = card.bonusStamps[j];
+      if (b && typeof b.at === 'number' && count >= b.at && b.reward) {
+        bonus = '🎉 ' + b.at + '枚達成：' + esc(b.reward);
+      }
+    }
+  }
+  if (count >= goal && card.reward) {
+    bonus = '🎊 ゴール達成！' + esc(card.reward);
+  }
+
+  return '<div class="mp-stamp-card">' +
+    '<div class="mp-stamp-header" style="background:' + esc(color) + ';">' +
+      '<div class="mp-stamp-title">🎟 スタンプカード</div>' +
+      '<div class="mp-stamp-count-wrap">' +
+        '<span class="mp-stamp-num">' + count + '</span>' +
+        '<span class="mp-stamp-goal">&nbsp;/ ' + goal + '</span>' +
+      '</div>' +
+    '</div>' +
+    '<div class="mp-stamp-dots" style="background:' + esc(color) + ';">' + dots + '</div>' +
+    (card.reward
+      ? '<div class="mp-stamp-reward">🎁 ' + esc(card.reward) + '</div>'
+      : '') +
+    (bonus
+      ? '<div class="mp-stamp-bonus">' + bonus + '</div>'
+      : '') +
+  '</div>';
+}
+
 function renderMypageStep(){
   setFooter('');
   showLoading('マイページを読み込んでいます...');
 
-  // 顧客情報をFirestoreから取得
-  if (typeof dbCustomerResolveMyCard !== 'function'){
+  // dbCustomerGetMyStampInfo で customer情報・stampCard設定・stampCount を1本取得
+  if (typeof dbCustomerGetMyStampInfo !== 'function'){
     setBody('<div class="error-box">システムの読み込みに失敗しました。</div>');
     return;
   }
@@ -1531,12 +1616,13 @@ function renderMypageStep(){
     var freshUser = firebase.auth().currentUser;
     appState.user = freshUser; // appState更新
 
-    dbCustomerResolveMyCard(function(res){
-    if (!res || !res.customer){
+    dbCustomerGetMyStampInfo(function(stampInfo){
+    if (!stampInfo || !stampInfo.customer){
       setBody('<div class="error-box">プロフィール情報を取得できませんでした。</div>');
       return;
     }
-    var customer = res.customer;
+    var res = stampInfo; // 後続コードの res.customerDocId 参照を維持
+    var customer = stampInfo.customer;
     var user = appState.user;
     var currentEmail = (user && user.email) ? user.email : (customer.email || '');
 
@@ -1555,6 +1641,9 @@ function renderMypageStep(){
 
     var html =
       '<div class="step-title">マイページ</div>' +
+
+      // ---- スタンプカード（enabled:true の場合のみ表示） ----
+      buildStampCardHtml(stampInfo) +
 
       // ---- プロフィール ----
       '<div class="mypage-section">' +
@@ -1732,7 +1821,7 @@ function renderMypageStep(){
     });
 
     document.getElementById('mypageBackBtn').addEventListener('click', function(){ goStep('menu'); });
-    }); // dbCustomerResolveMyCard
+    }); // dbCustomerGetMyStampInfo
   }).catch(function(){ // reload失敗時はそのまま続行
     appState.user = firebase.auth().currentUser;
     goStep('mypage');
@@ -1797,44 +1886,6 @@ function calcCancelFee(item){
 }
 
 // キャンセル規定モーダル表示
-function showContraModal(btn){
-  var mid = btn.getAttribute('data-contra-mid');
-  var menuName = '';
-  var contraText = '';
-  if (appState.menus) {
-    for (var i = 0; i < appState.menus.length; i++) {
-      if (appState.menus[i] && appState.menus[i]._id === mid) {
-        menuName = appState.menus[i].name || '';
-        contraText = appState.menus[i].contraindications || '';
-        break;
-      }
-    }
-  }
-  if (!contraText) { return; }
-  var overlay = document.createElement('div');
-  overlay.className = 'contra-modal-overlay';
-  overlay.id = 'contraModalOverlay';
-  overlay.innerHTML =
-    '<div class="contra-modal-box">' +
-      '<div class="contra-modal-title">⚠ 禁忌・注意事項</div>' +
-      (menuName ? '<div style="font-size:12px;color:var(--mu);margin-bottom:10px;">【' + esc(menuName) + '】</div>' : '') +
-      '<div class="contra-modal-text" id="contraModalText"></div>' +
-      '<button class="contra-modal-close" id="contraModalClose">閉じる</button>' +
-    '</div>';
-  document.body.appendChild(overlay);
-  document.getElementById('contraModalText').textContent = contraText;
-  document.getElementById('contraModalClose').addEventListener('click', function(){
-    var el = document.getElementById('contraModalOverlay');
-    if (el) { el.parentNode.removeChild(el); }
-  });
-  overlay.addEventListener('click', function(e){
-    if (e.target === overlay){
-      var el = document.getElementById('contraModalOverlay');
-      if (el) { el.parentNode.removeChild(el); }
-    }
-  });
-}
-
 function showPolicyModal(){
   var pol = appState.cancelPolicy || {};
   var text = pol.text || '（キャンセル規定が設定されていません）';

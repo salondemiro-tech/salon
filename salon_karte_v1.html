@@ -137,6 +137,58 @@
     display:block; margin-top:2px; letter-spacing:.04em;
   }
 
+  /* ===== スタンプカード（カルテ操作用） ===== */
+  .sec-stamp-body{
+    padding:16px 18px 18px;
+  }
+  .stamp-ctrl{
+    display:flex; align-items:center; gap:10px; margin-bottom:12px;
+  }
+  .stamp-pm{
+    width:36px; height:36px; border-radius:50%;
+    border:1.5px solid var(--ac); background:#fff;
+    color:var(--ac); font-size:22px; line-height:1;
+    cursor:pointer; font-family:inherit;
+    display:flex; align-items:center; justify-content:center;
+    flex-shrink:0;
+  }
+  .stamp-pm:hover{background:var(--al);}
+  .stamp-pm:disabled{opacity:.35; cursor:default;}
+  .stamp-count-wrap{
+    display:flex; align-items:baseline; gap:4px;
+  }
+  .stamp-count{
+    font-size:26px; font-weight:700; color:var(--ad); line-height:1;
+  }
+  .stamp-goal-txt{
+    font-size:12px; color:var(--mu);
+  }
+  .stamp-save-btn{
+    margin-left:auto;
+    background:var(--ac); color:#fff; border:none;
+    border-radius:10px; padding:9px 18px;
+    font-size:13px; font-weight:600;
+    cursor:pointer; font-family:inherit;
+    white-space:nowrap;
+  }
+  .stamp-save-btn:hover{opacity:.85;}
+  .stamp-save-btn:disabled{opacity:.45; cursor:default;}
+  .stamp-dots{
+    display:flex; flex-wrap:wrap; gap:7px; margin-bottom:8px;
+  }
+  .stamp-dot{
+    width:20px; height:20px; border-radius:50%;
+    border:1.5px solid var(--ac); background:#fff;
+    flex-shrink:0;
+  }
+  .stamp-dot.on{background:var(--ac);}
+  .stamp-bonus-msg{
+    font-size:12px; color:var(--ac); min-height:18px;
+  }
+  .stamp-disabled-note{
+    font-size:12px; color:var(--mu); padding:4px 0;
+  }
+
   /* ===== 全体メモ (karteNote) ===== */
   .sec{
     background:#fff; border-radius:13px;
@@ -368,6 +420,16 @@
     </div>
   </div>
 
+  <!-- スタンプカード -->
+  <div class="sec" id="secStamp">
+    <div class="sec-head">
+      <div class="sec-title">🎟 スタンプカード</div>
+    </div>
+    <div class="sec-stamp-body" id="secStampBody">
+      <!-- JS で描画 -->
+    </div>
+  </div>
+
   <!-- 全体メモ -->
   <div class="sec" id="secKarte">
     <div class="sec-head">
@@ -434,6 +496,8 @@
   var _visits = [];       // 過去予約(自動visited) + 明示visited
   var _upcoming = [];     // 未来の confirmed
   var _expanded = {};     // { aid: true }
+  var _stampCard = null;  // config/stampCard (dbGetStampCard の戻り値)
+  var _stampEditing = 0;  // 編集中の値（renderStamp で初期化）
   var _karteTimer = null;
   var _memoTimers = {};
   var _uploadingAid = null;
@@ -557,23 +621,42 @@
     _visits = [];
     _upcoming = [];
     _expanded = {};
+    _stampCard = null;
+    _stampEditing = 0;
     document.getElementById('searchBox').value = '';
     document.getElementById('pickerResults').className = 'picker-results';
 
     uiShowLoading('カルテを開いています...');
+
+    // 顧客情報・履歴・stampCard 設定を並列取得
+    var _got = { cust: false, hist: false, card: false };
+    var _custOk = true; // 顧客取得失敗フラグ
+
+    function _tryRender() {
+      if (!_got.cust || !_got.hist || !_got.card) { return; }
+      uiHideLoading();
+      if (!_custOk) { uiToast('顧客情報の取得に失敗しました'); return; }
+      renderAll();
+    }
+
+    dbGetStampCard(function (card) {
+      _stampCard = card || null;
+      _got.card = true;
+      _tryRender();
+    });
+
     dbSalonGetCustomer(docId, function (c) {
-      if (!c) {
-        uiHideLoading();
-        uiToast('顧客情報の取得に失敗しました');
-        return;
-      }
+      if (!c) { _custOk = false; }
       _curCust = c;
-      dbSalonGetCustomerHistory(docId, function (h) {
-        uiHideLoading();
-        _visits = (h && h.visits) ? h.visits : [];
-        _upcoming = (h && h.upcoming) ? h.upcoming : [];
-        renderAll();
-      });
+      _got.cust = true;
+      _tryRender();
+    });
+
+    dbSalonGetCustomerHistory(docId, function (h) {
+      _visits   = (h && h.visits)   ? h.visits   : [];
+      _upcoming = (h && h.upcoming) ? h.upcoming : [];
+      _got.hist = true;
+      _tryRender();
     });
   }
 
@@ -581,24 +664,139 @@
   function renderAll() {
     if (!_curCust) {
       document.getElementById('custHead').className = 'cust-head';
+      document.getElementById('secStamp').className = 'sec';
       document.getElementById('secKarte').className = 'sec';
       document.getElementById('secUpcoming').className = 'sec';
       document.getElementById('secHist').className = 'sec';
       return;
     }
     document.getElementById('custHead').className = 'cust-head show';
+    document.getElementById('secStamp').className = 'sec show';
     document.getElementById('secKarte').className = 'sec show';
     document.getElementById('secUpcoming').className = 'sec show';
     document.getElementById('secHist').className = 'sec show';
 
     document.getElementById('chName').textContent = _curCust.name || '(名前なし)';
     renderStats();
+    renderStamp();
     document.getElementById('karteText').value = _curCust.karteNote || '';
     document.getElementById('karteSaved').textContent = '';
     renderUpcoming();
     renderHistory();
   }
 
+  // ===== スタンプカード =====
+
+  function _buildDots(container, count, goal) {
+    container.innerHTML = '';
+    var i;
+    var total = Math.max(count, goal); // goal 超過分も描画
+    for (i = 0; i < total; i++) {
+      var dot = document.createElement('div');
+      dot.className = (i < count) ? 'stamp-dot on' : 'stamp-dot';
+      container.appendChild(dot);
+    }
+  }
+
+  function _bonusMsg(count, goal, stampCard) {
+    var msg = '';
+    if (stampCard && Array.isArray(stampCard.bonusStamps)) {
+      var j;
+      for (j = 0; j < stampCard.bonusStamps.length; j++) {
+        var b = stampCard.bonusStamps[j];
+        if (b && typeof b.at === 'number' && count >= b.at && b.reward) {
+          msg = '🎉 ' + b.at + '枚達成：' + b.reward;
+        }
+      }
+    }
+    if (count >= goal && stampCard && stampCard.reward) {
+      msg = '🎊 ゴール達成！' + stampCard.reward;
+    }
+    return msg;
+  }
+
+  function renderStamp() {
+    var body = document.getElementById('secStampBody');
+    if (!body) { return; }
+
+    // スタンプ機能が無効 or 設定未取得
+    if (!_stampCard || !_stampCard.enabled) {
+      body.innerHTML = '<div class="stamp-disabled-note">スタンプカードは現在無効です。</div>';
+      return;
+    }
+
+    var goal  = (typeof _stampCard.goal === 'number') ? _stampCard.goal : 10;
+    var count = (_curCust && typeof _curCust.stampCount === 'number')
+                  ? _curCust.stampCount : 0;
+    _stampEditing = count;
+
+    // HTML 骨格
+    body.innerHTML =
+      '<div class="stamp-ctrl">' +
+        '<button class="stamp-pm" id="kStampMinus" onclick="bumpKarteStamp(-1)">&#8722;</button>' +
+        '<div class="stamp-count-wrap">' +
+          '<span class="stamp-count" id="kStampVal">' + count + '</span>' +
+          '<span class="stamp-goal-txt">/ ' + goal + '</span>' +
+        '</div>' +
+        '<button class="stamp-pm" id="kStampPlus" onclick="bumpKarteStamp(1)">+</button>' +
+        '<button class="stamp-save-btn" id="kStampSave" onclick="saveKarteStamp()" disabled>保存</button>' +
+      '</div>' +
+      '<div class="stamp-dots" id="kStampDots"></div>' +
+      '<div class="stamp-bonus-msg" id="kStampBonus"></div>';
+
+    _buildDots(document.getElementById('kStampDots'), count, goal);
+    document.getElementById('kStampBonus').textContent = _bonusMsg(count, goal, _stampCard);
+    document.getElementById('kStampMinus').disabled = (count <= 0);
+  }
+
+  function bumpKarteStamp(delta) {
+    var valEl   = document.getElementById('kStampVal');
+    var dotsEl  = document.getElementById('kStampDots');
+    var bonusEl = document.getElementById('kStampBonus');
+    var saveBtn = document.getElementById('kStampSave');
+    var minusBtn = document.getElementById('kStampMinus');
+    if (!valEl) { return; }
+
+    var n = parseInt(valEl.textContent, 10);
+    if (isNaN(n)) { n = 0; }
+    n += delta;
+    if (n < 0) { n = 0; }
+
+    valEl.textContent = String(n);
+    _stampEditing = n;
+
+    var goal = (_stampCard && typeof _stampCard.goal === 'number') ? _stampCard.goal : 10;
+    if (dotsEl)  { _buildDots(dotsEl, n, goal); }
+    if (bonusEl) { bonusEl.textContent = _bonusMsg(n, goal, _stampCard); }
+    if (saveBtn) { saveBtn.disabled = (n === (_curCust ? (_curCust.stampCount || 0) : 0)); }
+    if (minusBtn){ minusBtn.disabled = (n <= 0); }
+  }
+  window.bumpKarteStamp = bumpKarteStamp;
+
+  function saveKarteStamp() {
+    if (!_curDocId) { return; }
+    var n = _stampEditing;
+    if (typeof n !== 'number' || isNaN(n) || n < 0) { n = 0; }
+
+    var saveBtn = document.getElementById('kStampSave');
+    if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = '保存中...'; }
+
+    dbSalonUpdateCustomer(_curDocId, { stampCount: n }, function (ok) {
+      if (saveBtn) { saveBtn.textContent = '保存'; }
+      if (!ok) {
+        uiToast('スタンプ保存に失敗しました');
+        if (saveBtn) { saveBtn.disabled = false; }
+        return;
+      }
+      if (_curCust) { _curCust.stampCount = n; }
+      uiToast('スタンプを保存しました (' + n + '枚)');
+      // 保存ボタンは変更なし状態なので disabled に戻す
+      if (saveBtn) { saveBtn.disabled = true; }
+    });
+  }
+  window.saveKarteStamp = saveKarteStamp;
+
+  // ===== 統計バー =====
   function renderStats() {
     // ★ 2026/5/23 改訂：来店履歴 (_visits) のみで統計計算
     //   未来予約 (_upcoming) は対象外（来店していないため）

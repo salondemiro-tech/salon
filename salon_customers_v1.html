@@ -417,18 +417,32 @@
     _mode = 'view';
     _curDocId = docId;
     uiShowLoading('読み込み中...');
+
+    // dbSalonGetCustomer と dbSalonGetCustomerHistory を並列取得
+    var _got = { cust: false, hist: false };
+    var _c = null;
+    var _hist = null;
+    var _custOk = true;
+
+    function _tryRender() {
+      if (!_got.cust || !_got.hist) { return; }
+      uiHideLoading();
+      if (!_custOk) { uiToast('顧客情報の取得に失敗しました'); return; }
+      renderDetail(_c, _hist);
+      showPanel();
+    }
+
     dbSalonGetCustomer(docId, function (c) {
-      if (c == null) {
-        uiHideLoading();
-        uiToast('顧客情報の取得に失敗しました');
-        return;
-      }
-      // 履歴も取得
-      dbSalonGetCustomerHistory(docId, function (hist) {
-        uiHideLoading();
-        renderDetail(c, hist);
-        showPanel();
-      });
+      if (c == null) { _custOk = false; }
+      _c = c;
+      _got.cust = true;
+      _tryRender();
+    });
+
+    dbSalonGetCustomerHistory(docId, function (hist) {
+      _hist = hist;
+      _got.hist = true;
+      _tryRender();
     });
   }
 
