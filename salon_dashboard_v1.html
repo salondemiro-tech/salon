@@ -5,9 +5,26 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>TORITA - ダッシュボード</title>
 <!--
-  salon_dashboard_v1.html  -  TORITA Phase C / C-2  ★DEBUG版
-  この版は checkPlan の結果(uid/email/exists/planStatus)を画面に表示する。
-  原因特定後、通常版に戻すこと。
+  salon_dashboard_v1.html  -  TORITA Phase C / C-2
+  作成: 2026/5/17
+  修正: 2026/6/6 契約確認ローディングの固まり修正
+    原因: 決済直後(checkout=success)のリトライ毎に uiShowLoading を
+          重ねて呼び、_loadingCount が増加。成功時の uiHideLoading は
+          1回だけのためカウンタが 0 に戻らず、オーバーレイが残って固まる。
+    対策:
+      - ローディング表示は最初に1回だけ uiShowLoading を呼ぶ。
+        リトライ時は再度 uiShowLoading せず、表示テキストのみ更新する。
+      - 画面を確定させる全経路(成功/未契約/エラー)で uiForceHideLoading()
+        を呼び、カウンタ残留に関係なく確実にオーバーレイを消す。
+
+  設計準拠:
+    - DESIGN.md v6 セクション C-2, B-1 (dbLoadSalonDashboard), 4-1
+    - 9つの設計ルール #8 (HTML内JS最小限) / #9 (顧客と管理を完全分離)
+
+  ロード順序 (shared_auth.js ヘッダ契約):
+    firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js → shared_ui.js
+
+  ES5 互換: var / function のみ
 -->
 <style>
   :root{
@@ -26,6 +43,8 @@
     -webkit-text-size-adjust:100%;
     min-height:100vh;
   }
+
+  /* ===== ヘッダー ===== */
   .topbar{
     background:#fff; border-bottom:1px solid var(--bd);
     padding:16px 20px;
@@ -45,17 +64,11 @@
     font-family:inherit;
   }
   .logout-btn:hover{border-color:var(--ac); color:var(--ac);}
+
+  /* ===== コンテナ ===== */
   .wrap{max-width:760px; margin:0 auto; padding:22px 18px 40px;}
 
-  /* ===== DEBUG パネル ===== */
-  .debug-box{
-    background:#1a1a18; color:#9fe89f;
-    border-radius:12px; padding:16px 18px; margin-bottom:20px;
-    font-family:monospace; font-size:14px; line-height:1.9;
-    word-break:break-all; white-space:pre-wrap;
-  }
-  .debug-box b{color:#ffd27a;}
-
+  /* ===== サロン情報カード ===== */
   .salon-card{
     background:#fff; border-radius:16px;
     box-shadow:0 6px 24px rgba(0,0,0,.09);
@@ -65,20 +78,33 @@
     font-size:22px; font-weight:600; color:var(--ad);
     margin-bottom:6px; word-break:break-word;
   }
-  .salon-meta{font-size:13px; color:var(--mu); line-height:1.9;}
+  .salon-meta{
+    font-size:13px; color:var(--mu); line-height:1.9;
+  }
   .salon-meta .label{
-    display:inline-block; min-width:78px; color:var(--ac); font-weight:600;
+    display:inline-block; min-width:78px; color:var(--ac);
+    font-weight:600;
   }
   .skeleton{
     color:transparent; background:var(--s2);
     border-radius:6px; display:inline-block; min-width:120px;
   }
+
+  /* ===== セクション見出し ===== */
   .sec-title{
     font-size:13px; color:var(--mu); font-weight:600;
     letter-spacing:.05em; margin:4px 4px 12px;
   }
-  .nav-grid{display:grid; grid-template-columns:repeat(2, 1fr); gap:13px;}
-  @media (min-width:560px){.nav-grid{grid-template-columns:repeat(3, 1fr);}}
+
+  /* ===== ナビグリッド ===== */
+  .nav-grid{
+    display:grid;
+    grid-template-columns:repeat(2, 1fr);
+    gap:13px;
+  }
+  @media (min-width:560px){
+    .nav-grid{grid-template-columns:repeat(3, 1fr);}
+  }
   .nav-card{
     background:#fff; border:1px solid var(--bd);
     border-radius:14px; padding:20px 16px;
@@ -93,16 +119,28 @@
     box-shadow:0 8px 22px rgba(0,0,0,.10);
     border-color:var(--ac);
   }
-  .nav-card.disabled{cursor:default; opacity:.55;}
-  .nav-card.disabled:hover{transform:none; box-shadow:none; border-color:var(--bd);}
-  .nav-ico{font-size:26px; margin-bottom:9px; line-height:1;}
-  .nav-label{font-size:14px; font-weight:600; color:var(--ad); margin-bottom:3px;}
+  .nav-card.disabled{
+    cursor:default; opacity:.55;
+  }
+  .nav-card.disabled:hover{
+    transform:none; box-shadow:none; border-color:var(--bd);
+  }
+  .nav-ico{
+    font-size:26px; margin-bottom:9px; line-height:1;
+  }
+  .nav-label{
+    font-size:14px; font-weight:600; color:var(--ad);
+    margin-bottom:3px;
+  }
   .nav-desc{font-size:11px; color:var(--mu); line-height:1.5;}
   .nav-badge{
     display:inline-block; margin-top:7px;
     font-size:10px; color:var(--mu);
-    background:var(--s2); border-radius:10px; padding:2px 9px;
+    background:var(--s2); border-radius:10px;
+    padding:2px 9px;
   }
+
+  /* ===== 顧客用URL ===== */
   .customer-url-box{
     margin-top:14px;
     background:var(--sf); border:1px solid var(--bd);
@@ -112,18 +150,24 @@
     font-size:11px; color:var(--ac); font-weight:600;
     letter-spacing:.04em; margin-bottom:6px;
   }
-  .customer-url-row{display:flex; align-items:center; gap:8px;}
+  .customer-url-row{
+    display:flex; align-items:center; gap:8px;
+  }
   .customer-url-text{
     font-size:11.5px; color:var(--tx);
-    word-break:break-all; flex:1; line-height:1.5;
+    word-break:break-all; flex:1;
+    line-height:1.5;
   }
   .copy-btn{
-    flex-shrink:0; background:var(--ac); color:#fff;
+    flex-shrink:0;
+    background:var(--ac); color:#fff;
     border:none; border-radius:8px;
     padding:6px 12px; font-size:11.5px;
-    cursor:pointer; font-family:inherit; white-space:nowrap;
+    cursor:pointer; font-family:inherit;
+    white-space:nowrap;
   }
-  .copy-btn:active{opacity:.8;}
+  .copy-btn:active{ opacity:.8; }
+
   footer{
     text-align:center; font-size:10.5px; color:var(--mu);
     margin-top:26px; letter-spacing:.03em;
@@ -135,16 +179,14 @@
 <div class="topbar">
   <div class="brand">
     <span class="brand-mark">TORITA</span>
-    <span class="brand-sub">SALON MANAGER (DEBUG)</span>
+    <span class="brand-sub">SALON MANAGER</span>
   </div>
   <button class="logout-btn" onclick="doLogout()">ログアウト</button>
 </div>
 
 <div class="wrap">
 
-  <!-- ★DEBUG: 結果をここに表示 -->
-  <div class="debug-box" id="debugBox">診断中...</div>
-
+  <!-- サロン情報 -->
   <div class="salon-card">
     <div class="salon-name" id="salonName">
       <span class="skeleton">読み込み中</span>
@@ -159,6 +201,7 @@
         <span id="salonEmail"><span class="skeleton">loading</span></span>
       </div>
     </div>
+    <!-- 顧客用URL -->
     <div class="customer-url-box">
       <div class="customer-url-label">📋 顧客用予約URL（お客様にお渡しください）</div>
       <div class="customer-url-row">
@@ -168,6 +211,7 @@
     </div>
   </div>
 
+  <!-- 機能ナビ -->
   <div class="sec-title">予約・顧客</div>
   <div class="nav-grid" id="navGrid1"></div>
 
@@ -177,24 +221,22 @@
   <footer>&copy; TORITA</footer>
 </div>
 
+<!-- ===== Firebase SDK (compat) ===== -->
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 
+<!-- ===== TORITA 共通ファイル (ロード順序を厳守) ===== -->
 <script src="firebase-init.js"></script>
 <script src="shared_db.js"></script>
 <script src="shared_auth.js"></script>
 <script src="shared_ui.js"></script>
 
+<!-- ===== 画面固有スクリプト (最小限) ===== -->
 <script>
 (function () {
 
-  // ★DEBUG: 画面とalertの両方に出す
-  function debugShow(text) {
-    var el = document.getElementById('debugBox');
-    if (el) { el.innerHTML = text; }
-  }
-
+  // ----- ナビ定義 -----
   var NAV1 = [
     { ico: '\uD83D\uDCC5', label: 'カレンダー', desc: '予約の確認・登録',
       href: 'salon_calendar_v8.html', ready: true },
@@ -217,165 +259,205 @@
   function buildCard(item) {
     var card = document.createElement(item.ready ? 'a' : 'div');
     card.className = 'nav-card' + (item.ready ? '' : ' disabled');
-    if (item.ready) { card.setAttribute('href', item.href); }
+    if (item.ready) {
+      card.setAttribute('href', item.href);
+    }
+
     var ico = document.createElement('div');
-    ico.className = 'nav-ico'; ico.textContent = item.ico; card.appendChild(ico);
+    ico.className = 'nav-ico';
+    ico.textContent = item.ico;
+    card.appendChild(ico);
+
     var lbl = document.createElement('div');
-    lbl.className = 'nav-label'; lbl.textContent = item.label; card.appendChild(lbl);
+    lbl.className = 'nav-label';
+    lbl.textContent = item.label;
+    card.appendChild(lbl);
+
     var desc = document.createElement('div');
-    desc.className = 'nav-desc'; desc.textContent = item.desc; card.appendChild(desc);
+    desc.className = 'nav-desc';
+    desc.textContent = item.desc;
+    card.appendChild(desc);
+
     if (!item.ready) {
       var badge = document.createElement('span');
-      badge.className = 'nav-badge'; badge.textContent = '準備中'; card.appendChild(badge);
+      badge.className = 'nav-badge';
+      badge.textContent = '準備中';
+      card.appendChild(badge);
     }
     return card;
   }
+
   function renderNav() {
     var g1 = document.getElementById('navGrid1');
     var g2 = document.getElementById('navGrid2');
     var i;
-    for (i = 0; i < NAV1.length; i++) { g1.appendChild(buildCard(NAV1[i])); }
-    for (i = 0; i < NAV2.length; i++) { g2.appendChild(buildCard(NAV2[i])); }
+    for (i = 0; i < NAV1.length; i++) {
+      g1.appendChild(buildCard(NAV1[i]));
+    }
+    for (i = 0; i < NAV2.length; i++) {
+      g2.appendChild(buildCard(NAV2[i]));
+    }
   }
+
   function setText(id, text) {
     var el = document.getElementById(id);
     if (el) { el.textContent = (text == null) ? '' : String(text); }
   }
+
+  // ----- サロン情報の表示 -----
   function renderSalon(data) {
     var info = (data && data.info) ? data.info : null;
     var settings = (data && data.settings) ? data.settings : null;
+
     if (info && info.name) {
       setText('salonName', info.name);
       document.title = 'TORITA - ' + info.name;
-    } else { setText('salonName', '(サロン名未設定)'); }
+    } else {
+      setText('salonName', '(サロン名未設定)');
+    }
     setText('salonEmail', (info && info.email) ? info.email : '-');
+
     if (settings && settings.openTime && settings.closeTime) {
-      setText('salonHours', settings.openTime + ' 〜 ' + settings.closeTime);
-    } else { setText('salonHours', '-'); }
+      setText('salonHours',
+        settings.openTime + ' 〜 ' + settings.closeTime);
+    } else {
+      setText('salonHours', '-');
+    }
   }
 
+  // ----- 顧客用URL -----
   var _customerUrl = '';
+
   function setCustomerUrl(salonId) {
     var base = window.location.href.replace(/\/[^\/]*$/, '/');
     _customerUrl = base + 'customer_app_v2.html?salon=' + salonId;
     var el = document.getElementById('customerUrl');
     if (el) { el.textContent = _customerUrl; }
   }
+
   function copyCustomerUrl() {
     if (!_customerUrl) { return; }
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(_customerUrl).then(function () {
         uiToast('URLをコピーしました');
-      }).catch(function () { _fallbackCopy(_customerUrl); });
-    } else { _fallbackCopy(_customerUrl); }
+      }).catch(function () {
+        _fallbackCopy(_customerUrl);
+      });
+    } else {
+      _fallbackCopy(_customerUrl);
+    }
   }
   window.copyCustomerUrl = copyCustomerUrl;
+
   function _fallbackCopy(text) {
     var ta = document.createElement('textarea');
-    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
-    document.body.appendChild(ta); ta.select();
+    ta.value = text;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
     try { document.execCommand('copy'); uiToast('URLをコピーしました'); }
     catch (e) { uiToast('コピーに失敗しました'); }
     document.body.removeChild(ta);
   }
+
+  // ----- ログアウト -----
   function doLogout() {
     uiConfirm('ログアウトしますか?', function () {
-      authLogout(function () { window.location.href = 'salon_auth_v2_new.html'; });
+      authLogout(function () {
+        window.location.href = 'salon_auth_v2_new.html';
+      });
     });
   }
   window.doLogout = doLogout;
 
+  // ----- 起動 -----
   renderNav();
 
   onFbReady(function () {
     requireSalonStaff(function (isStaff) {
       if (!isStaff) {
-        debugShow('<b>結果:</b> isStaff=false → ログイン画面へ飛ばされる状態');
-        window.alert('isStaff=false (サロン本人と認識されていない)');
+        window.location.href = 'salon_auth_v2_new.html';
         return;
       }
 
+      // ===== 契約状態ガード =====
       var user = firebase.auth().currentUser;
       var uid = user ? user.uid : null;
-      var email = user ? user.email : null;
-
       if (!uid) {
-        debugShow('<b>結果:</b> uid=null');
-        window.alert('uid=null');
+        window.location.href = 'salon_auth_v2_new.html';
         return;
       }
 
-      // ★ ローディングは出さない（固まり防止）。代わりに毎回 debugShow。
+      // ★ ローディングは「最初に1回だけ」表示する。
+      //   リトライ時に再度 uiShowLoading を呼ぶと _loadingCount が増え、
+      //   成功時の uiHideLoading 1回ではカウンタが 0 に戻らず固まるため。
+      uiShowLoading('読み込み中...');
+
+      // ローディング表示テキストだけを更新する（カウンタは増やさない）
+      function setLoadingText(text) {
+        var txt = document.getElementById('tuiLoadingTxt');
+        if (txt) { txt.textContent = text; }
+      }
+
+      // 決済直後 (?checkout=success) かどうか
       var isJustCheckedOut =
         window.location.search.indexOf('checkout=success') >= 0;
 
+      // planStatus を確認。決済直後で未確定なら数秒リトライ
+      // (Stripe Webhook の書き込みに数秒のラグがあるため)
       function checkPlan(retriesLeft) {
-        debugShow(
-          '診断中... 残りリトライ=' + retriesLeft + '<br>' +
-          '<b>uid:</b> ' + uid + '<br>' +
-          '<b>email:</b> ' + email + '<br>' +
-          '<b>checkout=success?:</b> ' + isJustCheckedOut
-        );
-
         firebase.firestore()
           .collection('salons').doc(uid)
           .collection('config').doc('settings')
           .get()
           .then(function (doc) {
-            var exists = doc.exists;
-            var st = exists ? (doc.data().planStatus || null) : null;
-
-            var msg =
-              'uid=' + uid + '\n' +
-              'email=' + email + '\n' +
-              'exists=' + exists + '\n' +
-              'planStatus=' + st;
-
-            debugShow(
-              '<b>=== 診断結果 ===</b><br>' +
-              '<b>uid:</b> ' + uid + '<br>' +
-              '<b>email:</b> ' + email + '<br>' +
-              '<b>doc.exists:</b> ' + exists + '<br>' +
-              '<b>planStatus:</b> ' + st + '<br>' +
-              '<b>checkout=success?:</b> ' + isJustCheckedOut
-            );
-
-            // ★ここで必ずalertを出す（iPadでも確実に見える）
-            window.alert('【診断結果】\n' + msg);
+            var st = doc.exists ? (doc.data().planStatus || null) : null;
 
             if (st === 'trial' || st === 'active') {
+              // 契約済み → ダッシュボード表示
               setCustomerUrl(uid);
               dbLoadSalonDashboard(function (data) {
-                if (!data) { uiToast('サロン情報の取得に失敗しました'); renderSalon(null); return; }
+                // ★ カウンタ残留に関係なく確実に消す
+                uiForceHideLoading();
+                if (!data) {
+                  uiToast('サロン情報の取得に失敗しました');
+                  renderSalon(null);
+                  return;
+                }
                 renderSalon(data);
               });
               return;
             }
 
+            // 未契約。決済直後でリトライ回数が残っていれば待って再確認
             if (isJustCheckedOut && retriesLeft > 0) {
-              setTimeout(function () { checkPlan(retriesLeft - 1); }, 2000);
+              // ★ 再度 uiShowLoading は呼ばない。テキストのみ更新。
+              setLoadingText('契約情報を確認しています...');
+              setTimeout(function () {
+                checkPlan(retriesLeft - 1);
+              }, 2000);
               return;
             }
-            // 未契約確定 → 本来は billing へ。DEBUG版は遷移せず表示だけ残す。
-            debugShow(
-              '<b>未契約と判定されました</b><br>' +
-              'planStatus=' + st + ' (trial/activeでない)<br>' +
-              '通常版ならここで salon_billing_v1.html へ遷移します。'
-            );
+
+            // 未契約確定 → カード登録へ
+            uiForceHideLoading();
+            window.location.href = 'salon_billing_v1.html';
           })
-          .catch(function (err) {
-            debugShow(
-              '<b>=== .catch (読み取りエラー) ===</b><br>' +
-              '<b>uid:</b> ' + uid + '<br>' +
-              '<b>email:</b> ' + email + '<br>' +
-              '<b>error.code:</b> ' + (err && err.code) + '<br>' +
-              '<b>error.message:</b> ' + (err && err.message)
-            );
-            window.alert('【読み取りエラー】\ncode=' + (err && err.code) +
-              '\nmessage=' + (err && err.message));
+          .catch(function () {
+            if (isJustCheckedOut && retriesLeft > 0) {
+              setLoadingText('契約情報を確認しています...');
+              setTimeout(function () {
+                checkPlan(retriesLeft - 1);
+              }, 2000);
+              return;
+            }
+            uiForceHideLoading();
+            window.location.href = 'salon_billing_v1.html';
           });
       }
 
+      // 決済直後は最大5回(=最長約10秒)リトライ、通常は0回
       checkPlan(isJustCheckedOut ? 5 : 0);
     });
   });
