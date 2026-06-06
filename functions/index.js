@@ -1040,7 +1040,7 @@ const Stripe = require('stripe');
 //   ★ 本番リリース時に TEST → LIVE の price_ID へ1行差し替える。
 //      テスト: price_1TeJD5L5ab685f4daJW8vvOh
 //      本番:   price_1TeJ3BL5ab685f4d1EkdnmuT
-const STRIPE_PRICE_ID = 'price_1TeJD5L5ab685f4daJW8vvOh'; // ← テスト用
+const STRIPE_PRICE_ID = 'price_1TeJ3BL5ab685f4d1EkdnmuT'; // ← 本番用
 const APP_BASE_URL = 'https://torita-app.com';
 
 function getStripe() {
