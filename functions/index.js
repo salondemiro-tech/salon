@@ -1229,6 +1229,53 @@ async function applySubscriptionState(salonId, sub) {
   logger.info('subscription state applied', { salonId, planStatus });
 }
 
+// ========================================
+// createCustomerPortalSession (callable)
+// 追加日: 2026/6/7
+// サロンオーナーが「プラン・解約」ボタンをタップした際に
+// Stripe カスタマーポータルのセッション URL を発行する。
+// ========================================
+
+exports.createCustomerPortalSession = onCall(
+  { secrets: ['STRIPE_SECRET_KEY'] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'ログインが必要です。');
+    }
+    const uid = request.auth.uid;
+    const salonId = uid;
+
+    const stripe = getStripe();
+
+    const settingsSnap = await db.collection('salons').doc(salonId)
+      .collection('config').doc('settings').get();
+
+    if (!settingsSnap.exists) {
+      throw new HttpsError('not-found', 'サロン設定が見つかりません。');
+    }
+
+    const customerId = (settingsSnap.data().stripeCustomerId) || null;
+    if (!customerId) {
+      throw new HttpsError(
+        'failed-precondition',
+        'Stripe 顧客情報が見つかりません。先にプランへご登録ください。'
+      );
+    }
+
+    try {
+      const session = await stripe.billingPortal.sessions.create({
+        customer: customerId,
+        return_url: APP_BASE_URL + '/salon_dashboard_v1.html',
+      });
+      logger.info('Customer portal session created', { salonId, sessionId: session.id });
+      return { url: session.url };
+    } catch (err) {
+      logger.error('createCustomerPortalSession error', { error: err.message, salonId });
+      throw new HttpsError('internal', 'ポータルの起動に失敗しました: ' + err.message);
+    }
+  }
+);
+
 // stripeCustomerId から salonId を逆引き（metadata 優先、無ければ Firestore 検索）
 async function salonIdFromCustomer(customerId) {
   if (!customerId) return null;
