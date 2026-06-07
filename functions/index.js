@@ -8,8 +8,9 @@
 //   3. onAppointmentUpdate (キャンセル通知)
 //   4. getAvailableSlots (callable)
 //   5. resolveOrClaimCustomer (callable)
+//   6. executeMergeCustomers (callable) ← 2026/6/7 追加
 //
-// 最終改訂: 2026/6/2 F-4: logNotificationFailure に category 付与
+// 最終改訂: 2026/6/7 顧客統合機能追加
 // ========================================
 
 const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https');
@@ -1040,7 +1041,7 @@ const Stripe = require('stripe');
 //   ★ 本番リリース時に TEST → LIVE の price_ID へ1行差し替える。
 //      テスト: price_1TeJD5L5ab685f4daJW8vvOh
 //      本番:   price_1TeJ3BL5ab685f4d1EkdnmuT
-const STRIPE_PRICE_ID = 'price_1TeJ3BL5ab685f4d1EkdnmuT'; // ← 本番用
+const STRIPE_PRICE_ID = 'price_1TeJ3BL5ab685f4d1EkdnmuT'; // 本番用
 const APP_BASE_URL = 'https://torita-app.com';
 
 function getStripe() {
@@ -1242,3 +1243,233 @@ async function salonIdFromCustomer(customerId) {
   }
   return null;
 }
+
+// ========================================
+// executeMergeCustomers (callable Function)
+// Phase G / 顧客統合機能
+// 追加日: 2026/6/7
+//
+// 処理の流れ:
+//   1. 引数バリデーション（keepId / removeId / 選択フィールド）
+//   2. mergeJobs に job ドキュメント作成（lockedByJob で排他）
+//   3. keepDoc / removeDoc を Firestore から取得・検証
+//   4. keep カルテを更新（name/phone/memo/stampCount を選択値で上書き）
+//   5. appointments / appointments_archive の customerDocId を付け替え
+//      （バッチ処理、450件ごとにコミット）
+//   6. remove カルテを isMerged=true でマーク
+//   7. authIndex の整合: removeDoc に authUid があった場合、
+//      その authUid の authIndex を keepId に書き換え
+//   8. mergeJobs を completed に更新
+//
+// セキュリティ:
+//   - サロンオーナー（salonId == uid）のみ呼べる
+//   - Admin SDK 使用 → Firestore Rules をバイパス
+//   - lockedByJob フィールドで同時実行を防ぐ
+// ========================================
+
+exports.executeMergeCustomers = onCall(
+  { region: 'asia-northeast1' },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'ログインが必要です。');
+    }
+    const uid = request.auth.uid;
+
+    const data = request.data || {};
+    const salonId   = data.salonId;
+    const keepId    = data.keepId;
+    const removeId  = data.removeId;
+
+    const pickName  = data.pickName  || 'keep';
+    const pickPhone = data.pickPhone || 'keep';
+    const pickMemo  = data.pickMemo  || 'keep';
+
+    // ---------- バリデーション ----------
+    if (!salonId || typeof salonId !== 'string') {
+      throw new HttpsError('invalid-argument', 'salonId が不正です。');
+    }
+    if (salonId !== uid) {
+      throw new HttpsError('permission-denied', 'オーナー本人のみ操作できます。');
+    }
+    if (!keepId || typeof keepId !== 'string') {
+      throw new HttpsError('invalid-argument', 'keepId が不正です。');
+    }
+    if (!removeId || typeof removeId !== 'string') {
+      throw new HttpsError('invalid-argument', 'removeId が不正です。');
+    }
+    if (keepId === removeId) {
+      throw new HttpsError('invalid-argument', '同じカルテを指定しています。');
+    }
+    if (['keep', 'remove'].indexOf(pickName)  < 0 ||
+        ['keep', 'remove'].indexOf(pickPhone) < 0 ||
+        ['keep', 'remove'].indexOf(pickMemo)  < 0) {
+      throw new HttpsError('invalid-argument', 'pick フィールドの値が不正です。');
+    }
+
+    logger.info('executeMergeCustomers called', { uid, salonId, keepId, removeId });
+
+    const salonRef      = db.collection('salons').doc(salonId);
+    const customersRef  = salonRef.collection('customers');
+    const keepRef       = customersRef.doc(keepId);
+    const removeRef     = customersRef.doc(removeId);
+    const mergeJobsRef  = salonRef.collection('mergeJobs');
+
+    // ---------- 事前チェック ----------
+    const keepSnap   = await keepRef.get();
+    const removeSnap = await removeRef.get();
+
+    if (!keepSnap.exists) {
+      throw new HttpsError('not-found', '残すカルテが存在しません。');
+    }
+    if (!removeSnap.exists) {
+      throw new HttpsError('not-found', '取り込むカルテが存在しません。');
+    }
+
+    const keepDoc   = keepSnap.data();
+    const removeDoc = removeSnap.data();
+
+    if (keepDoc.isMerged === true) {
+      throw new HttpsError('failed-precondition', '残すカルテはすでに統合済みです。');
+    }
+    if (removeDoc.isMerged === true) {
+      throw new HttpsError('failed-precondition', '取り込むカルテはすでに統合済みです。');
+    }
+    if (keepDoc.lockedByJob || removeDoc.lockedByJob) {
+      throw new HttpsError('failed-precondition', '別の統合処理が進行中です。しばらく待ってから再試行してください。');
+    }
+
+    // ---------- mergeJob 作成 & ロック ----------
+    const jobRef = mergeJobsRef.doc();
+    const jobId  = jobRef.id;
+
+    await jobRef.set({
+      keepId:    keepId,
+      removeId:  removeId,
+      status:    'running',
+      createdAt: admin.firestore.FieldValue.serverTimestamp()
+    });
+
+    await keepRef.update({ lockedByJob: jobId });
+    await removeRef.update({ lockedByJob: jobId });
+
+    try {
+      // ---------- keep カルテの更新値を決定 ----------
+      const newName  = (pickName  === 'remove') ? (removeDoc.name  || '') : (keepDoc.name  || '');
+      const newPhone = (pickPhone === 'remove') ? (removeDoc.phone || '') : (keepDoc.phone || '');
+      const newMemo  = (pickMemo  === 'remove') ? (removeDoc.memo  || '') : (keepDoc.memo  || '');
+
+      const keepStamp   = (typeof keepDoc.stampCount   === 'number') ? keepDoc.stampCount   : 0;
+      const removeStamp = (typeof removeDoc.stampCount === 'number') ? removeDoc.stampCount : 0;
+      const newStamp    = keepStamp + removeStamp;
+
+      const existingAliases = Array.isArray(keepDoc.mergedAliases) ? keepDoc.mergedAliases : [];
+      const newAlias = {
+        customerDocId: removeId,
+        name:     removeDoc.name  || '',
+        phone:    removeDoc.phone || '',
+        mergedAt: new Date().toISOString()
+      };
+
+      // ---------- keep カルテ更新 ----------
+      await keepRef.update({
+        name:             newName,
+        phone:            newPhone,
+        memo:             newMemo,
+        stampCount:       newStamp,
+        isMerged:         false,
+        needsMergeReview: false,
+        mergedAliases:    existingAliases.concat([newAlias]),
+        lockedByJob:      null,
+        updatedAt:        admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      // ---------- appointments / appointments_archive の customerDocId 付け替え ----------
+      const collections = ['appointments', 'appointments_archive'];
+      var totalUpdated = 0;
+
+      for (var ci = 0; ci < collections.length; ci++) {
+        const colRef = salonRef.collection(collections[ci]);
+        const snap   = await colRef.where('customerDocId', '==', removeId).get();
+
+        let batch      = db.batch();
+        let opsInBatch = 0;
+
+        for (const doc of snap.docs) {
+          batch.update(doc.ref, {
+            customerDocId: keepId,
+            updatedAt: admin.firestore.FieldValue.serverTimestamp()
+          });
+          opsInBatch++;
+          totalUpdated++;
+
+          if (opsInBatch >= 450) {
+            await batch.commit();
+            batch      = db.batch();
+            opsInBatch = 0;
+          }
+        }
+        if (opsInBatch > 0) {
+          await batch.commit();
+        }
+
+        logger.info('appointments relinked', {
+          salonId, collection: collections[ci], count: snap.size
+        });
+      }
+
+      // ---------- authIndex 整合 ----------
+      const removeAuthUid = removeDoc.authUid || null;
+      if (removeAuthUid) {
+        const authIndexRef = salonRef.collection('authIndex').doc(removeAuthUid);
+        await authIndexRef.set({
+          customerDocId: keepId,
+          updatedAt: admin.firestore.FieldValue.serverTimestamp()
+        }, { merge: true });
+        logger.info('authIndex relinked', { salonId, authUid: removeAuthUid, newDocId: keepId });
+      }
+
+      // ---------- remove カルテを isMerged=true でマーク ----------
+      await removeRef.update({
+        isMerged:    true,
+        mergedInto:  keepId,
+        mergedAt:    admin.firestore.FieldValue.serverTimestamp(),
+        lockedByJob: null,
+        updatedAt:   admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      // ---------- mergeJob を completed に ----------
+      await jobRef.update({
+        status:              'completed',
+        appointmentsUpdated: totalUpdated,
+        completedAt:         admin.firestore.FieldValue.serverTimestamp()
+      });
+
+      logger.info('executeMergeCustomers completed', {
+        salonId, keepId, removeId, totalUpdated
+      });
+
+      return {
+        result:              'merged',
+        keepId:              keepId,
+        appointmentsUpdated: totalUpdated
+      };
+
+    } catch (err) {
+      logger.error('executeMergeCustomers error', { error: err.message, stack: err.stack });
+
+      try {
+        await keepRef.update({ lockedByJob: null });
+        await removeRef.update({ lockedByJob: null });
+        await jobRef.update({
+          status:       'failed',
+          errorMessage: err.message,
+          failedAt:     admin.firestore.FieldValue.serverTimestamp()
+        });
+      } catch (cleanupErr) {
+        logger.error('cleanup failed', { error: cleanupErr.message });
+      }
+
+      throw new HttpsError('internal', '統合処理に失敗しました: ' + err.message);
+    }
+  }
+);
