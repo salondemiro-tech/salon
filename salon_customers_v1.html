@@ -1366,7 +1366,7 @@
 
     uiShowLoading('統合処理中...');
 
-    var fn = firebase.functions().httpsCallable('executeMergeCustomers');
+    var fn = firebase.app().functions('asia-northeast1').httpsCallable('executeMergeCustomers');
     fn({
       salonId:   salonId,
       keepId:    _mergeKeepId,
