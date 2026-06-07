@@ -11,7 +11,7 @@
     - 顧客詳細パネル（画面内・dbSalonGetCustomer + 履歴）
     - サロン側新規登録（dbSalonCreateCustomer）
     - メモ / スタンプ編集（dbSalonUpdateCustomer）
-    - 「統合(merge)」は UI の箱だけ。merge Function 実装後に有効化
+    - 顧客統合（merge）機能 2026/6/7 実装
   ロード順序 (shared_auth.js ヘッダ契約):
     firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js
       → shared_ui.js
@@ -205,24 +205,119 @@
   .hist-stat.cancel{background:var(--rl); color:var(--rt);}
   .hist-empty{font-size:13px; color:var(--mu); padding:8px 0;}
 
-  /* merge 箱（無効・将来有効化） */
+  /* merge ボックス */
   .merge-box{
     margin-top:20px; padding:14px;
     border:1px dashed var(--bd); border-radius:10px;
     text-align:center;
   }
   .merge-box p{font-size:12px; color:var(--mu); margin-bottom:8px;}
-  .merge-box button{
-    background:var(--s2); color:var(--mu); border:none;
-    border-radius:8px; padding:9px 16px;
-    font-family:inherit; font-size:13px; cursor:not-allowed;
-  }
 
   .form-note{
     font-size:12px; color:var(--mu);
     background:var(--sf); border-radius:8px;
     padding:10px 12px; margin-bottom:16px; line-height:1.6;
   }
+
+  /* ===== 統合モーダル ===== */
+  .merge-ov{
+    display:none; position:fixed; inset:0;
+    background:rgba(0,0,0,.55); z-index:100;
+    overflow-y:auto; padding:24px 12px;
+  }
+  .merge-ov.show{display:block;}
+  .merge-modal{
+    max-width:520px; margin:0 auto;
+    background:#fff; border-radius:15px;
+    box-shadow:0 12px 40px rgba(0,0,0,.28);
+    overflow:hidden;
+  }
+  .merge-head{
+    background:#fff3cd; padding:16px 20px;
+    display:flex; align-items:center; justify-content:space-between;
+    border-bottom:2px solid #e6b800;
+  }
+  .merge-head h2{font-size:16px; color:#7a5800; font-weight:600;}
+  .merge-close{
+    background:none; border:none; cursor:pointer;
+    font-size:22px; color:var(--mu); line-height:1;
+  }
+  .merge-body{padding:18px 20px;}
+
+  .merge-warn{
+    background:#fff3cd; border:1px solid #e6b800;
+    border-radius:9px; padding:12px 14px;
+    font-size:13px; color:#7a5800; margin-bottom:14px;
+    line-height:1.6;
+  }
+
+  /* 候補カード */
+  .candidate-card{
+    border:2px solid var(--bd); border-radius:10px;
+    padding:13px 15px; margin-bottom:9px; cursor:pointer;
+    transition:border-color .15s, background .15s;
+  }
+  .candidate-card:hover{border-color:var(--ac); background:var(--al);}
+  .candidate-card.selected{border-color:var(--ac); background:var(--al);}
+  .candidate-name{font-size:15px; font-weight:600; color:var(--tx);}
+  .candidate-sub{font-size:12px; color:var(--mu); margin-top:3px;}
+
+  /* 検索エリア（手動） */
+  .merge-search-row{display:flex; gap:8px; margin-bottom:10px;}
+  .merge-search-input{
+    flex:1; background:#fff; border:1px solid var(--bd);
+    border-radius:9px; padding:10px 13px;
+    font-family:inherit; font-size:14px; color:var(--tx);
+  }
+  .merge-search-input:focus{outline:none; border-color:var(--ac);}
+  .btn-search{
+    background:var(--s2); border:none; border-radius:9px;
+    padding:0 14px; cursor:pointer; font-family:inherit;
+    font-size:13px; color:var(--mu); white-space:nowrap;
+  }
+  .btn-search:hover{background:var(--bd);}
+
+  /* 情報選択テーブル */
+  .pick-table{width:100%; border-collapse:collapse; margin-bottom:14px;}
+  .pick-table th{
+    font-size:11px; color:var(--mu); font-weight:normal;
+    padding:6px 8px; text-align:left;
+    border-bottom:1px solid var(--bd);
+  }
+  .pick-table td{
+    padding:8px 8px; font-size:13px;
+    border-bottom:1px solid var(--bd); vertical-align:top;
+  }
+  .pick-table tr.pick-row{cursor:pointer;}
+  .pick-table tr.pick-row:hover td{background:var(--al);}
+  .pick-cell-label{
+    font-size:11px; color:var(--mu); margin-bottom:3px;
+  }
+  .pick-cell-val{color:var(--tx); word-break:break-all;}
+
+  .stamp-merge-note{
+    font-size:13px; color:var(--mu); background:var(--sf);
+    border-radius:8px; padding:10px 13px; margin-bottom:14px;
+  }
+
+  /* 確認ステップ */
+  .confirm-box{
+    background:var(--sf); border-radius:10px;
+    padding:14px 16px; margin-bottom:14px;
+    font-size:13px; line-height:1.8; color:var(--tx);
+  }
+  .confirm-box strong{color:var(--ad);}
+  .confirm-danger{
+    background:var(--rl); border-radius:9px;
+    padding:11px 14px; font-size:13px;
+    color:var(--rt); font-weight:600; margin-bottom:14px;
+  }
+
+  .merge-actions{
+    display:flex; gap:9px; padding:14px 20px;
+    border-top:1px solid var(--bd); background:var(--sf);
+  }
+  .merge-actions .btn{flex:1;}
 </style>
 </head>
 <body>
@@ -256,9 +351,22 @@
   </div>
 </div>
 
+<!-- 統合モーダル -->
+<div class="merge-ov" id="mergeOv">
+  <div class="merge-modal">
+    <div class="merge-head">
+      <h2>&#x26A0;&#xFE0F; 顧客カルテの統合</h2>
+      <button class="merge-close" id="mergeCloseBtn">&#215;</button>
+    </div>
+    <div class="merge-body" id="mergeBody"></div>
+    <div class="merge-actions" id="mergeActions"></div>
+  </div>
+</div>
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
 
 <script src="firebase-init.js"></script>
 <script src="shared_db.js"></script>
@@ -278,16 +386,11 @@
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
-  // 検索用の正規化: 全角/半角スペースを除去し、英数字の
-  // 全角→半角を揃える。これで「テスト　テスト子」と
-  // 「テスト テスト子」「テストテスト子」が同じ扱いになる。
   function _norm(s) {
     s = (s == null) ? '' : String(s);
-    // 全角英数字 → 半角
     s = s.replace(/[\uFF01-\uFF5E]/g, function (ch) {
       return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
     });
-    // 全角スペース・半角スペース・タブ等を全て除去
     s = s.replace(/[\s\u3000]+/g, '');
     return s.toLowerCase();
   }
@@ -311,7 +414,6 @@
         renderList([]);
         return;
       }
-      // 名前で安定ソート
       list.sort(function (a, b) {
         var an = (a && a.name) ? String(a.name) : '';
         var bn = (b && b.name) ? String(b.name) : '';
@@ -321,8 +423,6 @@
       _all = list;
       applyFilter();
 
-      // URL ?docId=xxx で来ていれば自動的に詳細パネルを開く
-      // （C-9 カルテ画面の「顧客情報を編集」リンク経由）
       try {
         var params = new URLSearchParams(window.location.search);
         var did = params.get('docId');
@@ -397,7 +497,6 @@
     main.appendChild(sub);
     row.appendChild(main);
 
-    // createdSource バッジ（salon=サロン登録 / self=本人登録）
     var bd = document.createElement('div');
     if (c.createdSource === 'self' || c.authUid) {
       bd.className = 'cust-badge self';
@@ -418,7 +517,6 @@
     _curDocId = docId;
     uiShowLoading('読み込み中...');
 
-    // dbSalonGetCustomer と dbSalonGetCustomerHistory を並列取得
     var _got = { cust: false, hist: false };
     var _c = null;
     var _hist = null;
@@ -459,10 +557,8 @@
       (c.createdSource === 'self' || c.authUid)
         ? '顧客アプリ登録' : 'サロン登録'));
 
-    // メモ
     body.appendChild(_roField('メモ', c.memo || '(なし)'));
 
-    // スタンプ（読み取り表示）
     var sc = (typeof c.stampCount === 'number') ? c.stampCount : 0;
     body.appendChild(_roField('スタンプ', String(sc) + ' 個'));
 
@@ -511,16 +607,25 @@
     }
     body.appendChild(sec);
 
-    // 統合（merge）箱：Function 未実装のため無効表示
+    // 統合（merge）ボタン
     var mb = document.createElement('div');
     mb.className = 'merge-box';
     var mp = document.createElement('p');
-    mp.textContent =
-      '同一人物の重複カルテを統合する機能（準備中）';
+    mp.textContent = '同一人物の重複カルテを統合します（取り消し不可）';
     mb.appendChild(mp);
     var mbtn = document.createElement('button');
-    mbtn.textContent = '統合（近日対応）';
-    mbtn.disabled = true;
+    mbtn.style.background = 'var(--al)';
+    mbtn.style.color = 'var(--ad)';
+    mbtn.style.border = '1px solid var(--ac)';
+    mbtn.style.borderRadius = '8px';
+    mbtn.style.padding = '9px 16px';
+    mbtn.style.fontFamily = 'inherit';
+    mbtn.style.fontSize = '13px';
+    mbtn.style.cursor = 'pointer';
+    mbtn.textContent = '\uD83D\uDD17 カルテを統合する';
+    (function(docId, hasMergeFlag, custData) {
+      mbtn.onclick = function() { openMerge(docId, hasMergeFlag, custData); };
+    })(c._id, c.needsMergeReview === true, c);
     mb.appendChild(mbtn);
     body.appendChild(mb);
 
@@ -529,7 +634,7 @@
     act.innerHTML = '';
     var bKarte = document.createElement('button');
     bKarte.className = 'btn btn-primary';
-    bKarte.textContent = '📋 カルテを開く';
+    bKarte.textContent = '\uD83D\uDCCB カルテを開く';
     bKarte.onclick = function () {
       window.location.href = 'salon_karte_v1.html?docId='
                            + encodeURIComponent(c._id);
@@ -577,7 +682,6 @@
     body.appendChild(_taField('メモ（顧客には見えません）',
       'fMemo', c.memo || ''));
 
-    // スタンプ +/-（クライアントは stampCount を書ける＝サロン権限）
     var sf = document.createElement('div');
     sf.className = 'field';
     var sl = document.createElement('label');
@@ -658,7 +762,6 @@
         return;
       }
       uiToast('保存しました');
-      // 保存は完了済み。一覧は全件再取得せず該当1件を更新
       var i;
       for (i = 0; i < _all.length; i++) {
         if (_all[i] && _all[i]._id === _curDocId) {
@@ -693,7 +796,6 @@
             return;
           }
           uiToast('削除しました');
-          // 削除は完了済み。一覧は再取得せず該当1件を除去
           var i;
           for (i = 0; i < _all.length; i++) {
             if (_all[i] && _all[i]._id === _curDocId) {
@@ -763,17 +865,12 @@
     var memo = _v('fMemo');
 
     uiShowLoading('登録中...');
-    // 顧客カルテ本体（名前・電話・メール）は保存完了を必ず待つ。
-    // 「登録したのに消えていた」を防ぐため確実性を優先（設計書 9-1）。
     dbSalonCreateCustomer(data, function (res) {
       if (res == null || !res._id) {
         uiHideLoading();
         uiToast('登録に失敗しました');
         return;
       }
-      // ★ 本体は保存済み。一覧は全件再取得せず、作った1件を
-      //   ローカル配列に足すだけにして体感を速くする
-      //   （サーバには確実に保存済みなので表示と実体はズレない）
       var newC = {
         _id: res._id,
         name: data.name,
@@ -796,10 +893,8 @@
       uiHideLoading();
       uiToast('登録しました');
       closePanel();
-      applyFilter();   // 再取得せずローカルで即反映
+      applyFilter();
 
-      // メモは補足情報。本体保存後に裏で更新する。
-      // 万一メモ更新だけ失敗しても本体カルテは無事（安全側）。
       if (memo) {
         dbSalonUpdateCustomer(res._id, { memo: memo }, function (ok) {
           if (!ok) {
@@ -848,10 +943,480 @@
   }
   window.closePanel = closePanel;
 
-  // 背景タップで閉じる
   document.getElementById('panelOv').onclick = function (e) {
     if (e.target === this) { closePanel(); }
   };
+
+  // ========================================
+  // 統合（merge）機能
+  // ========================================
+
+  var _mergeKeepId     = null;
+  var _mergeKeepData   = null;
+  var _mergeRemoveId   = null;
+  var _mergeRemoveData = null;
+
+  var _pickName  = 'keep';
+  var _pickPhone = 'keep';
+  var _pickMemo  = 'keep';
+
+  function openMerge(docId, hasMergeFlag, custData) {
+    _mergeKeepId     = docId;
+    _mergeKeepData   = custData;
+    _mergeRemoveId   = null;
+    _mergeRemoveData = null;
+    _pickName  = 'keep';
+    _pickPhone = 'keep';
+    _pickMemo  = 'keep';
+
+    renderMergeStep1(hasMergeFlag);
+    document.getElementById('mergeOv').className = 'merge-ov show';
+  }
+
+  function closeMerge() {
+    document.getElementById('mergeOv').className = 'merge-ov';
+  }
+
+  document.getElementById('mergeCloseBtn').onclick = closeMerge;
+  document.getElementById('mergeOv').onclick = function (e) {
+    if (e.target === this) { closeMerge(); }
+  };
+
+  // ---- Step 1: 相手カルテを選ぶ ----
+  function renderMergeStep1(hasMergeFlag) {
+    var body = document.getElementById('mergeBody');
+    body.innerHTML = '';
+    var act  = document.getElementById('mergeActions');
+    act.innerHTML = '';
+
+    var warn = document.createElement('div');
+    warn.className = 'merge-warn';
+    warn.textContent =
+      '統合すると「取り込まれた」カルテは一覧から非表示になります。'
+      + 'この操作は取り消せません。';
+    body.appendChild(warn);
+
+    var secTitle = document.createElement('div');
+    secTitle.style.fontSize = '13px';
+    secTitle.style.fontWeight = '600';
+    secTitle.style.color = 'var(--ad)';
+    secTitle.style.marginBottom = '10px';
+    secTitle.textContent = '統合する相手のカルテを選んでください';
+    body.appendChild(secTitle);
+
+    var candidateBox = document.createElement('div');
+    candidateBox.id = 'mergeCandidateBox';
+    body.appendChild(candidateBox);
+
+    if (hasMergeFlag) {
+      loadMergeCandidates(candidateBox);
+    } else {
+      renderManualSearch(candidateBox);
+    }
+
+    var bCancel = document.createElement('button');
+    bCancel.className = 'btn btn-ghost';
+    bCancel.textContent = 'キャンセル';
+    bCancel.onclick = closeMerge;
+    act.appendChild(bCancel);
+
+    var bNext = document.createElement('button');
+    bNext.className = 'btn btn-primary';
+    bNext.textContent = '次へ';
+    bNext.id = 'mergeNextBtn1';
+    bNext.disabled = true;
+    bNext.onclick = function () { goMergeStep2(); };
+    act.appendChild(bNext);
+  }
+
+  function loadMergeCandidates(box) {
+    var keepEmail = (_mergeKeepData && _mergeKeepData.email) ? _mergeKeepData.email : '';
+    var candidates = [];
+    var i, c;
+    for (i = 0; i < _all.length; i++) {
+      c = _all[i];
+      if (!c || c._id === _mergeKeepId) { continue; }
+      if (c.isMerged) { continue; }
+      if (keepEmail && c.email && c.email === keepEmail) {
+        candidates.push(c);
+      }
+    }
+
+    box.innerHTML = '';
+
+    if (candidates.length === 0) {
+      var note = document.createElement('div');
+      note.style.fontSize = '13px';
+      note.style.color = 'var(--mu)';
+      note.style.marginBottom = '10px';
+      note.textContent = '自動候補が見つかりませんでした。名前か電話番号で検索してください。';
+      box.appendChild(note);
+      renderManualSearch(box);
+      return;
+    }
+
+    for (i = 0; i < candidates.length; i++) {
+      box.appendChild(buildCandidateCard(candidates[i]));
+    }
+
+    var sep = document.createElement('div');
+    sep.style.fontSize = '12px';
+    sep.style.color = 'var(--mu)';
+    sep.style.margin = '10px 0 6px';
+    sep.textContent = '上記以外を選ぶ場合は名前・電話で検索';
+    box.appendChild(sep);
+    renderManualSearch(box);
+  }
+
+  function renderManualSearch(box) {
+    var row = document.createElement('div');
+    row.className = 'merge-search-row';
+    var inp = document.createElement('input');
+    inp.type = 'text';
+    inp.className = 'merge-search-input';
+    inp.id = 'mergeSearchInput';
+    inp.placeholder = '名前または電話番号';
+    var btn = document.createElement('button');
+    btn.className = 'btn-search';
+    btn.textContent = '検索';
+    btn.onclick = function () { doMergeSearch(box); };
+    inp.onkeydown = function (e) {
+      if (e.key === 'Enter') { doMergeSearch(box); }
+    };
+    row.appendChild(inp);
+    row.appendChild(btn);
+    box.appendChild(row);
+
+    var resultBox = document.createElement('div');
+    resultBox.id = 'mergeSearchResult';
+    box.appendChild(resultBox);
+  }
+
+  function doMergeSearch(box) {
+    var inp = document.getElementById('mergeSearchInput');
+    var q = _norm(inp ? inp.value : '');
+    var resultBox = document.getElementById('mergeSearchResult');
+    if (!resultBox) { return; }
+    resultBox.innerHTML = '';
+    if (!q) {
+      resultBox.innerHTML = '<div style="font-size:13px;color:var(--mu);">検索ワードを入力してください</div>';
+      return;
+    }
+    var found = [];
+    var i, c, hay;
+    for (i = 0; i < _all.length; i++) {
+      c = _all[i];
+      if (!c || c._id === _mergeKeepId) { continue; }
+      if (c.isMerged) { continue; }
+      hay = _norm((c.name || '') + (c.phone || ''));
+      if (hay.indexOf(q) >= 0) { found.push(c); }
+    }
+    if (found.length === 0) {
+      resultBox.innerHTML = '<div style="font-size:13px;color:var(--mu);">該当する顧客が見つかりません</div>';
+      return;
+    }
+    for (i = 0; i < found.length; i++) {
+      resultBox.appendChild(buildCandidateCard(found[i]));
+    }
+  }
+
+  function buildCandidateCard(c) {
+    var card = document.createElement('div');
+    card.className = 'candidate-card';
+    card.id = 'ccard_' + c._id;
+
+    var nm = document.createElement('div');
+    nm.className = 'candidate-name';
+    nm.textContent = c.name || '(名前なし)';
+    card.appendChild(nm);
+
+    var sub = document.createElement('div');
+    sub.className = 'candidate-sub';
+    var bits = [];
+    if (c.phone) { bits.push(c.phone); }
+    if (c.email) { bits.push(c.email); }
+    if (typeof c.stampCount === 'number') { bits.push('スタンプ ' + c.stampCount); }
+    sub.textContent = bits.join('  ·  ');
+    card.appendChild(sub);
+
+    card.onclick = function () { selectCandidate(c); };
+    return card;
+  }
+
+  function selectCandidate(c) {
+    var cards = document.querySelectorAll('.candidate-card');
+    var i;
+    for (i = 0; i < cards.length; i++) {
+      cards[i].className = 'candidate-card';
+    }
+    var sel = document.getElementById('ccard_' + c._id);
+    if (sel) { sel.className = 'candidate-card selected'; }
+
+    _mergeRemoveId   = c._id;
+    _mergeRemoveData = c;
+
+    var btn = document.getElementById('mergeNextBtn1');
+    if (btn) { btn.disabled = false; }
+  }
+
+  // ---- Step 2: どの情報を使うか選ぶ ----
+  function goMergeStep2() {
+    if (!_mergeRemoveId || !_mergeRemoveData) {
+      uiToast('相手カルテを選んでください');
+      return;
+    }
+
+    var body = document.getElementById('mergeBody');
+    body.innerHTML = '';
+    var act  = document.getElementById('mergeActions');
+    act.innerHTML = '';
+
+    var secTitle = document.createElement('div');
+    secTitle.style.fontSize = '13px';
+    secTitle.style.fontWeight = '600';
+    secTitle.style.color = 'var(--ad)';
+    secTitle.style.marginBottom = '12px';
+    secTitle.textContent = '残す情報を選んでください（行をタップで切り替え）';
+    body.appendChild(secTitle);
+
+    body.appendChild(buildPickTable());
+
+    var stampNote = document.createElement('div');
+    stampNote.className = 'stamp-merge-note';
+    var ks = (typeof _mergeKeepData.stampCount === 'number') ? _mergeKeepData.stampCount : 0;
+    var rs = (typeof _mergeRemoveData.stampCount === 'number') ? _mergeRemoveData.stampCount : 0;
+    stampNote.textContent =
+      'スタンプは合算されます: ' + ks + ' + ' + rs + ' = ' + (ks + rs) + '個';
+    body.appendChild(stampNote);
+
+    var bBack = document.createElement('button');
+    bBack.className = 'btn btn-ghost';
+    bBack.textContent = '← 戻る';
+    bBack.onclick = function () {
+      renderMergeStep1(_mergeKeepData && _mergeKeepData.needsMergeReview === true);
+    };
+    act.appendChild(bBack);
+
+    var bNext = document.createElement('button');
+    bNext.className = 'btn btn-primary';
+    bNext.textContent = '次へ';
+    bNext.onclick = function () { goMergeStep3(); };
+    act.appendChild(bNext);
+  }
+
+  function buildPickTable() {
+    var fields = [
+      { key: 'name',  label: 'お名前' },
+      { key: 'phone', label: '電話番号' },
+      { key: 'memo',  label: 'メモ' }
+    ];
+    var table = document.createElement('table');
+    table.className = 'pick-table';
+
+    var thead = document.createElement('thead');
+    var hrow  = document.createElement('tr');
+    var headers = ['項目', '現在のカルテ（残す）', '相手のカルテ（取り込む）'];
+    var hi;
+    for (hi = 0; hi < headers.length; hi++) {
+      var th = document.createElement('th');
+      th.textContent = headers[hi];
+      hrow.appendChild(th);
+    }
+    thead.appendChild(hrow);
+    table.appendChild(thead);
+
+    var tbody = document.createElement('tbody');
+    var fi, field, row, tdLabel, tdKeep, tdRemove;
+
+    for (fi = 0; fi < fields.length; fi++) {
+      field = fields[fi];
+      row = document.createElement('tr');
+      row.className = 'pick-row';
+      row.id = 'pickrow_' + field.key;
+
+      tdLabel = document.createElement('td');
+      tdLabel.style.color = 'var(--mu)';
+      tdLabel.style.fontSize = '12px';
+      tdLabel.style.whiteSpace = 'nowrap';
+      tdLabel.textContent = field.label;
+      row.appendChild(tdLabel);
+
+      tdKeep = buildPickCell(field.key, 'keep',
+        (_mergeKeepData[field.key] || '(なし)'), true);
+      row.appendChild(tdKeep);
+
+      tdRemove = buildPickCell(field.key, 'remove',
+        (_mergeRemoveData[field.key] || '(なし)'), false);
+      row.appendChild(tdRemove);
+
+      (function (fk) {
+        row.onclick = function () { togglePick(fk); };
+      })(field.key);
+
+      tbody.appendChild(row);
+    }
+    table.appendChild(tbody);
+    return table;
+  }
+
+  function buildPickCell(fieldKey, side, val) {
+    var td = document.createElement('td');
+    var lbl = document.createElement('div');
+    lbl.className = 'pick-cell-label';
+    lbl.textContent = (side === 'keep') ? '✔ 採用' : '';
+    lbl.id = 'picklbl_' + fieldKey + '_' + side;
+    td.appendChild(lbl);
+    var v = document.createElement('div');
+    v.className = 'pick-cell-val';
+    v.textContent = val;
+    td.appendChild(v);
+    return td;
+  }
+
+  function togglePick(fieldKey) {
+    var current;
+    if (fieldKey === 'name')  { current = _pickName;  }
+    if (fieldKey === 'phone') { current = _pickPhone; }
+    if (fieldKey === 'memo')  { current = _pickMemo;  }
+    var next = (current === 'keep') ? 'remove' : 'keep';
+    if (fieldKey === 'name')  { _pickName  = next; }
+    if (fieldKey === 'phone') { _pickPhone = next; }
+    if (fieldKey === 'memo')  { _pickMemo  = next; }
+
+    var lblKeep   = document.getElementById('picklbl_' + fieldKey + '_keep');
+    var lblRemove = document.getElementById('picklbl_' + fieldKey + '_remove');
+    if (lblKeep)   { lblKeep.textContent   = (next === 'keep')   ? '✔ 採用' : ''; }
+    if (lblRemove) { lblRemove.textContent = (next === 'remove') ? '✔ 採用' : ''; }
+
+    var row = document.getElementById('pickrow_' + fieldKey);
+    if (row) {
+      var tds = row.querySelectorAll('td');
+      var i;
+      for (i = 1; i < tds.length; i++) {
+        tds[i].style.background = '';
+      }
+      tds[next === 'keep' ? 1 : 2].style.background = 'var(--al)';
+    }
+  }
+
+  // ---- Step 3: 確認 ----
+  function goMergeStep3() {
+    var body = document.getElementById('mergeBody');
+    body.innerHTML = '';
+    var act  = document.getElementById('mergeActions');
+    act.innerHTML = '';
+
+    var secTitle = document.createElement('div');
+    secTitle.style.fontSize = '13px';
+    secTitle.style.fontWeight = '600';
+    secTitle.style.color = 'var(--ad)';
+    secTitle.style.marginBottom = '12px';
+    secTitle.textContent = '最終確認';
+    body.appendChild(secTitle);
+
+    var ks = (typeof _mergeKeepData.stampCount === 'number') ? _mergeKeepData.stampCount : 0;
+    var rs = (typeof _mergeRemoveData.stampCount === 'number') ? _mergeRemoveData.stampCount : 0;
+
+    var useName  = (_pickName  === 'remove') ? (_mergeRemoveData.name  || '') : (_mergeKeepData.name  || '');
+    var usePhone = (_pickPhone === 'remove') ? (_mergeRemoveData.phone || '') : (_mergeKeepData.phone || '');
+    var useMemo  = (_pickMemo  === 'remove') ? (_mergeRemoveData.memo  || '') : (_mergeKeepData.memo  || '');
+
+    var box = document.createElement('div');
+    box.className = 'confirm-box';
+    box.innerHTML =
+        '<div><strong>名前:</strong> ' + esc(useName)  + '</div>'
+      + '<div><strong>電話:</strong> ' + esc(usePhone) + '</div>'
+      + '<div><strong>メモ:</strong> ' + esc(useMemo || '(なし)') + '</div>'
+      + '<div><strong>スタンプ:</strong> ' + (ks + rs) + '個（' + ks + '+' + rs + '合算）</div>'
+      + '<div style="margin-top:8px;font-size:12px;color:var(--mu);">'
+      + '「' + esc(_mergeRemoveData.name || '') + '」の来店履歴も引き継ぎます</div>';
+    body.appendChild(box);
+
+    var danger = document.createElement('div');
+    danger.className = 'confirm-danger';
+    danger.textContent = '⚠️ この操作は取り消せません。よろしいですか？';
+    body.appendChild(danger);
+
+    var bBack = document.createElement('button');
+    bBack.className = 'btn btn-ghost';
+    bBack.textContent = '← 戻る';
+    bBack.onclick = goMergeStep2;
+    act.appendChild(bBack);
+
+    var bExec = document.createElement('button');
+    bExec.className = 'btn btn-primary';
+    bExec.textContent = '統合を実行する';
+    bExec.onclick = doExecuteMerge;
+    act.appendChild(bExec);
+  }
+
+  // ---- 統合実行 ----
+  function doExecuteMerge() {
+    if (!_mergeKeepId || !_mergeRemoveId) {
+      uiToast('選択が不完全です');
+      return;
+    }
+
+    var salonId = getCurrentSalonId();
+    if (!salonId) {
+      uiToast('サロンIDが取得できません');
+      return;
+    }
+
+    uiShowLoading('統合処理中...');
+
+    var fn = firebase.functions().httpsCallable('executeMergeCustomers');
+    fn({
+      salonId:   salonId,
+      keepId:    _mergeKeepId,
+      removeId:  _mergeRemoveId,
+      pickName:  _pickName,
+      pickPhone: _pickPhone,
+      pickMemo:  _pickMemo
+    }).then(function (result) {
+      uiForceHideLoading();
+      var d = result.data || {};
+      if (d.result === 'merged') {
+        uiToast('統合完了！（履歴 ' + (d.appointmentsUpdated || 0) + '件 引き継ぎ）');
+        closeMerge();
+        closePanel();
+
+        // _all から removeId を除去
+        var i;
+        for (i = 0; i < _all.length; i++) {
+          if (_all[i] && _all[i]._id === _mergeRemoveId) {
+            _all.splice(i, 1);
+            break;
+          }
+        }
+
+        // keep 側をローカル更新
+        var ks2 = (typeof _mergeKeepData.stampCount === 'number') ? _mergeKeepData.stampCount : 0;
+        var rs2 = (typeof _mergeRemoveData.stampCount === 'number') ? _mergeRemoveData.stampCount : 0;
+        for (i = 0; i < _all.length; i++) {
+          if (_all[i] && _all[i]._id === _mergeKeepId) {
+            _all[i].name       = (_pickName  === 'remove') ? (_mergeRemoveData.name  || '') : (_mergeKeepData.name  || '');
+            _all[i].phone      = (_pickPhone === 'remove') ? (_mergeRemoveData.phone || '') : (_mergeKeepData.phone || '');
+            _all[i].memo       = (_pickMemo  === 'remove') ? (_mergeRemoveData.memo  || '') : (_mergeKeepData.memo  || '');
+            _all[i].stampCount = ks2 + rs2;
+            _all[i].needsMergeReview = false;
+            break;
+          }
+        }
+        _all.sort(function (a, b) {
+          var an = (a && a.name) ? String(a.name) : '';
+          var bn = (b && b.name) ? String(b.name) : '';
+          return (an < bn) ? -1 : (an > bn) ? 1 : 0;
+        });
+        applyFilter();
+      } else {
+        uiToast('予期しないレスポンス: ' + JSON.stringify(d));
+      }
+    }).catch(function (err) {
+      uiForceHideLoading();
+      uiToast('統合に失敗しました: ' + (err.message || err));
+    });
+  }
 
   // ----- 起動 -----
   onFbReady(function () {
