@@ -1080,6 +1080,7 @@
     btn.className = 'btn-search';
     btn.textContent = '検索';
     btn.onclick = function () { doMergeSearch(box); };
+    inp.oninput = function () { doMergeSearch(box); };
     inp.onkeydown = function (e) {
       if (e.key === 'Enter') { doMergeSearch(box); }
     };
@@ -1099,7 +1100,7 @@
     if (!resultBox) { return; }
     resultBox.innerHTML = '';
     if (!q) {
-      resultBox.innerHTML = '<div style="font-size:13px;color:var(--mu);">検索ワードを入力してください</div>';
+      resultBox.innerHTML = '';
       return;
     }
     var found = [];
