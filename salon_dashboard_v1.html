@@ -266,6 +266,7 @@
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
 
 <script src="firebase-init.js"></script>
 <script src="shared_db.js"></script>
@@ -394,19 +395,32 @@
     area.className = 'plan-area';
     area.innerHTML =
       '<div class="plan-area-left">' +
-        'プランの解約はStripeのカスタマーポータルから手続きできます。<br>' +
+        'プランの確認・解約はStripeのカスタマーポータルで手続きできます。<br>' +
         '解約後は次の請求日まで引き続きご利用いただけます。' +
       '</div>' +
       '<button class="plan-cancel-btn" id="cancelPlanBtn">プラン・解約</button>';
 
     document.getElementById('cancelPlanBtn').onclick = function () {
-      uiConfirm(
-        'Stripeのカスタマーポータルを開きます。\nプランの確認・解約ができます。',
-        function () {
-          // Stripe Customer Portal URL（本番）
-          window.open('https://billing.stripe.com/p/login/test_00g00000000000', '_blank');
+      var btn = document.getElementById('cancelPlanBtn');
+      btn.disabled = true;
+      btn.textContent = '開いています...';
+
+      var fns = firebase.app().functions('asia-northeast1');
+      var callable = fns.httpsCallable('createCustomerPortalSession');
+      callable({}).then(function (res) {
+        var url = res && res.data && res.data.url;
+        if (url) {
+          window.location.href = url;
+        } else {
+          btn.disabled = false;
+          btn.textContent = 'プラン・解約';
+          uiToast('ポータルURLの取得に失敗しました');
         }
-      );
+      }).catch(function (err) {
+        btn.disabled = false;
+        btn.textContent = 'プラン・解約';
+        uiToast('エラー: ' + (err.message || err));
+      });
     };
   }
 
