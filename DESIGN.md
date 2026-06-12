@@ -315,11 +315,22 @@ salons/{salonId}/menus/{menuId} {
   duration: 90,
   price: 12000,
   type: "main",                        // main / option
+  category: "facial",                  // ★2026/6/12追加: facial / body / other（省略可）
+                                       //   main メニューのみ意味を持つ。省略時は 'other' 扱い。
+                                       //   option には付けない（顧客画面で分類しないため）。
+                                       //   既存メニューは未設定のまま動作（マイグレーション不要）。
   public: true,                        // true: 顧客の予約画面に表示 / false: サロン内部用
   eligibleStaffIds: ["owner"],         // フェーズ1では常に ['owner']
   requiredResourceIds: ["default"]     // フェーズ1では常に ['default']
 }
 ```
+
+> ★ 2026/6/12 改訂：`category`（フェイシャル/ボディ/その他）を追加。
+> 顧客アプリのメニュー選択画面はカテゴリ別見出しでグループ表示する。
+> ただし**存在するカテゴリが1種類のみの場合は見出しを出さない**
+> （カテゴリ未使用サロンは従来通りの見た目）。
+> サロン側メニュー設定画面には「複製」ボタンも追加
+> （既存メニューの内容をコピーした新規フォームを開く。名前に「のコピー」付与）。
 
 > ★ 2026/5/20 改訂：旧 v6 のメニュー単位 `intervalBefore` / `intervalAfter`
 > は廃止。**インターバルはサロン共通設定 `settings.intervalMin` に1本化**

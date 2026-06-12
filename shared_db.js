@@ -561,6 +561,14 @@
       requiredResourceIds: ['default'],
       createdAt: _serverTimestamp()
     };
+    // ★ 2026/6/12: category（facial/body/other、省略可）。main のみ意味を持つ。
+    //   rules の hasOnly/in 検証と1対1（DESIGN.md 0-2 参照）
+    if (typ === 'main' &&
+        (data.category === 'facial' ||
+         data.category === 'body' ||
+         data.category === 'other')) {
+      doc.category = data.category;
+    }
     if (data.description) { doc.description = String(data.description); }
     if (data.contraindications) { doc.contraindications = String(data.contraindications); }
     if (data.photoUrl) { doc.photoUrl = String(data.photoUrl); }
@@ -593,6 +601,13 @@
       if (patch.hasOwnProperty('type') &&
           patch.type !== 'main' && patch.type !== 'option') {
         delete patch.type;
+      }
+      // ★ 2026/6/12: category は facial/body/other のみ許可。不正値は落とす
+      if (patch.hasOwnProperty('category') &&
+          patch.category !== 'facial' &&
+          patch.category !== 'body' &&
+          patch.category !== 'other') {
+        delete patch.category;
       }
       if (patch.hasOwnProperty('public')) {
         patch.public = (patch.public === true);

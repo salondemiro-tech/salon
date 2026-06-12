@@ -173,12 +173,13 @@ service cloud.firestore {
         // 作成: スタッフのみ、フィールド検証
         // ★ v8.1: intervalBefore/intervalAfter は廃止。
         //   インターバルは settings.intervalMin（サロン共通設定）に1本化
+        // ★ 2026/6/12: category 追加（facial/body/other、省略可。DESIGN.md 0-2 と1対1）
         allow create: if isSalonStaff(salonId) &&
                         request.resource.data.keys().hasOnly([
                           'name', 'duration', 'price', 'type', 'public',
                           'eligibleStaffIds', 'requiredResourceIds',
                           'description', 'contraindications',
-                          'photoUrl', 'sortOrder', 'createdAt'
+                          'photoUrl', 'sortOrder', 'category', 'createdAt'
                         ]) &&
                         request.resource.data.keys().hasAll([
                           'name', 'duration', 'price', 'type', 'public',
@@ -193,6 +194,8 @@ service cloud.firestore {
                         request.resource.data.public is bool &&
                         request.resource.data.eligibleStaffIds is list &&
                         request.resource.data.requiredResourceIds is list &&
+                        (!('category' in request.resource.data) ||
+                          request.resource.data.category in ['facial', 'body', 'other']) &&
                         (!('sortOrder' in request.resource.data) ||
                           (request.resource.data.sortOrder is int &&
                            request.resource.data.sortOrder >= 0));

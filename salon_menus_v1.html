@@ -12,6 +12,7 @@
     - 編集（dbSalonUpdateMenu）
     - 削除（dbSalonDeleteMenu。注意喚起あり）
     - 並び替え（▲▼ボタンで sortOrder 更新、dbSalonReorderMenus）
+    - ★2026/6/12 カテゴリ（facial/body/other、mainのみ）と複製ボタンを追加
   フェーズ1方針 (DESIGN.md 0-2):
     - 「施術可能スタッフ」「必要設備」UIは出さない（自動で['owner']/['default']）
     - public/非公開トグル、main/option タイプは設定する
@@ -328,6 +329,13 @@
     }
   }
 
+  // ★ カテゴリ表示名（facial/body/other → 日本語）
+  function _catLabel(c) {
+    if (c === 'facial') { return 'フェイシャル'; }
+    if (c === 'body') { return 'ボディ'; }
+    return 'その他';
+  }
+
   function buildRow(m, sectionList, idxInSection, kind) {
     var row = document.createElement('div');
     row.className = 'menu-row';
@@ -375,6 +383,15 @@
 
     var bd = document.createElement('div');
     bd.className = 'menu-badges';
+    // ★ カテゴリバッジ（mainのみ。facial/body のときだけ表示。
+    //   未設定/その他はバッジなし＝顧客側では「その他」グループ扱い）
+    if (m.type !== 'option' &&
+        (m.category === 'facial' || m.category === 'body')) {
+      var bc = document.createElement('span');
+      bc.className = 'badge';
+      bc.textContent = _catLabel(m.category);
+      bd.appendChild(bc);
+    }
     if (m.type === 'option') {
       var b1 = document.createElement('span');
       b1.className = 'badge opt';
@@ -471,6 +488,9 @@
     body.appendChild(_roField('メニュー名', m.name || '-'));
     body.appendChild(_roField('種別',
       (m.type === 'option') ? 'オプション' : 'メイン'));
+    if (m.type !== 'option') {
+      body.appendChild(_roField('カテゴリ', _catLabel(m.category)));
+    }
     body.appendChild(_roField('施術時間', (m.duration || 0) + ' 分'));
     body.appendChild(_roField('料金',
       '¥' + (m.price || 0).toLocaleString()));
@@ -490,6 +510,12 @@
     bEdit.textContent = '編集';
     bEdit.onclick = function () { openEdit(m); };
     act.appendChild(bEdit);
+    // ★ 複製: 内容をコピーした新規フォームを開く（保存するまで作成されない）
+    var bDup = document.createElement('button');
+    bDup.className = 'btn btn-ghost';
+    bDup.textContent = '複製';
+    bDup.onclick = function () { openDuplicate(m); };
+    act.appendChild(bDup);
     var bClose = document.createElement('button');
     bClose.className = 'btn btn-ghost';
     bClose.textContent = '閉じる';
@@ -548,6 +574,10 @@
     var pr = _vint('fPrice', 0);
     var sel = document.getElementById('fType');
     var typ = (sel && sel.value === 'option') ? 'option' : 'main';
+    // ★ カテゴリ（mainのみ。optionのときは送らない＝既存値はそのまま）
+    var catSel = document.getElementById('fCat');
+    var cat = (typ === 'main' && catSel) ? catSel.value : null;
+    if (cat !== 'facial' && cat !== 'body' && cat !== 'other') { cat = null; }
 
     var patch = {
       name: name,
@@ -558,6 +588,7 @@
       description: _v('fDesc'),
       contraindications: _v('fContra')
     };
+    if (cat) { patch.category = cat; }
 
     uiShowLoading('保存中...');
     dbSalonUpdateMenu(_curId, patch, function (ok) {
@@ -575,6 +606,7 @@
           _all[i].public = patch.public;
           _all[i].description = patch.description;
           _all[i].contraindications = patch.contraindications;
+          if (patch.category) { _all[i].category = patch.category; }
           break;
         }
       }
@@ -631,6 +663,41 @@
   }
   window.openCreate = openCreate;
 
+  // ----- 複製 -----
+  // 既存メニューの内容をコピーした「新規追加」フォームを開く。
+  // 名前に「のコピー」を付ける。「追加」を押すまでFirestoreには書き込まれない。
+  function openDuplicate(m) {
+    _mode = 'create';
+    _curId = null;
+    _formPublic = (m.public !== false);
+    document.getElementById('panelTitle').textContent = 'メニューを複製';
+    renderForm({
+      name: (m.name || '') + 'のコピー',
+      duration: m.duration,
+      price: m.price,
+      type: m.type,
+      category: m.category,
+      public: m.public,
+      description: m.description,
+      contraindications: m.contraindications
+    });
+
+    var act = document.getElementById('panelActions');
+    act.innerHTML = '';
+    var bSave = document.createElement('button');
+    bSave.className = 'btn btn-primary';
+    bSave.textContent = '追加';
+    bSave.onclick = doCreate;
+    act.appendChild(bSave);
+    var bCancel = document.createElement('button');
+    bCancel.className = 'btn btn-ghost';
+    bCancel.textContent = 'キャンセル';
+    bCancel.onclick = closePanel;
+    act.appendChild(bCancel);
+
+    showPanel();
+  }
+
   function doCreate() {
     var name = _v('fName');
     if (!name) { uiToast('メニュー名は必須です'); return; }
@@ -639,6 +706,10 @@
     var pr = _vint('fPrice', 0);
     var sel = document.getElementById('fType');
     var typ = (sel && sel.value === 'option') ? 'option' : 'main';
+    // ★ カテゴリ（mainのみ）
+    var catSel = document.getElementById('fCat');
+    var cat = (typ === 'main' && catSel) ? catSel.value : null;
+    if (cat !== 'facial' && cat !== 'body' && cat !== 'other') { cat = null; }
     // 新規は同種別の末尾に配置（既存の最大 sortOrder + 1）
     var maxSo = -1;
     var i;
@@ -659,6 +730,7 @@
       contraindications: _v('fContra'),
       sortOrder: maxSo + 1
     };
+    if (cat) { data.category = cat; }
 
     uiShowLoading('追加中...');
     dbSalonCreateMenu(data, function (res) {
@@ -674,6 +746,7 @@
         duration: data.duration,
         price: data.price,
         type: data.type,
+        category: data.category,
         public: data.public,
         description: data.description,
         contraindications: data.contraindications,
@@ -727,6 +800,38 @@
     else { sel.value = 'main'; }
     ft.appendChild(sel);
     body.appendChild(ft);
+
+    // ★ カテゴリセレクト（mainのみ。オプション選択時は非表示）
+    var fc = document.createElement('div');
+    fc.className = 'field';
+    fc.id = 'fCatField';
+    var fcl = document.createElement('label');
+    fcl.textContent = 'カテゴリ（顧客の予約画面の分類に使われます）';
+    fc.appendChild(fcl);
+    var csel = document.createElement('select');
+    csel.id = 'fCat';
+    var c1 = document.createElement('option');
+    c1.value = 'facial'; c1.textContent = 'フェイシャル';
+    var c2 = document.createElement('option');
+    c2.value = 'body'; c2.textContent = 'ボディ';
+    var c3 = document.createElement('option');
+    c3.value = 'other'; c3.textContent = 'その他';
+    csel.appendChild(c1); csel.appendChild(c2); csel.appendChild(c3);
+    if (m && (m.category === 'facial' || m.category === 'body')) {
+      csel.value = m.category;
+    } else {
+      csel.value = 'other';
+    }
+    fc.appendChild(csel);
+    if (sel.value === 'option') { fc.style.display = 'none'; }
+    body.appendChild(fc);
+
+    // 種別を切り替えたらカテゴリ欄の表示/非表示を連動
+    sel.onchange = function () {
+      var f = document.getElementById('fCatField');
+      if (!f) { return; }
+      f.style.display = (sel.value === 'option') ? 'none' : '';
+    };
 
     var r2 = document.createElement('div');
     r2.className = 'row-2';
