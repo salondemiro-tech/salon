@@ -434,11 +434,61 @@ service cloud.firestore {
       //   openTime/closeTime/intervalMin/intervalInClose/slotMin/
       //   closedDows/weeklyClose/bookingWeeks/lastMin/deadline/updatedAt
       //   + createdAt（A-8初期化が1回書く。merge時に残るためホワイトリストに含める）
+      //
+      // ★ 2026/6/13 重要修正: create / update を分割。
+      //   Stripe webhook（Admin SDK・rulesバイパス）が settings に
+      //   planStatus/stripeCustomerId/stripeSubscriptionId/
+      //   planUpdatedAt/trialEndsAt を書き込むため、merge保存の
+      //   keys().hasOnly() では「保存後のドキュメント全体」に
+      //   Stripeフィールドが混ざって必ず拒否される
+      //   （＝決済済みサロンが営業時間を保存できないバグ）。
+      //   update は diff().affectedKeys()（変更キーのみ検査）に変更。
+      //   これによりクライアントは planStatus 等を一切変更できない
+      //   （課金状態の偽装防止）まま、営業時間の保存が通る。
       // ─────────────────────────────────────────────────────────
       match /config/settings {
         allow read: if isSignedIn();
-        allow write: if isSalonStaff(salonId) &&
+
+        // 作成（初回初期化）: ドキュメント全体が許可フィールドのみ
+        allow create: if isSalonStaff(salonId) &&
           request.resource.data.keys().hasOnly([
+            'openTime', 'closeTime', 'intervalMin', 'intervalInClose',
+            'slotMin', 'closedDows', 'weeklyClose',
+            'bookingWeeks', 'lastMin', 'deadline',
+            'createdAt', 'updatedAt'
+          ]) &&
+          (!('createdAt' in request.resource.data) ||
+            request.resource.data.createdAt is timestamp) &&
+          (!('openTime' in request.resource.data) ||
+            request.resource.data.openTime is string) &&
+          (!('closeTime' in request.resource.data) ||
+            request.resource.data.closeTime is string) &&
+          (!('intervalMin' in request.resource.data) ||
+            (request.resource.data.intervalMin is int &&
+             request.resource.data.intervalMin >= 0)) &&
+          (!('intervalInClose' in request.resource.data) ||
+            request.resource.data.intervalInClose is bool) &&
+          (!('slotMin' in request.resource.data) ||
+            (request.resource.data.slotMin is int &&
+             request.resource.data.slotMin > 0)) &&
+          (!('closedDows' in request.resource.data) ||
+            request.resource.data.closedDows is list) &&
+          (!('weeklyClose' in request.resource.data) ||
+            request.resource.data.weeklyClose is list) &&
+          (!('bookingWeeks' in request.resource.data) ||
+            (request.resource.data.bookingWeeks is int &&
+             request.resource.data.bookingWeeks > 0)) &&
+          (!('lastMin' in request.resource.data) ||
+            request.resource.data.lastMin is string) &&
+          (!('deadline' in request.resource.data) ||
+            request.resource.data.deadline is string) &&
+          (!('updatedAt' in request.resource.data) ||
+            request.resource.data.updatedAt is timestamp);
+
+        // 更新: クライアントが変更したキーのみ検査（diff方式）。
+        //   Stripe系フィールドはホワイトリスト外なので変更不可。
+        allow update: if isSalonStaff(salonId) &&
+          request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'openTime', 'closeTime', 'intervalMin', 'intervalInClose',
             'slotMin', 'closedDows', 'weeklyClose',
             'bookingWeeks', 'lastMin', 'deadline',

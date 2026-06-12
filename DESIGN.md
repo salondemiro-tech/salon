@@ -363,8 +363,25 @@ salons/{salonId}/config/settings {
   lastMin: "same1h",          // 直前予約受付：1week/3days/1day/same3h/same1h/same30m
   deadline: "前日まで",       // 顧客キャンセル受付期限
   createdAt: <serverTimestamp> // ★ 2026/6/2 F-2同期：初期化時に確定。rules v3 ホワイトリストに含む（省略可）
+
+  // ★ 2026/6/13 追記（Phase G時の設計書反映漏れを補完）:
+  // 以下は Stripe webhook（Admin SDK・rulesバイパス）が書き込むフィールド。
+  // クライアントからは読み取り専用。rules のクライアント書き込み
+  // ホワイトリストには絶対に含めない（planStatus偽装＝課金回避を防ぐため）。
+  planStatus: "trial",                  // trial / active / past_due / canceled 等
+  stripeCustomerId: "cus_xxx",
+  stripeSubscriptionId: "sub_xxx",
+  planUpdatedAt: <serverTimestamp>,
+  trialEndsAt: <timestamp>              // トライアル終了予定（参考表示用、省略あり）
 }
 ```
+
+> ★ 2026/6/13 重要改訂（rules）: settings の書き込みルールを create / update に分割。
+> update は `diff(resource.data).affectedKeys().hasOnly([...])` 方式
+> （クライアントが**変更したキーだけ**を検査）に変更した。
+> 旧 `keys().hasOnly()` は merge 保存時に「保存後のドキュメント全体」を検査するため、
+> webhook が書いた planStatus 等が混ざって**決済済みサロンは営業時間を保存できない**
+> バグがあった（Phase F テスト時は planStatus 未存在のため発覚せず）。
 
 **キャンセル規定スキーマ（cancelPolicy）**：
 
