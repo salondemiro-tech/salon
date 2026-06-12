@@ -45,6 +45,18 @@
 //   - createdAt は Functions が serverTimestamp で確定するため、
 //     クライアントから送る必要はない（shared_db.js も元々送っていない）。
 //   - price/staffId/status/end/authUid/customerDocId 偽装は元から拒否済み（PASS確認）。
+//
+// 2026/6/12 変更点:
+//   - menus の create ホワイトリストに category を追加
+//     （facial / body / other、省略可。メニューのカテゴリ分け機能）
+//
+// 2026/6/13 変更点（★重要バグ修正）:
+//   - config/settings の write ルールを create / update に分割
+//   - update を diff(resource.data).affectedKeys().hasOnly() 方式に変更
+//   - 理由: Stripe webhook（Admin SDK）が settings に planStatus 等を
+//     書き込むため、merge保存の keys().hasOnly() では既存Stripeフィールドが
+//     混ざって必ず拒否され、決済済みサロンが営業時間を保存できなかった
+//   - クライアントによる planStatus 等の改ざん（課金状態偽装）は引き続き不可
 // ============================================================
 
 rules_version = '2';
