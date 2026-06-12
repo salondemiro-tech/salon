@@ -13,6 +13,7 @@
     - 削除（dbSalonDeleteMenu。注意喚起あり）
     - 並び替え（▲▼ボタンで sortOrder 更新、dbSalonReorderMenus）
     - ★2026/6/12 カテゴリ（facial/body/other、mainのみ）と複製ボタンを追加
+    - ★2026/6/13 メイン一覧をカテゴリ別グループ表示に変更（▲▼はカテゴリ内で完結）
   フェーズ1方針 (DESIGN.md 0-2):
     - 「施術可能スタッフ」「必要設備」UIは出さない（自動で['owner']/['default']）
     - public/非公開トグル、main/option タイプは設定する
@@ -71,6 +72,12 @@
   .sec-head{
     font-size:13px; color:var(--ad); margin:18px 4px 8px;
     letter-spacing:.05em;
+  }
+
+  /* ★ カテゴリ小見出し（メインメニュー内のグループ） */
+  .cat-head{
+    font-size:12px; color:var(--mu); margin:14px 6px 6px;
+    letter-spacing:.06em; font-weight:600;
   }
 
   /* メニュー一覧 */
@@ -224,8 +231,8 @@
   </div>
 
   <div class="sec-head">メインメニュー</div>
-  <div class="menu-list" id="mainList">
-    <div class="empty">読み込み中...</div>
+  <div id="mainList">
+    <div class="menu-list"><div class="empty">読み込み中...</div></div>
   </div>
 
   <div class="sec-head">オプションメニュー</div>
@@ -297,6 +304,12 @@
     });
   }
 
+  // ★ カテゴリ判定（未設定は 'other' 扱い。顧客アプリと同じルール）
+  function _catKey(m) {
+    return (m && (m.category === 'facial' || m.category === 'body'))
+      ? m.category : 'other';
+  }
+
   function renderAll(list) {
     var mains = [];
     var opts  = [];
@@ -308,8 +321,48 @@
         mains.push(list[i]);
       }
     }
-    renderSection(document.getElementById('mainList'), mains, 'main');
+    renderMainGroups(document.getElementById('mainList'), mains);
     renderSection(document.getElementById('optList'),  opts,  'option');
+  }
+
+  // ★ メインメニューをカテゴリ別（フェイシャル/ボディ/その他）に
+  //   小見出し付きでグループ表示。空のカテゴリは出さない。
+  //   ▲▼並び替えはカテゴリ内に閉じる。
+  function renderMainGroups(box, mains) {
+    box.innerHTML = '';
+    if (!mains || mains.length === 0) {
+      var card0 = document.createElement('div');
+      card0.className = 'menu-list';
+      var em = document.createElement('div');
+      em.className = 'empty';
+      em.textContent = 'メインメニューはまだありません';
+      card0.appendChild(em);
+      box.appendChild(card0);
+      return;
+    }
+    var defs = [
+      { key: 'facial', label: 'フェイシャル' },
+      { key: 'body',   label: 'ボディ' },
+      { key: 'other',  label: 'その他' }
+    ];
+    var g, i;
+    for (g = 0; g < defs.length; g++) {
+      var glist = [];
+      for (i = 0; i < mains.length; i++) {
+        if (_catKey(mains[i]) === defs[g].key) { glist.push(mains[i]); }
+      }
+      if (glist.length === 0) { continue; }
+      var head = document.createElement('div');
+      head.className = 'cat-head';
+      head.textContent = defs[g].label;
+      box.appendChild(head);
+      var card = document.createElement('div');
+      card.className = 'menu-list';
+      for (i = 0; i < glist.length; i++) {
+        card.appendChild(buildRow(glist[i], glist, i, defs[g].key));
+      }
+      box.appendChild(card);
+    }
   }
 
   function renderSection(box, list, kind) {
@@ -383,15 +436,7 @@
 
     var bd = document.createElement('div');
     bd.className = 'menu-badges';
-    // ★ カテゴリバッジ（mainのみ。facial/body のときだけ表示。
-    //   未設定/その他はバッジなし＝顧客側では「その他」グループ扱い）
-    if (m.type !== 'option' &&
-        (m.category === 'facial' || m.category === 'body')) {
-      var bc = document.createElement('span');
-      bc.className = 'badge';
-      bc.textContent = _catLabel(m.category);
-      bd.appendChild(bc);
-    }
+    // ★ カテゴリはグループ見出し表示に変更したためバッジは廃止（2026/6/13）
     if (m.type === 'option') {
       var b1 = document.createElement('span');
       b1.className = 'badge opt';
@@ -413,12 +458,19 @@
   }
 
   // ----- 並び替え -----
+  // ★ kind は 'option' / 'facial' / 'body' / 'other' のいずれか（グループキー）。
+  //   並び替えは同グループ内に閉じる。sortOrder はグループ内で 0..n-1 に振り直す
+  //   （グループごとに独立して表示順を決めるので、グループ間で値が重複しても問題ない）。
   function moveItem(menuId, kind, dir) {
-    // 当該セクション内のリストを sortOrder 順で取り出し、入れ替え後 sortOrder を 0..n-1 に振り直して一括更新
     var section = [];
     var i;
     for (i = 0; i < _all.length; i++) {
-      var t = (_all[i].type === 'option') ? 'option' : 'main';
+      var t;
+      if (kind === 'option') {
+        t = (_all[i].type === 'option') ? 'option' : '';
+      } else {
+        t = (_all[i].type === 'option') ? '' : _catKey(_all[i]);
+      }
       if (t === kind) { section.push(_all[i]); }
     }
     // 現在位置
