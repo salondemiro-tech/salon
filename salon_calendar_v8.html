@@ -970,29 +970,42 @@
   // 定期クローズの1回分を closeBlocks に切り出す。
   // 同時に例外日に追加して、定期クローズの二重表示と「削除で復活」を防ぐ。
   function cutOutWeeklyClose(wc, day) {
-    uiShowLoading('切り出し中...');
-    dbSalonCreateCloseBlock({
-      dateKey: day.dateKey,
-      start: wc.start,
-      end: wc.end,
-      reason: '定期クローズ'
-    }, function (res) {
-      if (!res || !res._id) {
-        uiForceHideLoading();
-        uiToast('切り出しに失敗しました');
-        return;
-      }
-      _addWcException(day.dateKey, function (err) {
-        uiForceHideLoading();
-        if (err) {
-          uiToast('切り出しに失敗しました（例外保存エラー）');
+    uiShowLoading('D1 開始');
+    try {
+      dbSalonCreateCloseBlock({
+        dateKey: day.dateKey,
+        start: wc.start,
+        end: wc.end,
+        reason: '定期クローズ'
+      }, function (res) {
+        uiShowLoading('D2 createCB=' + (res && res._id ? 'OK' : 'NULL'));
+        if (!res || !res._id) {
+          window.alert('停止: createCloseBlock が null。\nクローズ作成に失敗。');
+          uiForceHideLoading();
           return;
         }
-        uiToast('個別クローズに切り出しました。短縮・移動・削除できます。');
-        closeDetailModal();
-        loadWeek();
+        if (typeof dbSalonSetWeeklyCloseExceptions !== 'function') {
+          window.alert('停止: dbSalonSetWeeklyCloseExceptions が無い。\nshared_db.js が古い可能性。');
+          uiForceHideLoading();
+          return;
+        }
+        uiShowLoading('D3 例外保存中');
+        _addWcException(day.dateKey, function (err) {
+          if (err) {
+            window.alert('停止: 例外保存エラー = ' + (err.message || err));
+            uiForceHideLoading();
+            return;
+          }
+          window.alert('成功: ここまで到達。loadWeek を呼びます。');
+          uiForceHideLoading();
+          closeDetailModal();
+          loadWeek();
+        });
       });
-    });
+    } catch (e) {
+      window.alert('例外catch: ' + (e && e.message ? e.message : String(e)));
+      uiForceHideLoading();
+    }
   }
 
   // この日の定期クローズを外して終日あける（closeBlocksは作らない）
