@@ -9,7 +9,7 @@
   DESIGN.md 0-2 キャンセル規定スキーマ / shared_db dbGetCancelPolicy/dbSaveCancelPolicy と1対1
   管理対象:
     text, rates[{label,percent}], showOnBook, showOnCancel, qrUrl, qrMsg
-  ★ フェーズ1: キャンセル料は自動引き落としではなくQRコード送付方式
+  ★ フェーズ1: キャンセル料は自動引き落としではなく決済リンク送付方式
   ロード順序: firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js → shared_ui.js
   ES5 互換: var/function のみ
 -->
@@ -281,7 +281,7 @@
       </div>
 
       <div class="note blue">
-        キャンセルが規定に該当した場合、自動でQRコード付きメッセージが送付されます。
+        キャンセルが規定に該当した場合、自動で決済リンク付きメッセージが送付されます。
         自動引き落としではありません（フェーズ1）。
       </div>
     </div>
@@ -291,11 +291,11 @@
   <div class="sec">
     <div class="sec-head">
       <div class="sec-title">キャンセル料発生時の自動通知</div>
-      <div class="sec-sub">決済QRと自動送信メッセージ</div>
+      <div class="sec-sub">決済リンクと自動送信メッセージ</div>
     </div>
     <div class="sec-body">
       <div class="field">
-        <label>決済・振込用のQRコードURL</label>
+        <label>決済・振込用の決済リンクURL</label>
         <input type="text" id="qrUrl"
                placeholder="例：https://pay.paypay.ne.jp/xxxxx">
         <div class="note">PayPay・Square・銀行振込ページなど</div>
@@ -305,10 +305,10 @@
         <div class="var-hint">
           使える変数：
           <b>{顧客名}</b>　<b>{予約日時}</b>　<b>{メニュー}</b>　
-          <b>{キャンセル料}</b>　<b>{QRリンク}</b>
+          <b>{キャンセル料}</b>　<b>{決済リンク}</b>
         </div>
         <textarea class="msg-ta" id="qrMsg"
-                  placeholder="例：&#10;{顧客名}様&#10;{予約日時}の{メニュー}のキャンセル料 {キャンセル料} について、お振込みをお願いいたします。&#10;{QRリンク}"></textarea>
+                  placeholder="例：&#10;{顧客名}様&#10;{予約日時}の{メニュー}のキャンセル料 {キャンセル料} について、お振込みをお願いいたします。&#10;{決済リンク}"></textarea>
         <div class="prev">
           <div class="prev-t">送信イメージ（山田 花子さんの場合）</div>
           <div class="prev-c" id="msgPreview"></div>
@@ -492,12 +492,13 @@
     updateMsgPreview();
   }
   function updateMsgPreview() {
-    var url = st.qrUrl || '（QRコードURL未設定）';
+    var url = st.qrUrl || '（決済リンクURL未設定）';
     var msg = st.qrMsg || '（メッセージ未設定）';
     msg = msg.replace(/\{顧客名\}/g, '山田 花子')
              .replace(/\{予約日時\}/g, '6月3日（水）14:00')
              .replace(/\{メニュー\}/g, 'フェイシャル')
              .replace(/\{キャンセル料\}/g, '¥6,000（50%）')
+             .replace(/\{決済リンク\}/g, url)
              .replace(/\{QRリンク\}/g, url);
     document.getElementById('msgPreview').textContent = msg;
   }
