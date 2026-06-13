@@ -978,12 +978,12 @@
       reason: '定期クローズ'
     }, function (res) {
       if (!res || !res._id) {
-        uiHideLoading();
+        uiForceHideLoading();
         uiToast('切り出しに失敗しました');
         return;
       }
       _addWcException(day.dateKey, function (err) {
-        uiHideLoading();
+        uiForceHideLoading();
         if (err) {
           uiToast('切り出しに失敗しました（例外保存エラー）');
           return;
@@ -999,7 +999,7 @@
   function releaseWeeklyClose(day) {
     uiShowLoading('変更中...');
     _addWcException(day.dateKey, function (err) {
-      uiHideLoading();
+      uiForceHideLoading();
       if (err) {
         uiToast('変更に失敗しました');
         return;
@@ -1155,7 +1155,7 @@
     uiShowLoading('戻しています...');
     dbSalonDeleteCloseBlock(closeBlock._id, function (ok) {
       if (!ok) {
-        uiHideLoading();
+        uiForceHideLoading();
         uiToast('戻す処理に失敗しました');
         return;
       }
@@ -1163,7 +1163,7 @@
       var idx = list.indexOf(closeBlock.dateKey);
       if (idx >= 0) { list.splice(idx, 1); }
       dbSalonSetWeeklyCloseExceptions(list, function (err) {
-        uiHideLoading();
+        uiForceHideLoading();
         if (err) {
           uiToast('戻す処理に失敗しました（例外解除エラー）');
           return;
