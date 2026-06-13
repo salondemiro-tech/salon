@@ -710,10 +710,19 @@ exports.getAvailableSlots = onCall(
 
     const dObj = new Date(dateKey + 'T12:00:00+09:00');
     const dow = dObj.getDay();
+    // ★ 2026/6/13: 定期クローズの例外日（weeklyCloseExceptions）はこの日の
+    //   weeklyClose を適用しない。サロンがカレンダーで「この日は営業」にした日に
+    //   顧客が予約できるようにするため。切り出し済みの日は別途 closeBlocks 側で
+    //   ブロックされる（切り出し時に closeBlocks を作っているため二重にはならない）。
+    const wcExceptions = Array.isArray(settings.weeklyCloseExceptions)
+      ? settings.weeklyCloseExceptions : [];
+    const isWcException = wcExceptions.indexOf(dateKey) >= 0;
     const weeklyClose = settings.weeklyClose || [];
-    for (const wc of weeklyClose) {
-      if (wc && wc.dow === dow) {
-        busy.push({ startMin: hhmmToMin(wc.start), endMin: hhmmToMin(wc.end), isMin: true });
+    if (!isWcException) {
+      for (const wc of weeklyClose) {
+        if (wc && wc.dow === dow) {
+          busy.push({ startMin: hhmmToMin(wc.start), endMin: hhmmToMin(wc.end), isMin: true });
+        }
       }
     }
 
