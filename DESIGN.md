@@ -315,28 +315,11 @@ salons/{salonId}/menus/{menuId} {
   duration: 90,
   price: 12000,
   type: "main",                        // main / option
-  category: "facial",                  // ★2026/6/12追加: facial / body / other（省略可）
-                                       //   main メニューのみ意味を持つ。省略時は 'other' 扱い。
-                                       //   option には付けない（顧客画面で分類しないため）。
-                                       //   既存メニューは未設定のまま動作（マイグレーション不要）。
   public: true,                        // true: 顧客の予約画面に表示 / false: サロン内部用
   eligibleStaffIds: ["owner"],         // フェーズ1では常に ['owner']
   requiredResourceIds: ["default"]     // フェーズ1では常に ['default']
 }
 ```
-
-> ★ 2026/6/12 改訂：`category`（フェイシャル/ボディ/その他）を追加。
-> 顧客アプリのメニュー選択画面はカテゴリ別見出しでグループ表示する。
-> ただし**存在するカテゴリが1種類のみの場合は見出しを出さない**
-> （カテゴリ未使用サロンは従来通りの見た目）。
-> サロン側メニュー設定画面には「複製」ボタンも追加
-> （既存メニューの内容をコピーした新規フォームを開く。名前に「のコピー」付与）。
->
-> ★ 2026/6/13 改訂：サロン側メニュー設定画面のメイン一覧も
-> カテゴリ別（フェイシャル → ボディ → その他）の小見出し付きグループ表示に変更。
-> 空のカテゴリは表示しない。▲▼並び替えは**同カテゴリ内に閉じる**。
-> sortOrder はグループ内で 0..n-1 に振り直す方式
-> （グループごとに独立表示なのでグループ間の値重複は問題ない）。
 
 > ★ 2026/5/20 改訂：旧 v6 のメニュー単位 `intervalBefore` / `intervalAfter`
 > は廃止。**インターバルはサロン共通設定 `settings.intervalMin` に1本化**
@@ -363,25 +346,8 @@ salons/{salonId}/config/settings {
   lastMin: "same1h",          // 直前予約受付：1week/3days/1day/same3h/same1h/same30m
   deadline: "前日まで",       // 顧客キャンセル受付期限
   createdAt: <serverTimestamp> // ★ 2026/6/2 F-2同期：初期化時に確定。rules v3 ホワイトリストに含む（省略可）
-
-  // ★ 2026/6/13 追記（Phase G時の設計書反映漏れを補完）:
-  // 以下は Stripe webhook（Admin SDK・rulesバイパス）が書き込むフィールド。
-  // クライアントからは読み取り専用。rules のクライアント書き込み
-  // ホワイトリストには絶対に含めない（planStatus偽装＝課金回避を防ぐため）。
-  planStatus: "trial",                  // trial / active / past_due / canceled 等
-  stripeCustomerId: "cus_xxx",
-  stripeSubscriptionId: "sub_xxx",
-  planUpdatedAt: <serverTimestamp>,
-  trialEndsAt: <timestamp>              // トライアル終了予定（参考表示用、省略あり）
 }
 ```
-
-> ★ 2026/6/13 重要改訂（rules）: settings の書き込みルールを create / update に分割。
-> update は `diff(resource.data).affectedKeys().hasOnly([...])` 方式
-> （クライアントが**変更したキーだけ**を検査）に変更した。
-> 旧 `keys().hasOnly()` は merge 保存時に「保存後のドキュメント全体」を検査するため、
-> webhook が書いた planStatus 等が混ざって**決済済みサロンは営業時間を保存できない**
-> バグがあった（Phase F テスト時は planStatus 未存在のため発覚せず）。
 
 **キャンセル規定スキーマ（cancelPolicy）**：
 
@@ -396,27 +362,18 @@ salons/{salonId}/config/cancelPolicy {
   ],
   showOnBook: true,         // 予約時に規定を表示・同意を求める
   showOnCancel: true,       // キャンセル時に規定を表示
-  qrUrl: "",                // 決済・振込用リンク（PayPay/Square等）※画面表記は「決済リンク」
+  qrUrl: "",                // 決済・振込用QR/リンク（PayPay/Square等）
   qrMsg: "",                // キャンセル料発生時の自動送信メッセージ
                             // 変数: {顧客名}{予約日時}{メニュー}
-                            //       {キャンセル料}{決済リンク}（旧{QRリンク}も後方互換）
+                            //       {キャンセル料}{QRリンク}
   createdAt: <serverTimestamp>, // ★ 2026/6/2 F-2同期：rules v3 ホワイトリストに含む（省略可）
   updatedAt: <serverTimestamp>
 }
 ```
 
 ★ キャンセル料は**自動引き落としではない**：規定に該当した場合、
-決済リンクを含むメッセージが顧客に自動送付される（フェーズ1）。
+QRコードURLを含むメッセージが顧客に自動送付される（フェーズ1）。
 実際の支払いは顧客と店舗の間で行う。
-
-> ★ 2026/6/13 改訂:
-> - キャンセル通知メールで qrMsg（自動送信メッセージ）の変数置換に対応。
->   onAppointmentUpdate で {顧客名}{予約日時}{メニュー}{キャンセル料}{決済リンク}
->   を置換。qrMsg 未設定時は従来の固定文面にフォールバック。
->   キャンセル料の金額行は qrMsg の有無にかかわらず必ず明示する。
-> - 内部キー名 qrUrl/qrMsg は変更せず、画面表示の「QRコード」表記のみ
->   「決済リンク」に統一（QR画像アップロード機能は無いため誤解を避ける）。
->   変数名も {QRリンク}→{決済リンク} に変更（旧名も後方互換で受理）。
 
 **スタンプカードスキーマ（stampCard）**：
 
@@ -456,6 +413,21 @@ salons/{salonId}/closeBlocks/{closeBlockId} {
 `weeklyClose` は曜日繰り返しの「毎週の定期クローズ」で別物。
 クローズ時間中は顧客アプリの予約受付スロットから除外される
 （重複チェックは Functions の責任）。
+
+> ★ 2026/6/13 重要修正＋仕様追加（カレンダー C-3）:
+> - **バグ修正**: カレンダー（salon_calendar_v8.html）が weeklyClose の dow を
+>   「終日定休」として描画・予約禁止していた。これにより時間帯クローズ
+>   （例: 全曜日16:30〜21:00）を設定すると全曜日が終日定休になり予約不能だった。
+>   終日定休は **closedDows** で判定するよう修正（Functions・顧客アプリは元々正しく、
+>   カレンダーだけのバグだった）。
+> - **方式A**: weeklyClose は各週の該当曜日に「定期クローズ」ブロック（破線表示）として
+>   時間帯展開描画する。タップで詳細モーダルを開き、「この日を個別クローズに切り出す」
+>   ボタンで該当日の closeBlocks を1件作成（reason='定期クローズ'）。
+>   切り出し後はその closeBlocks を通常クローズとして削除・編集・移動できる。
+>   切り出し済み（同日同start同endのcloseBlocksが存在）の回は二重描画しない。
+> - 元の weeklyClose（曜日繰り返し設定）自体は営業時間設定でのみ編集する。
+>   カレンダー上の操作は「その回の例外」を closeBlocks として作るだけで、
+>   繰り返し設定には影響しない（データの矛盾を防ぐ方式A の核心）。
 
 **メニューの読み取り権限ルール（重要）**：
 - `public: true` のメニュー → 認証ユーザーなら誰でも読める（顧客の予約画面で表示するため）

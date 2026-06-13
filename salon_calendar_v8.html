@@ -178,6 +178,9 @@
   .appt.manual{background:var(--bll); border-color:var(--bl); color:var(--bt);}
   .appt.interval{background:var(--ivl); border-color:var(--iv); color:#5a4010; z-index:4;}
   .appt.cb{background:var(--cbl); border-color:var(--cb); color:var(--rt);}
+  /* ★ 定期クローズ由来（weeklyClose展開）。実クローズと区別するため破線＋淡色 */
+  .appt.wcb{background:repeating-linear-gradient(45deg,var(--cbl),var(--cbl) 6px,rgba(255,255,255,.5) 6px,rgba(255,255,255,.5) 12px);
+            border-color:var(--cb); color:var(--rt); border-left-style:dashed;}
   .appt-name{
     font-weight:600; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis;
@@ -642,16 +645,16 @@
     var openTime = settings.openTime || DEFAULT_OPEN;
     var closeTime = settings.closeTime || DEFAULT_CLOSE;
     var weeklyClose = settings.weeklyClose || [];
-    var weeklyCloseDows = [];
-    if (Array.isArray(weeklyClose)) {
-      var k;
-      for (k = 0; k < weeklyClose.length; k++) {
-        var wc = weeklyClose[k];
-        if (typeof wc === 'number') {
-          weeklyCloseDows.push(wc);
-        } else if (wc && typeof wc.dow === 'number') {
-          weeklyCloseDows.push(wc.dow);
-        }
+    // ★ 2026/6/13 修正: 終日定休は closedDows（settings.closedDows）で判定する。
+    //   従来は weeklyClose の dow を終日定休扱いにしていたため、
+    //   時間帯クローズ（16:30〜21:00 等）を設定すると全曜日が終日定休になるバグがあった。
+    //   weeklyClose は下で時間帯クローズブロックとして展開描画する（方式A）。
+    var closedDows = [];
+    var cdRaw = settings.closedDows || [];
+    if (Array.isArray(cdRaw)) {
+      var kc;
+      for (kc = 0; kc < cdRaw.length; kc++) {
+        if (typeof cdRaw[kc] === 'number') { closedDows.push(cdRaw[kc]); }
       }
     }
 
@@ -701,7 +704,7 @@
         var col = document.createElement('div');
         col.className = 'dcol';
         if (d.dateKey === today) { col.className += ' today-col'; }
-        if (weeklyCloseDows.indexOf(d.dow) >= 0) {
+        if (closedDows.indexOf(d.dow) >= 0) {
           col.className += ' hol';
           if (hour === startHour) {
             var lbl = document.createElement('div');
@@ -836,6 +839,115 @@
       })(cb);
       cAnchor.appendChild(cbEl);
     }
+
+    // ★ 2026/6/13 追加: 定期クローズ（weeklyClose）を各週の該当曜日に
+    //   時間帯クローズブロックとして展開描画（方式A）。
+    //   見た目は破線で実クローズと区別。クリックすると「実クローズに切り出す」操作。
+    //   既に同日同時刻の実クローズ（closeBlocks）がある場合は切り出し済みなので描画しない。
+    var wcList = [];
+    if (Array.isArray(weeklyClose)) {
+      var wi;
+      for (wi = 0; wi < weeklyClose.length; wi++) {
+        var w = weeklyClose[wi];
+        if (w && typeof w.dow === 'number' && w.start && w.end) {
+          wcList.push(w);
+        }
+      }
+    }
+    for (i = 0; i < wcList.length; i++) {
+      var wc = wcList[i];
+      var wDi = -1;
+      for (j = 0; j < 7; j++) {
+        if (days[j].dow === wc.dow) { wDi = j; break; }
+      }
+      if (wDi < 0) { continue; }
+      var wDay = days[wDi];
+      // 終日定休の曜日には定期クローズを重ねない
+      if (closedDows.indexOf(wDay.dow) >= 0) { continue; }
+      var ws2 = timeToHour(wc.start);
+      var we2 = timeToHour(wc.end);
+      if (ws2 == null || we2 == null || we2 <= ws2) { continue; }
+      // 既に切り出し済み（同日・同start・同endのcloseBlocksが存在）ならスキップ
+      var alreadyCut = false;
+      for (j = 0; j < cbs.length; j++) {
+        if (cbs[j].dateKey === wDay.dateKey &&
+            cbs[j].start === wc.start && cbs[j].end === wc.end) {
+          alreadyCut = true; break;
+        }
+      }
+      if (alreadyCut) { continue; }
+      var wHRow = Math.floor(ws2);
+      var wAnchor = colAt(wHRow, wDi);
+      if (!wAnchor) { continue; }
+      var wEl = document.createElement('div');
+      wEl.className = 'appt wcb';
+      var wTop = (ws2 - wHRow) * SLOT_H;
+      var wHeight = (we2 - ws2) * SLOT_H - 2;
+      if (wHeight < 16) { wHeight = 16; }
+      wEl.style.top = wTop + 'px';
+      wEl.style.height = wHeight + 'px';
+      wEl.innerHTML = '<div class="appt-name">定期クローズ</div>'
+                    + '<div class="appt-sub">' + esc(wc.start) + '〜' + esc(wc.end) + '</div>';
+      (function (wcObj, dayObj) {
+        wEl.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openWeeklyCloseDetail(wcObj, dayObj);
+        });
+      })(wc, wDay);
+      wAnchor.appendChild(wEl);
+    }
+  }
+
+  // ★ 定期クローズの詳細モーダル：この回だけ実クローズに切り出す（方式A）
+  function openWeeklyCloseDetail(wc, day) {
+    document.getElementById('detailModalTitle').textContent = '定期クローズ';
+    var body = document.getElementById('detailModalBody');
+    var dateTxt = formatDateKey(day.dateKey);
+    var html = '';
+    html += '<div class="detail-row"><span class="detail-label">日付</span><span class="detail-value">' + esc(dateTxt) + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-label">時間</span><span class="detail-value">' + esc(wc.start) + ' 〜 ' + esc(wc.end) + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-label">種別</span><span class="detail-value">毎週' + DOWS[wc.dow] + '曜の定期クローズ</span></div>';
+    html += '<div class="detail-note" style="margin-top:10px;font-size:11px;color:var(--mu);line-height:1.5;">'
+          + 'これは営業時間設定の「毎週の定期クローズ」です。曜日全体の設定を変えるには営業時間設定から変更してください。'
+          + 'この日だけ削除・短縮・移動したい場合は、下のボタンでこの回を個別のクローズ時間に切り出してください。</div>';
+    body.innerHTML = html;
+
+    var acts = document.getElementById('detailModalActions');
+    acts.innerHTML = '';
+    var cutBtn = document.createElement('button');
+    cutBtn.className = 'btn btn-primary';
+    cutBtn.textContent = 'この日を個別クローズに切り出す';
+    (function (wcObj, dayObj) {
+      cutBtn.onclick = function () { cutOutWeeklyClose(wcObj, dayObj); };
+    })(wc, day);
+    acts.appendChild(cutBtn);
+    var xBtn = document.createElement('button');
+    xBtn.className = 'btn btn-ghost';
+    xBtn.textContent = '閉じる';
+    xBtn.onclick = closeDetailModal;
+    acts.appendChild(xBtn);
+
+    document.getElementById('detailModalOv').className = 'modal-ov show';
+  }
+
+  // 定期クローズの1回分を closeBlocks に切り出す（その後は通常クローズとして編集・削除可）
+  function cutOutWeeklyClose(wc, day) {
+    uiShowLoading('切り出し中...');
+    dbSalonCreateCloseBlock({
+      dateKey: day.dateKey,
+      start: wc.start,
+      end: wc.end,
+      reason: '定期クローズ'
+    }, function (res) {
+      uiHideLoading();
+      if (!res || !res._id) {
+        uiToast('切り出しに失敗しました');
+        return;
+      }
+      uiToast('個別クローズに切り出しました。削除・編集できます。');
+      closeDetailModal();
+      loadWeek();
+    });
   }
 
   // ============================================================
@@ -1308,22 +1420,38 @@
     return dt.getDay();
   }
 
-  // settings.weeklyClose の dow 配列を抽出
-  function _weeklyCloseDows() {
+  // ★ 2026/6/13 修正: 終日定休は closedDows で判定する（weeklyClose ではない）
+  function _closedDows() {
     var settings = (_bundle && _bundle.settings) || {};
-    var wc = settings.weeklyClose || [];
+    var cd = settings.closedDows || [];
     var dows = [];
     var i;
-    if (!Array.isArray(wc)) { return dows; }
-    for (i = 0; i < wc.length; i++) {
-      var w = wc[i];
-      if (typeof w === 'number') {
-        dows.push(w);
-      } else if (w && typeof w.dow === 'number') {
-        dows.push(w.dow);
-      }
+    if (!Array.isArray(cd)) { return dows; }
+    for (i = 0; i < cd.length; i++) {
+      if (typeof cd[i] === 'number') { dows.push(cd[i]); }
     }
     return dows;
+  }
+
+  // 指定 dateKey に該当する定期クローズ（weeklyClose）の時間帯 [{startMin,endMin}] を返す
+  function _weeklyCloseBandsFor(dateKey) {
+    var settings = (_bundle && _bundle.settings) || {};
+    var wc = settings.weeklyClose || [];
+    var bands = [];
+    if (!Array.isArray(wc)) { return bands; }
+    var dow = _dowOf(dateKey);
+    var i;
+    for (i = 0; i < wc.length; i++) {
+      var w = wc[i];
+      if (w && typeof w.dow === 'number' && w.dow === dow && w.start && w.end) {
+        var s = _timeToMin(w.start);
+        var e = _timeToMin(w.end);
+        if (s >= 0 && e >= 0 && e > s) {
+          bands.push({ startMin: s, endMin: e, start: w.start, end: w.end });
+        }
+      }
+    }
+    return bands;
   }
 
   // settings.intervalMin を取得（数値・0未満は0）
@@ -1338,11 +1466,22 @@
   // 引数: { dateKey, startMin, endMin }
   // 自分自身を編集中なら excludeApptId で除外可
   function _checkApptOverlap(target, excludeApptId) {
-    // 1. 定休日チェック
-    var closeDows = _weeklyCloseDows();
+    // 1. 定休日チェック（closedDows = 終日定休）
+    var closeDows = _closedDows();
     var dow = _dowOf(target.dateKey);
     if (dow >= 0 && closeDows.indexOf(dow) >= 0) {
       return { ok: false, reason: 'この日は定休日です。予約を登録できません。' };
+    }
+
+    // 1b. 定期クローズ（weeklyClose）の時間帯と重複していないか
+    var wbands = _weeklyCloseBandsFor(target.dateKey);
+    var wb;
+    for (wb = 0; wb < wbands.length; wb++) {
+      if (_isOverlap(target.startMin, target.endMin, wbands[wb].startMin, wbands[wb].endMin)) {
+        return { ok: false, reason: '定期クローズの時間と重なっています（'
+                                    + wbands[wb].start + '〜' + wbands[wb].end + '）'
+                                    + '\nこの回だけ予約を入れたい場合は、カレンダー上の定期クローズをタップして調整してください。' };
+      }
     }
 
     // 2. 営業時間チェック
@@ -1403,8 +1542,8 @@
 
   // クローズ時間の重複チェック
   function _checkCloseOverlap(target) {
-    // 1. 定休日チェック
-    var closeDows = _weeklyCloseDows();
+    // 1. 定休日チェック（closedDows = 終日定休）
+    var closeDows = _closedDows();
     var dow = _dowOf(target.dateKey);
     if (dow >= 0 && closeDows.indexOf(dow) >= 0) {
       return { ok: false, reason: 'この日は定休日です。クローズ時間を別途登録する必要はありません。' };
