@@ -57,6 +57,8 @@
 //     書き込むため、merge保存の keys().hasOnly() では既存Stripeフィールドが
 //     混ざって必ず拒否され、決済済みサロンが営業時間を保存できなかった
 //   - クライアントによる planStatus 等の改ざん（課金状態偽装）は引き続き不可
+//   - settings ホワイトリストに weeklyCloseExceptions（list・省略可）を追加
+//     ＝定期クローズ(weeklyClose)の特定日を無効化する例外日付リスト（YYYY-MM-DD配列）
 // ============================================================
 
 rules_version = '2';
@@ -465,7 +467,7 @@ service cloud.firestore {
         allow create: if isSalonStaff(salonId) &&
           request.resource.data.keys().hasOnly([
             'openTime', 'closeTime', 'intervalMin', 'intervalInClose',
-            'slotMin', 'closedDows', 'weeklyClose',
+            'slotMin', 'closedDows', 'weeklyClose', 'weeklyCloseExceptions',
             'bookingWeeks', 'lastMin', 'deadline',
             'createdAt', 'updatedAt'
           ]) &&
@@ -487,6 +489,8 @@ service cloud.firestore {
             request.resource.data.closedDows is list) &&
           (!('weeklyClose' in request.resource.data) ||
             request.resource.data.weeklyClose is list) &&
+          (!('weeklyCloseExceptions' in request.resource.data) ||
+            request.resource.data.weeklyCloseExceptions is list) &&
           (!('bookingWeeks' in request.resource.data) ||
             (request.resource.data.bookingWeeks is int &&
              request.resource.data.bookingWeeks > 0)) &&
@@ -502,7 +506,7 @@ service cloud.firestore {
         allow update: if isSalonStaff(salonId) &&
           request.resource.data.diff(resource.data).affectedKeys().hasOnly([
             'openTime', 'closeTime', 'intervalMin', 'intervalInClose',
-            'slotMin', 'closedDows', 'weeklyClose',
+            'slotMin', 'closedDows', 'weeklyClose', 'weeklyCloseExceptions',
             'bookingWeeks', 'lastMin', 'deadline',
             'createdAt', 'updatedAt'
           ]) &&
@@ -524,6 +528,8 @@ service cloud.firestore {
             request.resource.data.closedDows is list) &&
           (!('weeklyClose' in request.resource.data) ||
             request.resource.data.weeklyClose is list) &&
+          (!('weeklyCloseExceptions' in request.resource.data) ||
+            request.resource.data.weeklyCloseExceptions is list) &&
           (!('bookingWeeks' in request.resource.data) ||
             (request.resource.data.bookingWeeks is int &&
              request.resource.data.bookingWeeks > 0)) &&

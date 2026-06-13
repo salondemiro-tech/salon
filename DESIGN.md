@@ -428,6 +428,24 @@ salons/{salonId}/closeBlocks/{closeBlockId} {
 > - 元の weeklyClose（曜日繰り返し設定）自体は営業時間設定でのみ編集する。
 >   カレンダー上の操作は「その回の例外」を closeBlocks として作るだけで、
 >   繰り返し設定には影響しない（データの矛盾を防ぐ方式A の核心）。
+>
+> ★ 2026/6/13 追補（例外日リスト weeklyCloseExceptions）:
+>   旧実装は「同日同時刻の closeBlocks があれば定期クローズを非表示」にしていたため、
+>   切り出したクローズを削除すると定期クローズが復活する不具合があった。
+>   これを解消するため settings に **weeklyCloseExceptions**（YYYY-MM-DD文字列の配列）
+>   を追加。「この日は定期クローズを適用しない」例外日を明示的に保持する。
+>   - カレンダー描画: 例外日は定期クローズを描画しない（closeBlocksの有無に依存しない）。
+>   - 切り出し: closeBlocks を1件作成し、同時に例外日へ追加。
+>   - 「この日は営業」: closeBlocks を作らず例外日へ追加（その日は終日あく）。
+>   - 「定期クローズに戻す」: 切り出し由来の closeBlocks を削除し、例外日からも外す。
+>   - 例外日リストの更新は dbSalonSetWeeklyCloseExceptions（settings の
+>     weeklyCloseExceptions と updatedAt のみ merge 更新。rules の update は
+>     diff().affectedKeys() 検査なので許可キーのみで通る）。
+>   - **Functions getAvailableSlots も例外日は weeklyClose を適用しない**
+>     （サロンが「営業」にした日に顧客が予約できるようにするため）。
+>   - rules: settings の create/update ホワイトリストに weeklyCloseExceptions（list）追加。
+>   - 顧客アプリ側のスロット表示計算は今回未変更（予約可否の正は Functions 側。
+>     表示の整合は次回反映予定）。
 
 **メニューの読み取り権限ルール（重要）**：
 - `public: true` のメニュー → 認証ユーザーなら誰でも読める（顧客の予約画面で表示するため）

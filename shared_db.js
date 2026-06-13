@@ -704,6 +704,17 @@
         };
       });
     }
+    // ★ 2026/6/13: 定期クローズの例外日リスト（YYYY-MM-DD文字列の配列）。
+    //   カレンダーで「この日だけ定期クローズを外す」ために使う。
+    if (Array.isArray(settings.weeklyCloseExceptions)) {
+      var _wce = [];
+      var _wi;
+      for (_wi = 0; _wi < settings.weeklyCloseExceptions.length; _wi++) {
+        var _d = String(settings.weeklyCloseExceptions[_wi]);
+        if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(_d)) { _wce.push(_d); }
+      }
+      doc.weeklyCloseExceptions = _wce;
+    }
     if (settings.bookingWeeks != null) {
       var bw = parseInt(settings.bookingWeeks, 10);
       if (!isNaN(bw) && bw > 0) { doc.bookingWeeks = bw; }
@@ -715,6 +726,32 @@
       function (ok) { _safeCb(cb, ok ? null : new Error('save failed')); });
   }
   window.dbSaveSettings = dbSaveSettings;
+
+  // ★ 2026/6/13: 定期クローズ例外日リストだけを merge 更新するヘルパー。
+  //   カレンダーから「この日だけ定期クローズを外す/戻す」操作で使う。
+  //   settings 全体を書き直さず weeklyCloseExceptions と updatedAt のみ書く
+  //   （rules は update を diff().affectedKeys() で検査するので許可キーのみで通る）。
+  function dbSalonSetWeeklyCloseExceptions(list, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, new Error('no salon')); return; }
+    var clean = [];
+    if (Array.isArray(list)) {
+      var i;
+      for (i = 0; i < list.length; i++) {
+        var d = String(list[i]);
+        if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(d) && clean.indexOf(d) < 0) {
+          clean.push(d);
+        }
+      }
+    }
+    var doc = {
+      weeklyCloseExceptions: clean,
+      updatedAt: _serverTimestamp()
+    };
+    dbWriteDoc('salons/' + sid + '/config/settings', doc, true,
+      function (ok) { _safeCb(cb, ok ? null : new Error('save failed')); });
+  }
+  window.dbSalonSetWeeklyCloseExceptions = dbSalonSetWeeklyCloseExceptions;
 
   function _defaultSettings() {
     return {

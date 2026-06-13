@@ -657,6 +657,15 @@
         if (typeof cdRaw[kc] === 'number') { closedDows.push(cdRaw[kc]); }
       }
     }
+    // ★ 定期クローズの例外日（この日は定期クローズを描画しない）
+    var wcExceptions = [];
+    var weRaw = settings.weeklyCloseExceptions || [];
+    if (Array.isArray(weRaw)) {
+      var ke;
+      for (ke = 0; ke < weRaw.length; ke++) {
+        wcExceptions.push(String(weRaw[ke]));
+      }
+    }
 
     var oh = timeToHour(openTime);
     var ch = timeToHour(closeTime);
@@ -842,8 +851,10 @@
 
     // ★ 2026/6/13 追加: 定期クローズ（weeklyClose）を各週の該当曜日に
     //   時間帯クローズブロックとして展開描画（方式A）。
-    //   見た目は破線で実クローズと区別。クリックすると「実クローズに切り出す」操作。
-    //   既に同日同時刻の実クローズ（closeBlocks）がある場合は切り出し済みなので描画しない。
+    //   見た目は破線で実クローズと区別。クリックで「実クローズに切り出す」操作。
+    //   例外日リスト（weeklyCloseExceptions）にある日は描画しない
+    //   ＝切り出し済み or 個別に解除された日。これにより closeBlocks を
+    //   削除しても定期クローズが復活しない（バグ修正の核心）。
     var wcList = [];
     if (Array.isArray(weeklyClose)) {
       var wi;
@@ -864,18 +875,11 @@
       var wDay = days[wDi];
       // 終日定休の曜日には定期クローズを重ねない
       if (closedDows.indexOf(wDay.dow) >= 0) { continue; }
+      // 例外日（切り出し済み・解除済み）は定期クローズを描画しない
+      if (wcExceptions.indexOf(wDay.dateKey) >= 0) { continue; }
       var ws2 = timeToHour(wc.start);
       var we2 = timeToHour(wc.end);
       if (ws2 == null || we2 == null || we2 <= ws2) { continue; }
-      // 既に切り出し済み（同日・同start・同endのcloseBlocksが存在）ならスキップ
-      var alreadyCut = false;
-      for (j = 0; j < cbs.length; j++) {
-        if (cbs[j].dateKey === wDay.dateKey &&
-            cbs[j].start === wc.start && cbs[j].end === wc.end) {
-          alreadyCut = true; break;
-        }
-      }
-      if (alreadyCut) { continue; }
       var wHRow = Math.floor(ws2);
       var wAnchor = colAt(wHRow, wDi);
       if (!wAnchor) { continue; }
@@ -908,8 +912,9 @@
     html += '<div class="detail-row"><span class="detail-label">時間</span><span class="detail-value">' + esc(wc.start) + ' 〜 ' + esc(wc.end) + '</span></div>';
     html += '<div class="detail-row"><span class="detail-label">種別</span><span class="detail-value">毎週' + DOWS[wc.dow] + '曜の定期クローズ</span></div>';
     html += '<div class="detail-note" style="margin-top:10px;font-size:11px;color:var(--mu);line-height:1.5;">'
-          + 'これは営業時間設定の「毎週の定期クローズ」です。曜日全体の設定を変えるには営業時間設定から変更してください。'
-          + 'この日だけ削除・短縮・移動したい場合は、下のボタンでこの回を個別のクローズ時間に切り出してください。</div>';
+          + 'これは営業時間設定の「毎週の定期クローズ」です。すべての週で変えるには営業時間設定から変更してください。<br><br>'
+          + '・<b>切り出す</b>＝この日だけ個別のクローズにします。あとで時間を短縮・移動・削除できます。<br>'
+          + '・<b>この日は営業</b>＝この日の定期クローズを外して終日あけます。</div>';
     body.innerHTML = html;
 
     var acts = document.getElementById('detailModalActions');
@@ -921,6 +926,13 @@
       cutBtn.onclick = function () { cutOutWeeklyClose(wcObj, dayObj); };
     })(wc, day);
     acts.appendChild(cutBtn);
+    var openBtn = document.createElement('button');
+    openBtn.className = 'btn btn-danger';
+    openBtn.textContent = 'この日は営業（定期クローズを外す）';
+    (function (dayObj) {
+      openBtn.onclick = function () { releaseWeeklyClose(dayObj); };
+    })(day);
+    acts.appendChild(openBtn);
     var xBtn = document.createElement('button');
     xBtn.className = 'btn btn-ghost';
     xBtn.textContent = '閉じる';
@@ -930,7 +942,33 @@
     document.getElementById('detailModalOv').className = 'modal-ov show';
   }
 
-  // 定期クローズの1回分を closeBlocks に切り出す（その後は通常クローズとして編集・削除可）
+  // 現在の例外日リストを _bundle.settings から取得（コピーを返す）
+  function _currentWcExceptions() {
+    var settings = (_bundle && _bundle.settings) || {};
+    var list = settings.weeklyCloseExceptions || [];
+    var out = [];
+    var i;
+    if (Array.isArray(list)) {
+      for (i = 0; i < list.length; i++) { out.push(String(list[i])); }
+    }
+    return out;
+  }
+
+  // 例外日リストに dateKey を追加して保存（ローカル _bundle にも即反映）
+  function _addWcException(dateKey, cb) {
+    var list = _currentWcExceptions();
+    if (list.indexOf(dateKey) < 0) { list.push(dateKey); }
+    dbSalonSetWeeklyCloseExceptions(list, function (err) {
+      if (!err) {
+        if (!_bundle.settings) { _bundle.settings = {}; }
+        _bundle.settings.weeklyCloseExceptions = list;
+      }
+      _safeCb(cb, err);
+    });
+  }
+
+  // 定期クローズの1回分を closeBlocks に切り出す。
+  // 同時に例外日に追加して、定期クローズの二重表示と「削除で復活」を防ぐ。
   function cutOutWeeklyClose(wc, day) {
     uiShowLoading('切り出し中...');
     dbSalonCreateCloseBlock({
@@ -939,12 +977,34 @@
       end: wc.end,
       reason: '定期クローズ'
     }, function (res) {
-      uiHideLoading();
       if (!res || !res._id) {
+        uiHideLoading();
         uiToast('切り出しに失敗しました');
         return;
       }
-      uiToast('個別クローズに切り出しました。削除・編集できます。');
+      _addWcException(day.dateKey, function (err) {
+        uiHideLoading();
+        if (err) {
+          uiToast('切り出しに失敗しました（例外保存エラー）');
+          return;
+        }
+        uiToast('個別クローズに切り出しました。短縮・移動・削除できます。');
+        closeDetailModal();
+        loadWeek();
+      });
+    });
+  }
+
+  // この日の定期クローズを外して終日あける（closeBlocksは作らない）
+  function releaseWeeklyClose(day) {
+    uiShowLoading('変更中...');
+    _addWcException(day.dateKey, function (err) {
+      uiHideLoading();
+      if (err) {
+        uiToast('変更に失敗しました');
+        return;
+      }
+      uiToast('この日の定期クローズを外しました。');
       closeDetailModal();
       loadWeek();
     });
@@ -1069,6 +1129,17 @@
       dBtn.onclick = function () { deleteCloseBlock(cb); };
     })(closeBlock);
     acts.appendChild(dBtn);
+    // ★ この日が定期クローズの例外日（切り出し由来）なら「定期クローズに戻す」を出す。
+    //   このクローズを削除しつつ例外日も解除 → 翌週以降と同じ定期クローズ表示に戻る。
+    if (_currentWcExceptions().indexOf(closeBlock.dateKey) >= 0) {
+      var rBtn = document.createElement('button');
+      rBtn.className = 'btn btn-ghost';
+      rBtn.textContent = '定期クローズに戻す';
+      (function (cb) {
+        rBtn.onclick = function () { restoreWeeklyClose(cb); };
+      })(closeBlock);
+      acts.appendChild(rBtn);
+    }
     var xBtn = document.createElement('button');
     xBtn.className = 'btn btn-ghost';
     xBtn.textContent = '閉じる';
@@ -1076,6 +1147,34 @@
     acts.appendChild(xBtn);
 
     document.getElementById('detailModalOv').className = 'modal-ov show';
+  }
+
+  // この日を定期クローズに戻す：切り出しで作った closeBlock を削除し、例外日も解除。
+  function restoreWeeklyClose(closeBlock) {
+    if (!window.confirm('この日を定期クローズに戻しますか？\n（個別のクローズは削除されます）')) { return; }
+    uiShowLoading('戻しています...');
+    dbSalonDeleteCloseBlock(closeBlock._id, function (ok) {
+      if (!ok) {
+        uiHideLoading();
+        uiToast('戻す処理に失敗しました');
+        return;
+      }
+      var list = _currentWcExceptions();
+      var idx = list.indexOf(closeBlock.dateKey);
+      if (idx >= 0) { list.splice(idx, 1); }
+      dbSalonSetWeeklyCloseExceptions(list, function (err) {
+        uiHideLoading();
+        if (err) {
+          uiToast('戻す処理に失敗しました（例外解除エラー）');
+          return;
+        }
+        if (!_bundle.settings) { _bundle.settings = {}; }
+        _bundle.settings.weeklyCloseExceptions = list;
+        uiToast('定期クローズに戻しました。');
+        closeDetailModal();
+        loadWeek();
+      });
+    });
   }
 
   function closeDetailModal() {
