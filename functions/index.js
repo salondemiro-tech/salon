@@ -504,10 +504,58 @@ exports.onAppointmentUpdate = onDocumentUpdated(
 
       const dateLabel = formatJpDate(dateKey);
       const menuName  = menuNameSnapshot || '';
-      const feeText   = cancelFee > 0
-        ? '<p style="color:#c47b7b;font-weight:600;">キャンセル料: ¥' + cancelFee.toLocaleString() + '（' + cancelPercent + '%）</p>'
-          + (pol.qrUrl ? '<p><a href="' + pol.qrUrl + '">お支払いはこちら</a></p>' : '')
-        : '';
+
+      // ★ 2026/6/13: キャンセル料発生時の自動送信メッセージ（pol.qrMsg）対応。
+      //   サロンが設定画面で入力した本文を変数置換して使う。
+      //   未設定（空）なら従来の固定文面にフォールバック。
+      //   使える変数: {顧客名} {予約日時} {メニュー} {キャンセル料} {決済リンク}
+      //   （旧 {QRリンク} も後方互換で受け付ける）
+      function buildFeeText() {
+        if (cancelFee <= 0) return '';
+
+        // 固定のキャンセル料行（金額の明示は必ず入れる）
+        const feeLine = '<p style="color:#c47b7b;font-weight:600;">キャンセル料: ¥'
+          + cancelFee.toLocaleString() + '（' + cancelPercent + '%）</p>';
+
+        const qrMsgRaw = (typeof pol.qrMsg === 'string') ? pol.qrMsg.trim() : '';
+
+        // qrMsg 未設定: 従来通り（固定行＋QRリンク）
+        if (!qrMsgRaw) {
+          return feeLine
+            + (pol.qrUrl ? '<p><a href="' + escapeHtml(pol.qrUrl) + '">お支払いはこちら</a></p>' : '');
+        }
+
+        // qrMsg 設定済み: 変数置換（テキスト変数を先に置換 → 全体をHTMLエスケープ
+        //   → 改行を<br>化 → 最後に {QRリンク} をリンクHTMLへ差し替え）
+        let msg = qrMsgRaw
+          .split('{顧客名}').join(customer.name || '')
+          .split('{予約日時}').join(dateLabel + ' ' + (start || ''))
+          .split('{メニュー}').join(menuName)
+          .split('{キャンセル料}').join('¥' + cancelFee.toLocaleString() + '（' + cancelPercent + '%）');
+
+        let msgHtml = escapeHtml(msg).replace(/\r?\n/g, '<br>');
+
+        const qrLinkHtml = pol.qrUrl
+          ? '<a href="' + escapeHtml(pol.qrUrl) + '">お支払いはこちら</a>'
+          : '';
+        // {決済リンク} を主変数とする。旧 {QRリンク} も後方互換で受け付ける。
+        const hasLinkVar = (msgHtml.indexOf('{決済リンク}') >= 0) ||
+                           (msgHtml.indexOf('{QRリンク}') >= 0);
+        if (hasLinkVar) {
+          msgHtml = msgHtml.split('{決済リンク}').join(qrLinkHtml)
+                           .split('{QRリンク}').join(qrLinkHtml);
+        } else if (qrLinkHtml) {
+          // リンク変数を書き忘れていても、URLが設定されていれば末尾に付ける
+          msgHtml += '<br><br>' + qrLinkHtml;
+        }
+
+        return feeLine
+          + '<div style="background:#fdf6e3;border-radius:10px;padding:14px 18px;margin:14px 0;">'
+          + msgHtml
+          + '</div>';
+      }
+
+      const feeText = buildFeeText();
 
       function buildCancelCustomerHtml() {
         return '<div style="font-family:sans-serif;color:#1a1a18;line-height:1.7;max-width:560px;">'
