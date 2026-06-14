@@ -1131,9 +1131,13 @@
       dBtn.onclick = function () { deleteCloseBlock(cb); };
     })(closeBlock);
     acts.appendChild(dBtn);
-    // ★ この日が定期クローズの例外日（切り出し由来）なら「定期クローズに戻す」を出す。
-    //   このクローズを削除しつつ例外日も解除 → 翌週以降と同じ定期クローズ表示に戻る。
-    if (_currentWcExceptions().indexOf(closeBlock.dateKey) >= 0) {
+    // ★ 2026/6/14 ③バグ修正: 「定期クローズに戻す」は切り出し由来のクローズだけに出す。
+    //   旧実装は「その日が例外日か」だけで判定していたため、同じ日にある通常クローズにも
+    //   ボタンが出てしまった。条件を厳密化:
+    //   (1) その日が定期クローズの例外日 かつ
+    //   (2) このクローズの時間帯が、その曜日の定期クローズ(weeklyClose)の時間帯と一致
+    //   の両方を満たすクローズ＝切り出しで作られたものだけに表示する。
+    if (_isCutOutCloseBlock(closeBlock)) {
       var rBtn = document.createElement('button');
       rBtn.className = 'btn btn-ghost';
       rBtn.textContent = '定期クローズに戻す';
@@ -1152,6 +1156,20 @@
   }
 
   // この日を定期クローズに戻す：切り出しで作った closeBlock を削除し、例外日も解除。
+  // 切り出し由来のクローズか判定（例外日 かつ その曜日の定期クローズ時間帯と一致）
+  function _isCutOutCloseBlock(closeBlock) {
+    if (!closeBlock) { return false; }
+    if (_currentWcExceptions().indexOf(closeBlock.dateKey) < 0) { return false; }
+    var bands = _weeklyCloseBandsFor(closeBlock.dateKey);
+    var i;
+    for (i = 0; i < bands.length; i++) {
+      if (bands[i].start === closeBlock.start && bands[i].end === closeBlock.end) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   function restoreWeeklyClose(closeBlock) {
     if (!window.confirm('この日を定期クローズに戻しますか？\n（個別のクローズは削除されます）')) { return; }
     uiShowLoading('戻しています...');
@@ -1421,22 +1439,61 @@
     var sel = document.getElementById('bMenu');
     sel.innerHTML = '';
     var menus = (_bundle && _bundle.menus) ? _bundle.menus : [];
-    var i, hasAny = false;
+    // ★ 2026/6/14 ①: メインメニューをカテゴリ別（フェイシャル/ボディ/その他）に
+    //   optgroup でグループ表示。メニュー設定・顧客アプリと同じ分類ルール。
+    //   category 未設定は「その他」。存在カテゴリが1種類だけならグループ見出しなし。
+    var mains = [];
+    var i;
     for (i = 0; i < menus.length; i++) {
       if (menus[i].type === 'option') { continue; }
       if (menus[i].public === false) { continue; }
-      var op = document.createElement('option');
-      op.value = menus[i]._id;
-      op.textContent = menus[i].name +
-        (menus[i].duration ? '（' + menus[i].duration + '分）' : '');
-      sel.appendChild(op);
-      hasAny = true;
+      mains.push(menus[i]);
     }
-    if (!hasAny) {
+    function _menuOptionEl(m) {
+      var op = document.createElement('option');
+      op.value = m._id;
+      op.textContent = m.name + (m.duration ? '（' + m.duration + '分）' : '');
+      return op;
+    }
+    function _catKeyOf(m) {
+      return (m && (m.category === 'facial' || m.category === 'body')) ? m.category : 'other';
+    }
+    if (mains.length === 0) {
       var op0 = document.createElement('option');
       op0.value = '';
       op0.textContent = '（メニューが登録されていません）';
       sel.appendChild(op0);
+    } else {
+      var catDefs = [
+        { key: 'facial', label: 'フェイシャル' },
+        { key: 'body', label: 'ボディ' },
+        { key: 'other', label: 'その他' }
+      ];
+      var groups = { facial: [], body: [], other: [] };
+      for (i = 0; i < mains.length; i++) {
+        groups[_catKeyOf(mains[i])].push(mains[i]);
+      }
+      var usedCats = 0, g, gi;
+      for (g = 0; g < catDefs.length; g++) {
+        if (groups[catDefs[g].key].length > 0) { usedCats++; }
+      }
+      var useGroups = (usedCats >= 2);
+      for (g = 0; g < catDefs.length; g++) {
+        var glist = groups[catDefs[g].key];
+        if (glist.length === 0) { continue; }
+        if (useGroups) {
+          var og = document.createElement('optgroup');
+          og.label = catDefs[g].label;
+          for (gi = 0; gi < glist.length; gi++) {
+            og.appendChild(_menuOptionEl(glist[gi]));
+          }
+          sel.appendChild(og);
+        } else {
+          for (gi = 0; gi < glist.length; gi++) {
+            sel.appendChild(_menuOptionEl(glist[gi]));
+          }
+        }
+      }
     }
 
     _optionSelects = [];
@@ -1880,12 +1937,26 @@
 
   // ===== イベント =====
   document.getElementById('custSearchInp').addEventListener('input', onCustSearchInput);
-  document.getElementById('modalOv').addEventListener('click', function (e) {
-    if (e.target === this) { closeModal(); }
-  });
-  document.getElementById('detailModalOv').addEventListener('click', function (e) {
-    if (e.target === this) { closeDetailModal(); }
-  });
+  // ★ 2026/6/14 ②バグ修正: iPadで入力欄（理由など）をタップするとモーダルが
+  //   閉じてしまう問題に対応。クリックだけで判定すると、ソフトキーボード表示に伴う
+  //   レイアウト変化で合成クリックが背景に当たり閉じることがある。
+  //   「押し始め(down)も背景、離した(click)も背景」のときだけ閉じる方式に変更。
+  (function () {
+    var modalOv = document.getElementById('modalOv');
+    var detailOv = document.getElementById('detailModalOv');
+    function markModal(v) { markModal.flag = v; }
+    function markDetail(v) { markDetail.flag = v; }
+    modalOv.addEventListener('mousedown', function (e) { markModal(e.target === modalOv); });
+    modalOv.addEventListener('touchstart', function (e) { markModal(e.target === modalOv); }, { passive: true });
+    modalOv.addEventListener('click', function (e) {
+      if (e.target === modalOv && markModal.flag) { closeModal(); }
+    });
+    detailOv.addEventListener('mousedown', function (e) { markDetail(e.target === detailOv); });
+    detailOv.addEventListener('touchstart', function (e) { markDetail(e.target === detailOv); }, { passive: true });
+    detailOv.addEventListener('click', function (e) {
+      if (e.target === detailOv && markDetail.flag) { closeDetailModal(); }
+    });
+  })();
 
   // ===== 起動 =====
   _weekStart = getTodayStart();
