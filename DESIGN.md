@@ -1354,7 +1354,294 @@ sendChangeNotification(customerDocId, oldAppointment, newAppointment, cb);
 - G-5. サポート体制（問い合わせフォーム）
 
 ### Phase H：LINE連携追加（販売後、PC環境が整ってから）
+
 ### Phase I：複数人版（フェーズ2）追加
+
+★ 2026/6/19 設計着手。方針決定済み。
+
+#### Phase I 設計方針
+
+- **対象規模**：2〜10人（小規模〜中規模、同一設計でカバー）
+- **権限モデル**：全スタッフが全予約を閲覧・編集可能。`role` フィールドは参考情報のみ（ルール上の制限なし）
+- **フェーズ1との互換性**：フェーズ1の既存データ・コード・ルールを壊さず「追加だけ」で移行する
+- **前提**：フェーズ1で `staffs/owner`・`appointments.staffId`・`editingBy` の箱はすでに用意済み
+
+---
+
+#### Phase I-1：DBスキーマ追加
+
+##### 新規コレクション：`salons/{salonId}/staffs/{staffId}`
+
+フェーズ1では `staffs/owner` 1件のみ存在。フェーズ2でスタッフを追加するだけ。
+
+```
+{
+  uid: "<Auth UID>",           // このスタッフの Firebase Auth UID
+  name: "山田 花子",            // 表示名
+  role: "staff",               // "owner" | "staff"（参考情報のみ、権限制御には使わない）
+  color: "#F4A8B2",            // カレンダー表示色（スタッフ識別用）
+  active: true,                // false = 退職・非表示
+  createdAt: <Timestamp>,
+  updatedAt: <Timestamp>
+}
+```
+
+- `staffId` = スタッフの Auth UID（`staffs/owner` のパターンを踏襲しない）
+  - フェーズ1の `staffs/owner` は残留させる（doc ID が文字列 'owner' のまま）
+  - フェーズ2の新スタッフは `staffs/{Auth UID}` として追加
+  - 既存の `isSalonStaff()` ルール関数は `staffs/{request.auth.uid}` の存在チェックなので、そのまま機能する
+
+##### 新規コレクション：`salons/{salonId}/resources/{resourceId}`
+
+設備・スペース（フェーズ1では `resources/default` 1件のみ、フェーズ2で追加）
+
+```
+{
+  name: "施術ベッド1",
+  type: "bed",                 // "bed" | "room" | "chair" | "other"
+  active: true,
+  createdAt: <Timestamp>
+}
+```
+
+##### 新規コレクション：`salons/{salonId}/shifts/{shiftId}`
+
+スタッフ別の出勤スケジュール（フェーズ1では「営業時間 = オーナーのシフト」として扱い不要だったが、フェーズ2では個人シフトが必要）
+
+```
+{
+  staffId: "<Auth UID>",       // 対象スタッフ
+  date: "2026-07-01",          // YYYY-MM-DD
+  startTime: "10:00",
+  endTime: "19:00",
+  isOff: false,                // true = この日は休み
+  createdAt: <Timestamp>
+}
+```
+
+- シフト未登録のスタッフは「営業時間と同じシフト」として扱う（デフォルト動作）
+- `shifts` が存在する日だけ個別シフト扱い
+
+##### `appointments` の変更（既存フィールドの活用）
+
+フェーズ1ですでに `staffId: 'owner'` で保存されている。フェーズ2では動的に設定する。
+
+```
+{
+  staffId: "<Auth UID>",       // フェーズ1: 'owner' 固定 → フェーズ2: 実際のUID
+  resourceIds: ["<resourceId>"], // フェーズ1: ['default'] 固定 → フェーズ2: 実際のID
+  editingBy: null,             // フェーズ1: null 固定 → フェーズ2: 警告表示用（任意実装）
+  // ... 他フィールドは変更なし
+}
+```
+
+##### `menus` の変更（既存フィールドの活用）
+
+```
+{
+  eligibleStaffIds: ["<uid1>", "<uid2>"],  // フェーズ1: ['owner'] → フェーズ2: 実際のUID配列
+  requiredResourceIds: ["<resourceId>"],   // フェーズ1: ['default'] → フェーズ2: 実際のID
+  // ... 他フィールドは変更なし
+}
+```
+
+---
+
+#### Phase I-2：Firestoreルール追加
+
+フェーズ1のルールは **変更しない**。以下を追記するだけ。
+
+```
+// staffs コレクション：読み取りはサロンスタッフ全員、書き込みはオーナーのみ
+match /staffs/{staffId} {
+  allow read: if isSalonStaff(salonId);
+  allow write: if isSalonOwner(salonId);
+}
+
+// resources コレクション
+match /resources/{resourceId} {
+  allow read: if isSalonStaff(salonId);
+  allow write: if isSalonStaff(salonId);
+}
+
+// shifts コレクション
+match /shifts/{shiftId} {
+  allow read: if isSalonStaff(salonId);
+  allow write: if isSalonStaff(salonId);
+}
+```
+
+`isSalonOwner()` の定義：
+
+```javascript
+function isSalonOwner(salonId) {
+  // staffs/owner の uid フィールドが request.auth.uid と一致するか
+  // または Auth UID = salonId（フェーズ1の既存チェック）
+  return request.auth.uid == salonId;
+}
+```
+
+`appointments` の書き込みルール変更点：
+- フェーズ1：`staffId` は必ず `'owner'` に限定（`request.resource.data.staffId == 'owner'`）
+- フェーズ2：`staffId` が `staffs` コレクションに存在するドキュメントIDであることをチェック
+- ★ この変更は `appointments` ルールの修正が必要（フェーズ1の唯一の破壊的変更）
+
+```javascript
+// フェーズ2での appointments 書き込み条件
+function isValidStaffId(salonId, staffId) {
+  return staffId == 'owner' ||  // フェーズ1互換
+    exists(/databases/$(database)/documents/salons/$(salonId)/staffs/$(staffId));
+}
+```
+
+---
+
+#### Phase I-3：新規画面
+
+| 画面ファイル | 機能 | 優先度 |
+|---|---|---|
+| `salon_staff_v1.html` | スタッフ一覧・追加・編集・無効化 | 最高 |
+| `salon_resource_v1.html` | 設備・スペース管理 | 中（設備なしサロンは不要） |
+| `salon_shift_v1.html` | スタッフ別シフト管理（週ビュー） | 高 |
+
+##### `salon_staff_v1.html` の機能要件
+
+1. スタッフ一覧（名前・色・role・active状態）
+2. スタッフ追加：メールアドレスで招待 → Firebase Auth でアカウント作成 → `staffs/{uid}` 追加
+3. スタッフ編集：名前・色変更
+4. スタッフ無効化：`active: false` にする（削除はしない、過去予約が残るため）
+5. オーナー自身は無効化・削除不可
+
+##### 招待フロー（スタッフ追加）
+
+```
+オーナーが「スタッフ追加」→ メールアドレス入力
+→ Cloud Function: inviteStaff
+  1. Firebase Auth でユーザー作成（または既存検索）
+  2. `staffs/{uid}` ドキュメント作成
+  3. 招待メール送信（ログインURLと初期PW）
+→ スタッフがメールのURLからログイン → PWを変更
+```
+
+- スタッフの Auth UID != salonId（別アカウント）
+- スタッフは `salons/{salonId}/staffs/{uid}` に自分のドキュメントがあることで「このサロンのスタッフ」と認識される
+- **複数サロン所属**：将来的には1人のスタッフが複数サロンの `staffs` コレクションに存在できる（現時点では設計のみ、実装は据え置き）
+
+---
+
+#### Phase I-4：既存画面の改修
+
+| 画面 | 変更内容 |
+|---|---|
+| `salon_calendar_v8.html` | スタッフ別カラー表示、スタッフフィルタ切り替え |
+| `salon_menus_v1.html` | メニューに「担当可能スタッフ」選択UI追加 |
+| `customer_app_v2.html` | 予約時「スタッフ指名」オプション追加（任意） |
+| `shared_db_reservation.js` | `getAvailableSlots` をスタッフ別空き計算に対応 |
+| `shared_db.js` | 主要読み取り関数を `onSnapshot` 対応に切り替え |
+
+##### カレンダー改修方針
+
+- 現在：全予約を時系列で1列表示
+- フェーズ2：スタッフ別に列を分けた「横並び」表示（グーグルカレンダーのコラムビュー）
+- ★ これはUIの大幅変更。既存の週ビューと別タブか、トグルで切り替える
+
+##### `getAvailableSlots` 改修方針
+
+現在：`staffId='owner'` 固定で空き計算
+フェーズ2：
+```
+指名あり → 特定スタッフの空きだけ計算
+指名なし → 全スタッフの「誰かが空いている」スロットを計算
+          → 予約確定時にシステムが自動でスタッフをアサイン
+```
+
+自動アサインルール（シンプルな実装）：
+1. そのスロットで空いているスタッフ一覧を取得
+2. その日の予約件数が最も少ないスタッフを選択（負荷均等化）
+3. 同数なら `staffs` ドキュメントの `createdAt` 順（古い方）
+
+---
+
+#### Phase I-5：`onSnapshot` 移行計画
+
+フェーズ1では全部 `get()`（1回読み取り）。フェーズ2では複数スタッフが同時編集するため、リアルタイム同期が必要。
+
+**移行対象（優先度順）**：
+
+| 関数 | 現在 | フェーズ2 |
+|---|---|---|
+| `dbSalonGetCalendarWeek` | `get()` | `onSnapshot()` |
+| `dbSalonGetAppointment` | `get()` | `onSnapshot()` |
+| `dbSalonGetCustomers` | `get()` | `get()` のまま（一覧は重すぎるため） |
+
+**移行パターン**（`shared_db.js` の実装規約）：
+
+```javascript
+// フェーズ1（get）
+function dbSalonGetCalendarWeek(salonId, startKey, endKey, cb) {
+  db.collection(...)
+    .where(...)
+    .get()
+    .then(function(snap) { _safeCb(cb, null, rows); })
+    .catch(function(e) { _safeCb(cb, e); });
+}
+
+// フェーズ2（onSnapshot）
+function dbSalonWatchCalendarWeek(salonId, startKey, endKey, cb) {
+  return db.collection(...)   // unsubscribe 関数を return する
+    .where(...)
+    .onSnapshot(function(snap) { _safeCb(cb, null, rows); },
+                function(e) { _safeCb(cb, e); });
+}
+// 呼び出し側：var unsub = dbSalonWatchCalendarWeek(...); // 画面離脱時に unsub() を呼ぶ
+```
+
+- `get` 版は残す（フェーズ1画面との互換のため）
+- `watch` 版を新規追加する（フェーズ2画面が使用）
+
+---
+
+#### Phase I-6：編集ロック（editingBy）
+
+DESIGN_NOTES.md §6 の方針を引き継ぐ：
+
+- フェーズ2当初は「**警告だけ出す**」レベルで実装
+- 完全ロック（他スタッフが編集できない）は実装しない（Firestoreの整合性問題があるため）
+
+実装仕様：
+```
+予約詳細を開いた時 → editingBy: { uid: '<myUid>', name: '山田', at: <Timestamp> } をセット
+予約詳細を閉じた時 → editingBy: null にリセット
+別スタッフが同じ予約を開いた時 → 「山田が編集中です」ダイアログを表示（OK で続行可）
+```
+
+- `at` が5分以上前なら「誰かが編集中」表示を無視（クラッシュなどで残留した場合）
+- Firestoreルールで `editingBy` フィールドのみ別途 `allow update` を許可する必要あり
+
+---
+
+#### Phase I 実装順序
+
+```
+I-step0: DESIGN.md フェーズ2設計追記（← 今ここ）
+I-step1: Firestoreルール追加（staffs / resources / shifts / appointments改修）
+I-step2: Cloud Function: inviteStaff 実装
+I-step3: salon_staff_v1.html 実装（スタッフ一覧・追加・無効化）
+I-step4: salon_shift_v1.html 実装（シフト管理）
+I-step5: shared_db_reservation.js 改修（getAvailableSlots のスタッフ対応）
+I-step6: salon_calendar_v8.html 改修（スタッフ別カラー・列表示）
+I-step7: shared_db.js onSnapshot 対応（watchCalendarWeek など）
+I-step8: salon_menus_v1.html 改修（担当スタッフ選択UI）
+I-step9: customer_app_v2.html 改修（指名オプション）
+I-step10: 全体テスト（2サロン × 複数スタッフ）
+```
+
+#### Phase I 未解決事項（実装時に決定）
+
+1. **Stripe プラン分け**：フェーズ2（複数人用）は別料金プランにするか？スタッフ人数課金か？
+2. **スタッフのログイン画面**：`salon_auth_v2_new.html` をそのまま使うか、スタッフ専用URLにするか
+3. **salon_resource_v1.html の優先度**：設備が1部屋しかないサロン（大多数）には不要。後回しにして I-step4 以降に入れる
+4. **Auth UID = salonId 設計の置き換え**：フェーズ2以降は `salons/{salonId}.ownerUid` 分離が本来の正解。現実装のままで販売後の課題として先送り
 
 ---
 
