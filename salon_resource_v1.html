@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TORITA - 設備設定</title>
+<!--
+  salon_resource_v1.html  -  TORITA Phase I-step3
+  作成: 2026/6/19
+  機能:
+    - 設備一覧表示
+    - 設備追加（名前・タイプ）
+    - 設備名・タイプの編集
+    - 設備削除（resources/default は削除不可）
+  DB: salons/{salonId}/resources/{resourceId}
+    フィールド: name, type, active, createdAt, updatedAt
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --rd:#c47b7b; --rl:#faeaea;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2); color:var(--tx);
+    -webkit-text-size-adjust:100%; min-height:100vh;
+  }
+  .topbar{
+    background:#fff; border-bottom:1px solid var(--bd);
+    padding:12px 20px;
+    display:flex; align-items:center; gap:12px;
+    position:sticky; top:0; z-index:10;
+  }
+  .back-btn{
+    background:none; border:none; font-size:20px;
+    cursor:pointer; padding:4px 6px; color:var(--ac); line-height:1;
+  }
+  .page-title{ font-size:16px; font-weight:600; color:var(--ad); flex:1; }
+
+  .wrap{max-width:600px; margin:0 auto; padding:22px 18px 60px;}
+
+  .add-btn{
+    width:100%; padding:14px;
+    background:var(--ac); color:#fff;
+    border:none; border-radius:12px;
+    font-size:15px; font-weight:600;
+    cursor:pointer; font-family:inherit;
+    margin-bottom:20px;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .add-btn:active{ opacity:.85; }
+  .add-btn:disabled{ opacity:.5; cursor:default; }
+
+  .resource-list{ display:flex; flex-direction:column; gap:10px; }
+
+  .resource-card{
+    background:#fff; border-radius:14px;
+    border:1px solid var(--bd);
+    padding:16px 18px;
+    display:flex; align-items:center; gap:14px;
+  }
+  .resource-ico{ font-size:28px; flex-shrink:0; line-height:1; }
+  .resource-info{ flex:1; min-width:0; }
+  .resource-name{
+    font-size:15px; font-weight:600; color:var(--ad);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .resource-type{
+    font-size:11.5px; color:var(--mu); margin-top:2px;
+  }
+  .resource-actions{ display:flex; gap:8px; flex-shrink:0; }
+  .icon-btn{
+    background:none; border:1.5px solid var(--bd);
+    border-radius:8px; padding:7px 10px;
+    font-size:14px; cursor:pointer;
+    font-family:inherit; color:var(--mu);
+    transition:border-color .12s, color .12s;
+  }
+  .icon-btn:hover{ border-color:var(--ac); color:var(--ac); }
+  .icon-btn.del:hover{ border-color:var(--rd); color:var(--rd); }
+  .icon-btn:disabled{ opacity:.4; cursor:default; }
+
+  .empty-state{
+    text-align:center; padding:48px 20px;
+    color:var(--mu); font-size:14px; line-height:2;
+  }
+  .empty-ico{ font-size:40px; margin-bottom:12px; }
+
+  /* モーダル */
+  .modal-overlay{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,.45); z-index:100;
+    display:flex; align-items:center; justify-content:center; padding:20px;
+  }
+  .modal{
+    background:#fff; border-radius:18px;
+    padding:26px 24px; width:100%; max-width:420px;
+    box-shadow:0 20px 60px rgba(0,0,0,.2);
+  }
+  .modal-title{ font-size:17px; font-weight:600; color:var(--ad); margin-bottom:20px; }
+  .form-row{ margin-bottom:16px; }
+  .form-label{
+    display:block; font-size:12px; color:var(--ac);
+    font-weight:600; margin-bottom:6px; letter-spacing:.04em;
+  }
+  .form-input{
+    width:100%; border:1.5px solid var(--bd);
+    border-radius:9px; padding:10px 12px;
+    font-size:14px; font-family:inherit; color:var(--tx);
+    background:#fff; outline:none; -webkit-appearance:none;
+  }
+  .form-input:focus{ border-color:var(--ac); }
+
+  /* タイプ選択ボタン */
+  .type-grid{
+    display:grid; grid-template-columns:repeat(2,1fr); gap:8px;
+  }
+  .type-btn{
+    border:1.5px solid var(--bd); border-radius:10px;
+    padding:10px 8px; text-align:center;
+    cursor:pointer; background:#fff;
+    font-family:inherit; font-size:13px; color:var(--mu);
+    transition:border-color .12s, background .12s, color .12s;
+  }
+  .type-btn.selected{
+    border-color:var(--ac); background:var(--al); color:var(--ad);
+    font-weight:600;
+  }
+  .type-btn-ico{ font-size:22px; display:block; margin-bottom:4px; }
+
+  .modal-actions{ display:flex; gap:10px; margin-top:22px; }
+  .btn-cancel{
+    flex:1; padding:12px;
+    background:none; border:1.5px solid var(--bd);
+    border-radius:10px; font-size:14px;
+    cursor:pointer; font-family:inherit; color:var(--mu);
+  }
+  .btn-save{
+    flex:2; padding:12px;
+    background:var(--ac); color:#fff;
+    border:none; border-radius:10px; font-size:14px;
+    font-weight:600; cursor:pointer; font-family:inherit;
+  }
+  .btn-save:disabled{ opacity:.5; cursor:default; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back-btn" onclick="history.back()">&#8592;</button>
+  <div class="page-title">設備設定</div>
+</div>
+
+<div class="wrap">
+  <button class="add-btn" id="addBtn" onclick="openAddModal()">
+    &#43; 設備を追加
+  </button>
+  <div class="resource-list" id="resourceList"></div>
+</div>
+
+<!-- 追加・編集モーダル -->
+<div class="modal-overlay" id="modalOverlay" style="display:none;" onclick="overlayClick(event)">
+  <div class="modal">
+    <div class="modal-title" id="modalTitle">設備を追加</div>
+
+    <div class="form-row">
+      <label class="form-label">設備名（例：ベッド1、施術室A）</label>
+      <input class="form-input" id="inputName" type="text" maxlength="20" placeholder="例：ベッド1">
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">タイプ</label>
+      <div class="type-grid" id="typeGrid"></div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn-cancel" onclick="closeModal()">キャンセル</button>
+      <button class="btn-save" id="saveBtn" onclick="saveResource()">追加する</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_ui.js"></script>
+
+<script>
+(function () {
+
+  var TYPES = [
+    { value: 'bed',   label: 'ベッド',   ico: '\uD83D\uDECB\uFE0F' },
+    { value: 'chair', label: 'チェア',   ico: '\uD83E\uDE91' },
+    { value: 'room',  label: '個室',     ico: '\uD83D\uDEAA' },
+    { value: 'other', label: 'その他',   ico: '\uD83D\uDCE6' }
+  ];
+
+  var TYPE_LABELS = { bed: 'ベッド', chair: 'チェア', room: '個室', other: 'その他' };
+  var TYPE_ICOS   = { bed: '\uD83D\uDECB\uFE0F', chair: '\uD83E\uDE91', room: '\uD83D\uDEAA', other: '\uD83D\uDCE6' };
+
+  var _salonId = null;
+  var _resourceList = [];
+  var _editingId = null;
+  var _selectedType = 'bed';
+
+  /* ===== 起動 ===== */
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (!isStaff) { window.location.href = 'salon_auth_v2_new.html'; return; }
+      var user = firebase.auth().currentUser;
+      _salonId = user ? user.uid : null;
+      if (!_salonId) { window.location.href = 'salon_auth_v2_new.html'; return; }
+      buildTypeGrid();
+      loadList();
+    });
+  });
+
+  /* ===== タイプグリッド生成 ===== */
+  function buildTypeGrid() {
+    var grid = document.getElementById('typeGrid');
+    grid.innerHTML = '';
+    for (var i = 0; i < TYPES.length; i++) {
+      (function (t) {
+        var btn = document.createElement('button');
+        btn.className = 'type-btn' + (t.value === _selectedType ? ' selected' : '');
+        btn.innerHTML = '<span class="type-btn-ico">' + t.ico + '</span>' + t.label;
+        btn.onclick = function () { selectType(t.value); };
+        grid.appendChild(btn);
+      })(TYPES[i]);
+    }
+  }
+
+  function selectType(value) {
+    _selectedType = value;
+    var btns = document.querySelectorAll('.type-btn');
+    for (var i = 0; i < TYPES.length; i++) {
+      btns[i].className = 'type-btn' + (TYPES[i].value === value ? ' selected' : '');
+    }
+  }
+
+  /* ===== 一覧ロード ===== */
+  function loadList() {
+    uiShowLoading('読み込み中...');
+    firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('resources')
+      .orderBy('createdAt', 'asc')
+      .get()
+      .then(function (snap) {
+        uiForceHideLoading();
+        _resourceList = [];
+        snap.forEach(function (doc) {
+          _resourceList.push({ id: doc.id, data: doc.data() });
+        });
+        renderList();
+      })
+      .catch(function (e) {
+        uiForceHideLoading();
+        uiToast('読み込みに失敗しました: ' + e.message);
+      });
+  }
+
+  /* ===== 一覧描画 ===== */
+  function renderList() {
+    var list = document.getElementById('resourceList');
+    list.innerHTML = '';
+
+    /* default ドキュメントは表示しない（フェーズ1残留） */
+    var displayList = [];
+    for (var i = 0; i < _resourceList.length; i++) {
+      if (_resourceList[i].id !== 'default') {
+        displayList.push(_resourceList[i]);
+      }
+    }
+
+    if (displayList.length === 0) {
+      list.innerHTML =
+        '<div class="empty-state">' +
+          '<div class="empty-ico">\uD83D\uDECB\uFE0F</div>' +
+          '設備がまだ登録されていません<br>' +
+          '「設備を追加」から登録してください<br>' +
+          '<span style="font-size:12px;color:#aaa;">例：ベッド1、施術ベッドA、個室1</span>' +
+        '</div>';
+      return;
+    }
+
+    for (var j = 0; j < displayList.length; j++) {
+      list.appendChild(buildCard(displayList[j]));
+    }
+  }
+
+  function buildCard(item) {
+    var d = item.data;
+    var card = document.createElement('div');
+    card.className = 'resource-card';
+
+    var ico = document.createElement('div');
+    ico.className = 'resource-ico';
+    ico.textContent = TYPE_ICOS[d.type] || '\uD83D\uDCE6';
+    card.appendChild(ico);
+
+    var info = document.createElement('div');
+    info.className = 'resource-info';
+    var name = document.createElement('div');
+    name.className = 'resource-name';
+    name.textContent = d.name || '（名前なし）';
+    info.appendChild(name);
+    var type = document.createElement('div');
+    type.className = 'resource-type';
+    type.textContent = TYPE_LABELS[d.type] || 'その他';
+    info.appendChild(type);
+    card.appendChild(info);
+
+    var actions = document.createElement('div');
+    actions.className = 'resource-actions';
+
+    var editBtn = document.createElement('button');
+    editBtn.className = 'icon-btn';
+    editBtn.textContent = '\u270F\uFE0F';
+    editBtn.title = '編集';
+    editBtn.onclick = (function (id, data) {
+      return function () { openEditModal(id, data); };
+    })(item.id, d);
+    actions.appendChild(editBtn);
+
+    var delBtn = document.createElement('button');
+    delBtn.className = 'icon-btn del';
+    delBtn.textContent = '\uD83D\uDDD1\uFE0F';
+    delBtn.title = '削除';
+    delBtn.onclick = (function (id, data) {
+      return function () { confirmDelete(id, data); };
+    })(item.id, d);
+    actions.appendChild(delBtn);
+
+    card.appendChild(actions);
+    return card;
+  }
+
+  /* ===== モーダル：追加 ===== */
+  function openAddModal() {
+    _editingId = null;
+    _selectedType = 'bed';
+    document.getElementById('modalTitle').textContent = '設備を追加';
+    document.getElementById('inputName').value = '';
+    document.getElementById('saveBtn').textContent = '追加する';
+    buildTypeGrid();
+    document.getElementById('modalOverlay').style.display = 'flex';
+    setTimeout(function () { document.getElementById('inputName').focus(); }, 100);
+  }
+  window.openAddModal = openAddModal;
+
+  /* ===== モーダル：編集 ===== */
+  function openEditModal(id, data) {
+    _editingId = id;
+    _selectedType = data.type || 'bed';
+    document.getElementById('modalTitle').textContent = '設備を編集';
+    document.getElementById('inputName').value = data.name || '';
+    document.getElementById('saveBtn').textContent = '保存';
+    buildTypeGrid();
+    document.getElementById('modalOverlay').style.display = 'flex';
+    setTimeout(function () { document.getElementById('inputName').focus(); }, 100);
+  }
+
+  /* ===== 保存 ===== */
+  function saveResource() {
+    var name = (document.getElementById('inputName').value || '').trim();
+    if (!name) { uiToast('設備名を入力してください'); return; }
+
+    var saveBtn = document.getElementById('saveBtn');
+    if (saveBtn) { saveBtn.disabled = true; }
+
+    var col = firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('resources');
+
+    var payload = {
+      name: name,
+      type: _selectedType,
+      active: true,
+      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    if (_editingId) {
+      col.doc(_editingId).update(payload)
+        .then(function () {
+          closeModal();
+          uiToast('保存しました');
+          loadList();
+        })
+        .catch(function (e) {
+          if (saveBtn) { saveBtn.disabled = false; }
+          uiToast('保存に失敗しました: ' + e.message);
+        });
+    } else {
+      payload.createdAt = firebase.firestore.FieldValue.serverTimestamp();
+      col.add(payload)
+        .then(function () {
+          closeModal();
+          uiToast(name + ' を追加しました');
+          loadList();
+        })
+        .catch(function (e) {
+          if (saveBtn) { saveBtn.disabled = false; }
+          uiToast('追加に失敗しました: ' + e.message);
+        });
+    }
+  }
+  window.saveResource = saveResource;
+
+  /* ===== 削除 ===== */
+  function confirmDelete(id, data) {
+    uiConfirm(
+      '"' + (data.name || 'この設備') + '" を削除しますか？',
+      function () {
+        uiShowLoading('削除中...');
+        firebase.firestore()
+          .collection('salons').doc(_salonId)
+          .collection('resources').doc(id)
+          .delete()
+          .then(function () {
+            uiForceHideLoading();
+            uiToast((data.name || '設備') + ' を削除しました');
+            loadList();
+          })
+          .catch(function (e) {
+            uiForceHideLoading();
+            uiToast('削除に失敗しました: ' + e.message);
+          });
+      }
+    );
+  }
+
+  /* ===== モーダルを閉じる ===== */
+  function closeModal() {
+    document.getElementById('modalOverlay').style.display = 'none';
+  }
+  window.closeModal = closeModal;
+
+  function overlayClick(e) {
+    if (e.target === document.getElementById('modalOverlay')) { closeModal(); }
+  }
+  window.overlayClick = overlayClick;
+
+})();
+</script>
+</body>
+</html>

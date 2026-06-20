@@ -163,12 +163,16 @@ service cloud.firestore {
         // 読み取り: ログイン済みなら誰でも（予約可能時間計算で必要）
         allow read: if isSignedIn();
         
+        // ★ 2026/6/19: updatedAt 追加、type 任意
         allow create: if isSalonOwner(salonId) &&
                         request.resource.data.keys().hasOnly([
-                          'name', 'type', 'active', 'createdAt'
+                          'name', 'type', 'active', 'createdAt', 'updatedAt'
                         ]) &&
                         request.resource.data.keys().hasAll(['name', 'active']) &&
-                        request.resource.data.active is bool;
+                        request.resource.data.name is string &&
+                        request.resource.data.active is bool &&
+                        (!('type' in request.resource.data) ||
+                          request.resource.data.type in ['bed', 'chair', 'room', 'other']);
         
         allow update: if isSalonOwner(salonId);
         allow delete: if isSalonOwner(salonId) && resourceId != 'default';  // default は削除不可
