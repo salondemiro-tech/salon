@@ -135,14 +135,18 @@ service cloud.firestore {
         
         // 作成: オーナー本人が自分のスタッフドキュメントを作成（owner として）
         //       または、オーナーが他スタッフを追加（フェーズ2）
-        // ★ 2026/6/19: color フィールド追加（カレンダーのスタッフ識別色）
+        // ★ 2026/6/19: フェーズ2スタッフ登録対応
+        //   role は任意（未送信でもOK）、updatedAt を追加
+        //   name と active のみ必須
         allow create: if isSalonOwner(salonId) &&
                         request.resource.data.keys().hasOnly([
-                          'name', 'role', 'email', 'color', 'active', 'createdAt'
+                          'name', 'role', 'email', 'color', 'active', 'createdAt', 'updatedAt'
                         ]) &&
-                        request.resource.data.keys().hasAll(['name', 'role', 'active']) &&
-                        request.resource.data.role in ['owner', 'staff'] &&
+                        request.resource.data.keys().hasAll(['name', 'active']) &&
+                        request.resource.data.name is string &&
                         request.resource.data.active is bool &&
+                        (!('role' in request.resource.data) ||
+                          request.resource.data.role in ['owner', 'staff']) &&
                         (!('color' in request.resource.data) ||
                           request.resource.data.color is string);
         
