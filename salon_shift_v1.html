@@ -119,6 +119,20 @@
     margin-left:3px; vertical-align:middle;
   }
 
+  /* 一括ON/OFFボタン */
+  .cell-bulk{
+    display:flex; gap:3px; margin-bottom:4px;
+  }
+  .bulk-btn{
+    flex:1; border:none; border-radius:4px;
+    font-size:9px; padding:2px 0;
+    cursor:pointer; font-family:inherit; font-weight:600;
+    line-height:1.4;
+  }
+  .bulk-btn.on{ background:var(--gl); color:var(--gn); }
+  .bulk-btn.off{ background:var(--rl); color:var(--rd); }
+  .bulk-btn:disabled{ opacity:.4; cursor:default; }
+
   /* スタッフチェック（コンパクト） */
   .cell-checks{
     display:flex; flex-direction:column; gap:3px; flex:1;
@@ -368,6 +382,39 @@
 
     // スタッフチェック
     if (_staffList.length > 0) {
+      // 一括ON/OFFボタン
+      if (!isPast) {
+        var bulk = document.createElement('div');
+        bulk.className = 'cell-bulk';
+        var btnOn = document.createElement('button');
+        btnOn.className = 'bulk-btn on';
+        btnOn.textContent = '全ON';
+        btnOn.onclick = (function (dk2) {
+          return function (e) {
+            e.preventDefault();
+            for (var si = 0; si < _staffList.length; si++) {
+              var cb2 = document.getElementById('chk_' + dk2 + '_' + _staffList[si].id);
+              if (cb2) { cb2.checked = true; }
+            }
+          };
+        })(dk);
+        bulk.appendChild(btnOn);
+        var btnOff = document.createElement('button');
+        btnOff.className = 'bulk-btn off';
+        btnOff.textContent = '全OFF';
+        btnOff.onclick = (function (dk2) {
+          return function (e) {
+            e.preventDefault();
+            for (var si = 0; si < _staffList.length; si++) {
+              var cb2 = document.getElementById('chk_' + dk2 + '_' + _staffList[si].id);
+              if (cb2) { cb2.checked = false; }
+            }
+          };
+        })(dk);
+        bulk.appendChild(btnOff);
+        cell.appendChild(bulk);
+      }
+
       var checks = document.createElement('div');
       checks.className = 'cell-checks';
       for (var i = 0; i < _staffList.length; i++) {
