@@ -215,6 +215,27 @@
     background:var(--sf); border-radius:8px;
     padding:10px 12px; margin-bottom:16px; line-height:1.6;
   }
+
+  /* ===== Phase2: staff/space/equipment check UI ===== */
+  .team-section{
+    border:1px solid var(--bd); border-radius:10px;
+    padding:12px 14px; margin-bottom:16px; background:var(--sf);
+  }
+  .team-section-title{
+    font-size:12px; font-weight:600; color:var(--ac);
+    letter-spacing:.04em; margin-bottom:10px;
+  }
+  .check-list{ display:flex; flex-direction:column; gap:7px; }
+  .check-item{
+    display:flex; align-items:center; gap:8px;
+    cursor:pointer; font-size:13px; color:var(--tx);
+  }
+  .check-item input[type=checkbox]{
+    width:16px; height:16px; accent-color:var(--ac);
+    flex-shrink:0; cursor:pointer;
+  }
+  .check-empty{ font-size:12px; color:var(--mu); font-style:italic; }
+  .team-note{ font-size:11px; color:var(--mu); margin-top:8px; line-height:1.5; }
 </style>
 </head>
 <body>
@@ -268,6 +289,11 @@
   var _mode = '';         // 'view' | 'edit' | 'create'
   var _curId = null;
   var _formPublic = true; // フォーム中の公開トグル状態
+  var _salonId = null;    // Phase2
+  var _planId = 'solo';   // Phase2: 'solo'|'team'
+  var _staffList = [];    // Phase2: スタッフ一覧
+  var _spaceList = [];    // Phase2: 場所一覧
+  var _equipList = [];    // Phase2: 機器一覧
 
   function esc(s) {
     s = (s == null) ? '' : String(s);
@@ -292,15 +318,53 @@
   // ----- 一覧 -----
   function loadList() {
     uiShowLoading('読み込み中...');
-    dbSalonListMenus(function (list) {
-      uiHideLoading();
-      if (list == null) {
-        uiToast('メニュー一覧の取得に失敗しました');
-        renderAll([]);
-        return;
-      }
-      _all = list;
-      renderAll(_all);
+    var db = firebase.firestore();
+    db.collection('salons').doc(_salonId)
+      .collection('config').doc('settings').get()
+      .then(function (doc) {
+        var d = doc.exists ? doc.data() : {};
+        _planId = d.planId || 'solo';
+        if (_planId !== 'team') { return loadMenusOnly(); }
+        var p1 = db.collection('salons').doc(_salonId)
+          .collection('staffs').orderBy('name', 'asc').get();
+        var p2 = db.collection('salons').doc(_salonId)
+          .collection('resources').orderBy('name', 'asc').get();
+        return Promise.all([p1, p2]).then(function (results) {
+          _staffList = [];
+          results[0].forEach(function (sdoc) {
+            if (sdoc.id === 'owner') { return; }
+            _staffList.push({ id: sdoc.id, name: sdoc.data().name || sdoc.id });
+          });
+          _spaceList = []; _equipList = [];
+          results[1].forEach(function (rdoc) {
+            if (rdoc.id === 'default') { return; }
+            var rd = rdoc.data();
+            var item = { id: rdoc.id, name: rd.name || rdoc.id };
+            if (rd.category === 'equipment') { _equipList.push(item); }
+            else { _spaceList.push(item); }
+          });
+          return loadMenusOnly();
+        });
+      })
+      .catch(function (e) {
+        uiForceHideLoading();
+        uiToast('読み込みに失敗しました: ' + e.message);
+      });
+  }
+
+  function loadMenusOnly() {
+    return new Promise(function (resolve) {
+      dbSalonListMenus(function (list) {
+        uiForceHideLoading();
+        if (list == null) {
+          uiToast('メニュー一覧の取得に失敗しました');
+          renderAll([]);
+        } else {
+          _all = list;
+          renderAll(_all);
+        }
+        resolve();
+      });
     });
   }
 
@@ -641,6 +705,11 @@
       contraindications: _v('fContra')
     };
     if (cat) { patch.category = cat; }
+    if (_planId === 'team') {
+      patch.eligibleStaffIds     = _getChecked('fStaff', _staffList);
+      patch.requiredSpaceIds     = _getChecked('fSpace', _spaceList);
+      patch.requiredEquipmentIds = _getChecked('fEquip', _equipList);
+    }
 
     uiShowLoading('保存中...');
     dbSalonUpdateMenu(_curId, patch, function (ok) {
@@ -783,6 +852,11 @@
       sortOrder: maxSo + 1
     };
     if (cat) { data.category = cat; }
+    if (_planId === 'team') {
+      data.eligibleStaffIds     = _getChecked('fStaff', _staffList);
+      data.requiredSpaceIds     = _getChecked('fSpace', _spaceList);
+      data.requiredEquipmentIds = _getChecked('fEquip', _equipList);
+    }
 
     uiShowLoading('追加中...');
     dbSalonCreateMenu(data, function (res) {
@@ -924,6 +998,80 @@
       'fDesc', m ? (m.description || '') : ''));
     body.appendChild(_taField('禁忌・注意事項（顧客の予約画面に表示）',
       'fContra', m ? (m.contraindications || '') : ''));
+
+    // Phase2: チームプランのみ表示
+    if (_planId === 'team') {
+      body.appendChild(_buildCheckSection(
+        'スタッフ 担当可能スタッフ', 'fStaff', _staffList,
+        m ? (m.eligibleStaffIds || []) : [],
+        'スタッフが登録されていません',
+        '選択したスタッフが出勤中・空きがある時に予約可能'
+      ));
+      body.appendChild(_buildCheckSection(
+        '場所 必要な場所（スペース）', 'fSpace', _spaceList,
+        m ? (m.requiredSpaceIds || []) : [],
+        '場所が登録されていません',
+        '選択した場所が空いている時に予約可能（1つ選択推奨）'
+      ));
+      if (_equipList.length > 0) {
+        body.appendChild(_buildCheckSection(
+          '機器 必要な機器（不要な場合は空白）', 'fEquip', _equipList,
+          m ? (m.requiredEquipmentIds || []) : [],
+          '',
+          '機器が不要なメニューは何も選択しなくてOK'
+        ));
+      }
+    }
+  }
+
+  function _buildCheckSection(title, prefix, items, selectedIds, emptyMsg, noteMsg) {
+    var sec = document.createElement('div');
+    sec.className = 'team-section';
+    var ttl = document.createElement('div');
+    ttl.className = 'team-section-title';
+    ttl.textContent = title;
+    sec.appendChild(ttl);
+    var list = document.createElement('div');
+    list.className = 'check-list';
+    if (items.length === 0) {
+      var em = document.createElement('div');
+      em.className = 'check-empty';
+      em.textContent = emptyMsg;
+      list.appendChild(em);
+    } else {
+      for (var i = 0; i < items.length; i++) {
+        (function (item) {
+          var lbl = document.createElement('label');
+          lbl.className = 'check-item';
+          var cb = document.createElement('input');
+          cb.type = 'checkbox'; cb.id = prefix + '_' + item.id; cb.value = item.id;
+          for (var j = 0; j < selectedIds.length; j++) {
+            if (selectedIds[j] === item.id) { cb.checked = true; break; }
+          }
+          lbl.appendChild(cb);
+          var sp = document.createElement('span');
+          sp.textContent = item.name;
+          lbl.appendChild(sp);
+          list.appendChild(lbl);
+        })(items[i]);
+      }
+    }
+    sec.appendChild(list);
+    if (noteMsg) {
+      var note = document.createElement('div');
+      note.className = 'team-note'; note.textContent = noteMsg;
+      sec.appendChild(note);
+    }
+    return sec;
+  }
+
+  function _getChecked(prefix, items) {
+    var result = [];
+    for (var i = 0; i < items.length; i++) {
+      var cb = document.getElementById(prefix + '_' + items[i].id);
+      if (cb && cb.checked) { result.push(items[i].id); }
+    }
+    return result;
   }
 
   function _inField(label, id, val, type) {
@@ -970,6 +1118,12 @@
   onFbReady(function () {
     requireSalonStaff(function (isStaff) {
       if (!isStaff) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+      var user = firebase.auth().currentUser;
+      _salonId = user ? user.uid : null;
+      if (!_salonId) {
         window.location.href = 'salon_auth_v2_new.html';
         return;
       }
