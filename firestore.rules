@@ -163,20 +163,16 @@ service cloud.firestore {
         // 読み取り: ログイン済みなら誰でも（予約可能時間計算で必要）
         allow read: if isSignedIn();
         
-        // ★ 2026/6/19: 場所（space）と機器（equipment）の2カテゴリに対応
-        //   category: 'space' | 'equipment'
-        //   type: space系 → 'bed'|'booth'|'studio'|'other'
-        //         equipment系 → 'facial'|'slimming'|'laser'|'other'
+        // ★ 2026/6/19: 場所（space）と機器（equipment）の2カテゴリ
+        //   type フィールドは廃止（名前だけで登録）
         allow create: if isSalonOwner(salonId) &&
                         request.resource.data.keys().hasOnly([
-                          'name', 'category', 'type', 'active', 'createdAt', 'updatedAt'
+                          'name', 'category', 'active', 'createdAt', 'updatedAt'
                         ]) &&
                         request.resource.data.keys().hasAll(['name', 'category', 'active']) &&
                         request.resource.data.name is string &&
                         request.resource.data.active is bool &&
-                        request.resource.data.category in ['space', 'equipment'] &&
-                        (!('type' in request.resource.data) ||
-                          request.resource.data.type is string);
+                        request.resource.data.category in ['space', 'equipment'];
         
         allow update: if isSalonOwner(salonId);
         allow delete: if isSalonOwner(salonId) && resourceId != 'default';  // default は削除不可
