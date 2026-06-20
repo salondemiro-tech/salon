@@ -5,15 +5,16 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>TORITA - 設備設定</title>
 <!--
-  salon_resource_v1.html  -  TORITA Phase I-step3
+  salon_resource_v1.html  -  TORITA Phase I-step3 (redesign)
   作成: 2026/6/19
-  機能:
-    - 設備一覧表示
-    - 設備追加（名前・タイプ）
-    - 設備名・タイプの編集
-    - 設備削除（resources/default は削除不可）
+  設計変更:
+    - 「場所（スペース）」と「機器（equipment）」の2カテゴリに分離
+    - 場所：ベッド・ブース・スタジオ・その他 → 予約時に必ず1つ占有
+    - 機器：フェイシャル・痩身・レーザー・その他 → メニューで指定時のみ占有
+  バグ修正:
+    - 複数登録できない問題 → orderBy('name')に変更（createdAt同秒問題を回避）
   DB: salons/{salonId}/resources/{resourceId}
-    フィールド: name, type, active, createdAt, updatedAt
+    フィールド: name, category('space'|'equipment'), type, active, createdAt, updatedAt
 -->
 <style>
   :root{
@@ -21,6 +22,8 @@
     --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
     --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
     --rd:#c47b7b; --rl:#faeaea;
+    --sp:#7b9e87; --sl:#eef3ef;   /* 場所：グリーン系 */
+    --eq:#7b8eb5; --el:#eef0f8;   /* 機器：ブルー系 */
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{height:100%;}
@@ -43,54 +46,80 @@
 
   .wrap{max-width:600px; margin:0 auto; padding:22px 18px 60px;}
 
-  .add-btn{
-    width:100%; padding:14px;
-    background:var(--ac); color:#fff;
-    border:none; border-radius:12px;
-    font-size:15px; font-weight:600;
-    cursor:pointer; font-family:inherit;
-    margin-bottom:20px;
-    display:flex; align-items:center; justify-content:center; gap:8px;
+  /* ===== セクション ===== */
+  .section{ margin-bottom:28px; }
+  .section-header{
+    display:flex; align-items:center; justify-content:space-between;
+    margin-bottom:12px;
   }
-  .add-btn:active{ opacity:.85; }
-  .add-btn:disabled{ opacity:.5; cursor:default; }
+  .section-title{
+    font-size:13px; font-weight:600; letter-spacing:.05em;
+    display:flex; align-items:center; gap:7px;
+  }
+  .section-title.space{ color:var(--sp); }
+  .section-title.equipment{ color:var(--eq); }
+  .section-badge{
+    font-size:10px; padding:2px 8px; border-radius:10px;
+    font-weight:600;
+  }
+  .section-badge.space{ background:var(--sl); color:var(--sp); }
+  .section-badge.equipment{ background:var(--el); color:var(--eq); }
 
-  .resource-list{ display:flex; flex-direction:column; gap:10px; }
+  .section-desc{
+    font-size:11.5px; color:var(--mu); margin-bottom:12px;
+    line-height:1.6; padding:0 2px;
+  }
+
+  .add-btn{
+    padding:9px 16px;
+    border:none; border-radius:10px;
+    font-size:13px; font-weight:600;
+    cursor:pointer; font-family:inherit;
+    white-space:nowrap;
+  }
+  .add-btn.space{ background:var(--sp); color:#fff; }
+  .add-btn.equipment{ background:var(--eq); color:#fff; }
+  .add-btn:active{ opacity:.85; }
+
+  /* ===== カード ===== */
+  .resource-list{ display:flex; flex-direction:column; gap:9px; }
 
   .resource-card{
-    background:#fff; border-radius:14px;
+    background:#fff; border-radius:12px;
     border:1px solid var(--bd);
-    padding:16px 18px;
-    display:flex; align-items:center; gap:14px;
+    padding:14px 16px;
+    display:flex; align-items:center; gap:12px;
   }
-  .resource-ico{ font-size:28px; flex-shrink:0; line-height:1; }
+  .resource-card.space{ border-left:3px solid var(--sp); }
+  .resource-card.equipment{ border-left:3px solid var(--eq); }
+
+  .resource-ico{ font-size:24px; flex-shrink:0; line-height:1; }
   .resource-info{ flex:1; min-width:0; }
   .resource-name{
-    font-size:15px; font-weight:600; color:var(--ad);
+    font-size:14px; font-weight:600; color:var(--ad);
     white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
   }
-  .resource-type{
-    font-size:11.5px; color:var(--mu); margin-top:2px;
-  }
-  .resource-actions{ display:flex; gap:8px; flex-shrink:0; }
+  .resource-type{ font-size:11px; color:var(--mu); margin-top:2px; }
+
+  .resource-actions{ display:flex; gap:7px; flex-shrink:0; }
   .icon-btn{
     background:none; border:1.5px solid var(--bd);
-    border-radius:8px; padding:7px 10px;
-    font-size:14px; cursor:pointer;
+    border-radius:8px; padding:6px 9px;
+    font-size:13px; cursor:pointer;
     font-family:inherit; color:var(--mu);
     transition:border-color .12s, color .12s;
   }
   .icon-btn:hover{ border-color:var(--ac); color:var(--ac); }
   .icon-btn.del:hover{ border-color:var(--rd); color:var(--rd); }
-  .icon-btn:disabled{ opacity:.4; cursor:default; }
 
-  .empty-state{
-    text-align:center; padding:48px 20px;
-    color:var(--mu); font-size:14px; line-height:2;
+  .empty-card{
+    background:#fff; border-radius:12px;
+    border:1.5px dashed var(--bd);
+    padding:20px; text-align:center;
+    color:var(--mu); font-size:13px;
   }
-  .empty-ico{ font-size:40px; margin-bottom:12px; }
 
-  /* モーダル */
+  /* ===== モーダル ===== */
   .modal-overlay{
     position:fixed; inset:0;
     background:rgba(0,0,0,.45); z-index:100;
@@ -115,7 +144,6 @@
   }
   .form-input:focus{ border-color:var(--ac); }
 
-  /* タイプ選択ボタン */
   .type-grid{
     display:grid; grid-template-columns:repeat(2,1fr); gap:8px;
   }
@@ -123,14 +151,16 @@
     border:1.5px solid var(--bd); border-radius:10px;
     padding:10px 8px; text-align:center;
     cursor:pointer; background:#fff;
-    font-family:inherit; font-size:13px; color:var(--mu);
+    font-family:inherit; font-size:12px; color:var(--mu);
     transition:border-color .12s, background .12s, color .12s;
   }
-  .type-btn.selected{
-    border-color:var(--ac); background:var(--al); color:var(--ad);
-    font-weight:600;
+  .type-btn.selected-space{
+    border-color:var(--sp); background:var(--sl); color:#2a5a3a; font-weight:600;
   }
-  .type-btn-ico{ font-size:22px; display:block; margin-bottom:4px; }
+  .type-btn.selected-equipment{
+    border-color:var(--eq); background:var(--el); color:#1a2a5a; font-weight:600;
+  }
+  .type-btn-ico{ font-size:20px; display:block; margin-bottom:4px; }
 
   .modal-actions{ display:flex; gap:10px; margin-top:22px; }
   .btn-cancel{
@@ -140,11 +170,12 @@
     cursor:pointer; font-family:inherit; color:var(--mu);
   }
   .btn-save{
-    flex:2; padding:12px;
-    background:var(--ac); color:#fff;
+    flex:2; padding:12px; color:#fff;
     border:none; border-radius:10px; font-size:14px;
     font-weight:600; cursor:pointer; font-family:inherit;
   }
+  .btn-save.space{ background:var(--sp); }
+  .btn-save.equipment{ background:var(--eq); }
   .btn-save:disabled{ opacity:.5; cursor:default; }
 </style>
 </head>
@@ -156,20 +187,53 @@
 </div>
 
 <div class="wrap">
-  <button class="add-btn" id="addBtn" onclick="openAddModal()">
-    &#43; 設備を追加
-  </button>
-  <div class="resource-list" id="resourceList"></div>
+
+  <!-- 場所セクション -->
+  <div class="section">
+    <div class="section-header">
+      <div>
+        <div class="section-title space">
+          &#x1F4CD; 場所（スペース）
+          <span class="section-badge space">予約時に必ず占有</span>
+        </div>
+      </div>
+      <button class="add-btn space" onclick="openAddModal('space')">&#43; 追加</button>
+    </div>
+    <div class="section-desc">
+      施術を行う場所です。ベッド・ブース・スタジオなど。<br>
+      予約ごとに必ず1つ占有されます。
+    </div>
+    <div class="resource-list" id="spaceList"></div>
+  </div>
+
+  <!-- 機器セクション -->
+  <div class="section">
+    <div class="section-header">
+      <div>
+        <div class="section-title equipment">
+          &#x2699;&#xFE0F; 機器（equipment）
+          <span class="section-badge equipment">メニューで指定時のみ</span>
+        </div>
+      </div>
+      <button class="add-btn equipment" onclick="openAddModal('equipment')">&#43; 追加</button>
+    </div>
+    <div class="section-desc">
+      フェイシャル機器・痩身機器など専門機材です。<br>
+      メニューに機器が指定されている場合のみ占有されます。
+    </div>
+    <div class="resource-list" id="equipmentList"></div>
+  </div>
+
 </div>
 
-<!-- 追加・編集モーダル -->
+<!-- モーダル -->
 <div class="modal-overlay" id="modalOverlay" style="display:none;" onclick="overlayClick(event)">
   <div class="modal">
-    <div class="modal-title" id="modalTitle">設備を追加</div>
+    <div class="modal-title" id="modalTitle">場所を追加</div>
 
     <div class="form-row">
-      <label class="form-label">設備名（例：ベッド1、施術室A）</label>
-      <input class="form-input" id="inputName" type="text" maxlength="20" placeholder="例：ベッド1">
+      <label class="form-label" id="nameLabel">名前</label>
+      <input class="form-input" id="inputName" type="text" maxlength="20">
     </div>
 
     <div class="form-row">
@@ -179,7 +243,7 @@
 
     <div class="modal-actions">
       <button class="btn-cancel" onclick="closeModal()">キャンセル</button>
-      <button class="btn-save" id="saveBtn" onclick="saveResource()">追加する</button>
+      <button class="btn-save space" id="saveBtn" onclick="saveResource()">追加する</button>
     </div>
   </div>
 </div>
@@ -196,19 +260,37 @@
 <script>
 (function () {
 
-  var TYPES = [
-    { value: 'bed',   label: 'ベッド',   ico: '\uD83D\uDECB\uFE0F' },
-    { value: 'chair', label: 'チェア',   ico: '\uD83E\uDE91' },
-    { value: 'room',  label: '個室',     ico: '\uD83D\uDEAA' },
-    { value: 'other', label: 'その他',   ico: '\uD83D\uDCE6' }
+  /* タイプ定義 */
+  var SPACE_TYPES = [
+    { value: 'bed',    label: 'ベッド',   ico: '\uD83D\uDECB\uFE0F' },
+    { value: 'booth',  label: 'ブース',   ico: '\uD83C\uDFAA' },
+    { value: 'studio', label: 'スタジオ', ico: '\uD83C\uDFDB\uFE0F' },
+    { value: 'other',  label: 'その他',   ico: '\uD83D\uDCCC' }
+  ];
+  var EQUIP_TYPES = [
+    { value: 'facial',   label: 'フェイシャル', ico: '\u2728' },
+    { value: 'slimming', label: '痩身',         ico: '\uD83D\uDCAB' },
+    { value: 'laser',    label: 'レーザー',     ico: '\uD83D\uDD26' },
+    { value: 'other',    label: 'その他',        ico: '\uD83D\uDD27' }
   ];
 
-  var TYPE_LABELS = { bed: 'ベッド', chair: 'チェア', room: '個室', other: 'その他' };
-  var TYPE_ICOS   = { bed: '\uD83D\uDECB\uFE0F', chair: '\uD83E\uDE91', room: '\uD83D\uDEAA', other: '\uD83D\uDCE6' };
+  var TYPE_INFO = {};
+  SPACE_TYPES.concat(EQUIP_TYPES).forEach(function (t) {
+    TYPE_INFO[t.value + '_space']     = t;
+    TYPE_INFO[t.value + '_equipment'] = t;
+    TYPE_INFO[t.value] = t; /* fallback */
+  });
 
-  var _salonId = null;
-  var _resourceList = [];
-  var _editingId = null;
+  function getTypeLabel(type) {
+    return (TYPE_INFO[type] && TYPE_INFO[type].label) || type || 'その他';
+  }
+  function getTypeIco(type) {
+    return (TYPE_INFO[type] && TYPE_INFO[type].ico) || '\uD83D\uDCE6';
+  }
+
+  var _salonId    = null;
+  var _editingId  = null;
+  var _editingCat = 'space';   /* 現在編集中のカテゴリ */
   var _selectedType = 'bed';
 
   /* ===== 起動 ===== */
@@ -218,33 +300,9 @@
       var user = firebase.auth().currentUser;
       _salonId = user ? user.uid : null;
       if (!_salonId) { window.location.href = 'salon_auth_v2_new.html'; return; }
-      buildTypeGrid();
       loadList();
     });
   });
-
-  /* ===== タイプグリッド生成 ===== */
-  function buildTypeGrid() {
-    var grid = document.getElementById('typeGrid');
-    grid.innerHTML = '';
-    for (var i = 0; i < TYPES.length; i++) {
-      (function (t) {
-        var btn = document.createElement('button');
-        btn.className = 'type-btn' + (t.value === _selectedType ? ' selected' : '');
-        btn.innerHTML = '<span class="type-btn-ico">' + t.ico + '</span>' + t.label;
-        btn.onclick = function () { selectType(t.value); };
-        grid.appendChild(btn);
-      })(TYPES[i]);
-    }
-  }
-
-  function selectType(value) {
-    _selectedType = value;
-    var btns = document.querySelectorAll('.type-btn');
-    for (var i = 0; i < TYPES.length; i++) {
-      btns[i].className = 'type-btn' + (TYPES[i].value === value ? ' selected' : '');
-    }
-  }
 
   /* ===== 一覧ロード ===== */
   function loadList() {
@@ -252,15 +310,24 @@
     firebase.firestore()
       .collection('salons').doc(_salonId)
       .collection('resources')
-      .orderBy('createdAt', 'asc')
+      .orderBy('name', 'asc')   /* createdAt同秒バグ回避のためnameソート */
       .get()
       .then(function (snap) {
         uiForceHideLoading();
-        _resourceList = [];
+        var spaces = [];
+        var equips = [];
         snap.forEach(function (doc) {
-          _resourceList.push({ id: doc.id, data: doc.data() });
+          if (doc.id === 'default') { return; } /* フェーズ1残留は無視 */
+          var d = doc.data();
+          var item = { id: doc.id, data: d };
+          if (d.category === 'equipment') {
+            equips.push(item);
+          } else {
+            spaces.push(item); /* category未設定（旧データ）もspaceとして扱う */
+          }
         });
-        renderList();
+        renderSection('spaceList', spaces, 'space');
+        renderSection('equipmentList', equips, 'equipment');
       })
       .catch(function (e) {
         uiForceHideLoading();
@@ -268,43 +335,32 @@
       });
   }
 
-  /* ===== 一覧描画 ===== */
-  function renderList() {
-    var list = document.getElementById('resourceList');
+  /* ===== セクション描画 ===== */
+  function renderSection(listId, items, category) {
+    var list = document.getElementById(listId);
     list.innerHTML = '';
-
-    /* default ドキュメントは表示しない（フェーズ1残留） */
-    var displayList = [];
-    for (var i = 0; i < _resourceList.length; i++) {
-      if (_resourceList[i].id !== 'default') {
-        displayList.push(_resourceList[i]);
-      }
-    }
-
-    if (displayList.length === 0) {
-      list.innerHTML =
-        '<div class="empty-state">' +
-          '<div class="empty-ico">\uD83D\uDECB\uFE0F</div>' +
-          '設備がまだ登録されていません<br>' +
-          '「設備を追加」から登録してください<br>' +
-          '<span style="font-size:12px;color:#aaa;">例：ベッド1、施術ベッドA、個室1</span>' +
-        '</div>';
+    if (items.length === 0) {
+      var empty = document.createElement('div');
+      empty.className = 'empty-card';
+      empty.textContent = category === 'space'
+        ? 'まだ登録されていません'
+        : 'まだ登録されていません（機器が不要なサロンはそのままでOK）';
+      list.appendChild(empty);
       return;
     }
-
-    for (var j = 0; j < displayList.length; j++) {
-      list.appendChild(buildCard(displayList[j]));
+    for (var i = 0; i < items.length; i++) {
+      list.appendChild(buildCard(items[i], category));
     }
   }
 
-  function buildCard(item) {
+  function buildCard(item, category) {
     var d = item.data;
     var card = document.createElement('div');
-    card.className = 'resource-card';
+    card.className = 'resource-card ' + category;
 
     var ico = document.createElement('div');
     ico.className = 'resource-ico';
-    ico.textContent = TYPE_ICOS[d.type] || '\uD83D\uDCE6';
+    ico.textContent = getTypeIco(d.type);
     card.appendChild(ico);
 
     var info = document.createElement('div');
@@ -315,7 +371,7 @@
     info.appendChild(name);
     var type = document.createElement('div');
     type.className = 'resource-type';
-    type.textContent = TYPE_LABELS[d.type] || 'その他';
+    type.textContent = getTypeLabel(d.type);
     info.appendChild(type);
     card.appendChild(info);
 
@@ -325,16 +381,14 @@
     var editBtn = document.createElement('button');
     editBtn.className = 'icon-btn';
     editBtn.textContent = '\u270F\uFE0F';
-    editBtn.title = '編集';
-    editBtn.onclick = (function (id, data) {
-      return function () { openEditModal(id, data); };
-    })(item.id, d);
+    editBtn.onclick = (function (id, data, cat) {
+      return function () { openEditModal(id, data, cat); };
+    })(item.id, d, category);
     actions.appendChild(editBtn);
 
     var delBtn = document.createElement('button');
     delBtn.className = 'icon-btn del';
     delBtn.textContent = '\uD83D\uDDD1\uFE0F';
-    delBtn.title = '削除';
     delBtn.onclick = (function (id, data) {
       return function () { confirmDelete(id, data); };
     })(item.id, d);
@@ -344,27 +398,82 @@
     return card;
   }
 
+  /* ===== タイプグリッド生成 ===== */
+  function buildTypeGrid(category) {
+    var types = category === 'equipment' ? EQUIP_TYPES : SPACE_TYPES;
+    var grid = document.getElementById('typeGrid');
+    grid.innerHTML = '';
+    for (var i = 0; i < types.length; i++) {
+      (function (t) {
+        var btn = document.createElement('button');
+        var selClass = t.value === _selectedType
+          ? ' selected-' + category : '';
+        btn.className = 'type-btn' + selClass;
+        btn.innerHTML = '<span class="type-btn-ico">' + t.ico + '</span>' + t.label;
+        btn.onclick = (function (val, cat) {
+          return function () { selectType(val, cat); };
+        })(t.value, category);
+        grid.appendChild(btn);
+      })(types[i]);
+    }
+  }
+
+  function selectType(value, category) {
+    _selectedType = value;
+    var types = category === 'equipment' ? EQUIP_TYPES : SPACE_TYPES;
+    var btns = document.querySelectorAll('.type-btn');
+    for (var i = 0; i < btns.length; i++) {
+      var selClass = types[i] && types[i].value === value
+        ? ' selected-' + category : '';
+      btns[i].className = 'type-btn' + selClass;
+    }
+  }
+
   /* ===== モーダル：追加 ===== */
-  function openAddModal() {
-    _editingId = null;
-    _selectedType = 'bed';
-    document.getElementById('modalTitle').textContent = '設備を追加';
+  function openAddModal(category) {
+    _editingId  = null;
+    _editingCat = category;
+    _selectedType = category === 'equipment' ? 'facial' : 'bed';
+
+    document.getElementById('modalTitle').textContent =
+      category === 'equipment' ? '機器を追加' : '場所を追加';
+    document.getElementById('nameLabel').textContent =
+      category === 'equipment'
+        ? '機器名（例：フェイシャル機器A、痩身機1）'
+        : '場所名（例：ベッド1、ブースA）';
     document.getElementById('inputName').value = '';
-    document.getElementById('saveBtn').textContent = '追加する';
-    buildTypeGrid();
+    document.getElementById('inputName').placeholder =
+      category === 'equipment' ? '例：フェイシャル機器A' : '例：ベッド1';
+
+    var saveBtn = document.getElementById('saveBtn');
+    saveBtn.textContent = '追加する';
+    saveBtn.className = 'btn-save ' + category;
+    saveBtn.disabled = false;
+
+    buildTypeGrid(category);
     document.getElementById('modalOverlay').style.display = 'flex';
     setTimeout(function () { document.getElementById('inputName').focus(); }, 100);
   }
   window.openAddModal = openAddModal;
 
   /* ===== モーダル：編集 ===== */
-  function openEditModal(id, data) {
-    _editingId = id;
-    _selectedType = data.type || 'bed';
-    document.getElementById('modalTitle').textContent = '設備を編集';
+  function openEditModal(id, data, category) {
+    _editingId  = id;
+    _editingCat = category;
+    _selectedType = data.type || (category === 'equipment' ? 'facial' : 'bed');
+
+    document.getElementById('modalTitle').textContent =
+      category === 'equipment' ? '機器を編集' : '場所を編集';
+    document.getElementById('nameLabel').textContent =
+      category === 'equipment' ? '機器名' : '場所名';
     document.getElementById('inputName').value = data.name || '';
-    document.getElementById('saveBtn').textContent = '保存';
-    buildTypeGrid();
+
+    var saveBtn = document.getElementById('saveBtn');
+    saveBtn.textContent = '保存';
+    saveBtn.className = 'btn-save ' + category;
+    saveBtn.disabled = false;
+
+    buildTypeGrid(category);
     document.getElementById('modalOverlay').style.display = 'flex';
     setTimeout(function () { document.getElementById('inputName').focus(); }, 100);
   }
@@ -372,8 +481,10 @@
   /* ===== 保存 ===== */
   function saveResource() {
     var name = (document.getElementById('inputName').value || '').trim();
-    if (!name) { uiToast('設備名を入力してください'); return; }
-
+    if (!name) {
+      uiToast(_editingCat === 'equipment' ? '機器名を入力してください' : '場所名を入力してください');
+      return;
+    }
     var saveBtn = document.getElementById('saveBtn');
     if (saveBtn) { saveBtn.disabled = true; }
 
@@ -383,6 +494,7 @@
 
     var payload = {
       name: name,
+      category: _editingCat,
       type: _selectedType,
       active: true,
       updatedAt: firebase.firestore.FieldValue.serverTimestamp()
@@ -418,7 +530,7 @@
   /* ===== 削除 ===== */
   function confirmDelete(id, data) {
     uiConfirm(
-      '"' + (data.name || 'この設備') + '" を削除しますか？',
+      '"' + (data.name || 'この項目') + '" を削除しますか？',
       function () {
         uiShowLoading('削除中...');
         firebase.firestore()
@@ -427,7 +539,7 @@
           .delete()
           .then(function () {
             uiForceHideLoading();
-            uiToast((data.name || '設備') + ' を削除しました');
+            uiToast((data.name || '項目') + ' を削除しました');
             loadList();
           })
           .catch(function (e) {
