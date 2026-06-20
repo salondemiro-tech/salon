@@ -17,6 +17,15 @@
 //   - フェーズ1はスタッフ=オーナー1人なので isSalonStaff == isSalonOwner で正しい
 //   - フェーズ2で複数スタッフ対応時に exists() 版へ戻す（DESIGN_NOTES 段階移行方針）
 //
+// 2026/6/19 変更点 (Phase I-step1 フェーズ2着手):
+//   - isSalonStaff() を「オーナー OR staffsに存在するスタッフ」に拡張
+//   - フェーズ1互換：staffs/owner（doc ID='owner'）はそのまま残置。
+//     オーナー本人は isSalonOwner() で通過するため影響なし。
+//   - フェーズ2：新スタッフは staffs/{Auth UID} ドキュメントを追加するだけで
+//     自動的にアクセス権が付与される。ルール変更不要。
+//   - staffs create ホワイトリストに color フィールドを追加
+//     （カレンダーのスタッフ識別色。DESIGN.md Phase I-1 スキーマ定義済み）
+//
 // 2026/5/15 変更点 (その1):
 //   - menus のホワイトリストに sortOrder を追加（int >= 0、省略可）
 //   - 理由: メニュー設定画面で上下ボタンによる並び替えを実装するため
@@ -82,17 +91,21 @@ service cloud.firestore {
     
     // サロンに所属するスタッフか
     // ------------------------------------------------------------
-    // 【2026/5/14 修正】owner固定方式に統一
-    //   フェーズ1: staffs/owner の1ドキュメントだけ存在し、
-    //              そのオーナー = salonId 本人。
-    //              よって「スタッフか」は「オーナー本人か」と同値。
-    //   フェーズ2: 複数スタッフ対応時、ここを下記の exists() 版に戻す:
-    //     return isSignedIn() &&
-    //       exists(/databases/$(database)/documents/salons/$(salonId)/staffs/$(request.auth.uid));
-    //   （staffs/{各スタッフのAuth UID} ドキュメントが増える前提）
+    // 【2026/6/19 Phase I-step1 更新】フェーズ2対応版
+    //   オーナー本人（isSalonOwner）OR
+    //   staffs/{request.auth.uid} ドキュメントが存在するスタッフ
+    //
+    //   フェーズ1互換：
+    //     - staffs/owner（doc ID='owner'）はそのまま残置
+    //     - オーナー本人は isSalonOwner() で通過するため影響なし
+    //   フェーズ2：
+    //     - 新スタッフは staffs/{Auth UID} ドキュメントを追加するだけで
+    //       自動的にアクセス権が付与される（ルール変更不要）
     // ------------------------------------------------------------
     function isSalonStaff(salonId) {
-      return isSalonOwner(salonId);
+      return isSalonOwner(salonId) ||
+        (isSignedIn() &&
+          exists(/databases/$(database)/documents/salons/$(salonId)/staffs/$(request.auth.uid)));
     }
     
     // ============================================================
@@ -132,13 +145,16 @@ service cloud.firestore {
         
         // 作成: オーナー本人が自分のスタッフドキュメントを作成（owner として）
         //       または、オーナーが他スタッフを追加（フェーズ2）
+        // ★ 2026/6/19: color フィールド追加（カレンダーのスタッフ識別色）
         allow create: if isSalonOwner(salonId) &&
                         request.resource.data.keys().hasOnly([
-                          'name', 'role', 'email', 'active', 'createdAt'
+                          'name', 'role', 'email', 'color', 'active', 'createdAt'
                         ]) &&
                         request.resource.data.keys().hasAll(['name', 'role', 'active']) &&
                         request.resource.data.role in ['owner', 'staff'] &&
-                        request.resource.data.active is bool;
+                        request.resource.data.active is bool &&
+                        (!('color' in request.resource.data) ||
+                          request.resource.data.color is string);
         
         allow update: if isSalonOwner(salonId);
         allow delete: if isSalonOwner(salonId) && staffId != 'owner';  // owner は削除不可
