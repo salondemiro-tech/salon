@@ -5,15 +5,15 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>TORITA - シフト管理</title>
 <!--
-  salon_shift_v1.html  -  TORITA Phase I-step5
+  salon_shift_v1.html  -  TORITA Phase I-step5 v2
   作成: 2026/6/19
   設計:
-    - 週単位でシフトを管理（今週・来週・再来週）
-    - 各日付ごとに出勤スタッフをチェックして保存
-    - 未登録の日 = 全員オフ（予約不可）
-    - シフトドキュメントID = YYYY-MM-DD（日付ごとに1ドキュメント）
-  DB: salons/{salonId}/shifts/{dateKey}
-    フィールド: date(YYYY-MM-DD), staffIds([]), updatedAt
+    - 月カレンダー表示（前月・翌月ナビ）
+    - 各日マスにスタッフのチェックボックス
+    - 「まとめて保存」ボタン1つで月全体を保存
+    - 未チェックの日 = 全員オフ（予約不可）
+  DB: salons/{salonId}/shifts/{YYYY-MM-DD}
+    フィールド: date, staffIds[], updatedAt
 -->
 <style>
   :root{
@@ -21,7 +21,7 @@
     --sf:#f8f7f4; --s2:#f0ede8;
     --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
     --gn:#7b9e87; --gl:#eef3ef;
-    --rd:#c47b7b; --rl:#faeaea;
+    --rd:#c47b7b;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{height:100%;}
@@ -42,105 +42,129 @@
   }
   .page-title{ font-size:16px; font-weight:600; color:var(--ad); flex:1; }
 
-  .wrap{max-width:640px; margin:0 auto; padding:18px 16px 60px;}
+  .wrap{max-width:860px; margin:0 auto; padding:18px 12px 80px;}
 
-  /* 週ナビ */
-  .week-nav{
+  /* 月ナビ */
+  .month-nav{
     display:flex; align-items:center; justify-content:space-between;
     margin-bottom:16px; gap:10px;
   }
-  .week-label{
-    font-size:14px; font-weight:600; color:var(--ad); text-align:center; flex:1;
+  .month-label{
+    font-size:17px; font-weight:600; color:var(--ad); text-align:center; flex:1;
   }
   .nav-btn{
     background:#fff; border:1.5px solid var(--bd);
-    border-radius:9px; padding:8px 14px;
+    border-radius:9px; padding:8px 16px;
     font-size:13px; cursor:pointer; font-family:inherit; color:var(--mu);
     white-space:nowrap;
   }
   .nav-btn:hover{ border-color:var(--ac); color:var(--ac); }
   .nav-btn:disabled{ opacity:.4; cursor:default; }
 
-  /* 日付カード */
-  .day-list{ display:flex; flex-direction:column; gap:10px; }
-
-  .day-card{
-    background:#fff; border-radius:14px;
-    border:1px solid var(--bd);
-    overflow:hidden;
+  /* スタッフ凡例 */
+  .legend{
+    display:flex; flex-wrap:wrap; gap:10px;
+    margin-bottom:14px; padding:10px 14px;
+    background:#fff; border-radius:10px; border:1px solid var(--bd);
   }
-  .day-card.today{ border-color:var(--ac); }
-  .day-card.past{ opacity:.6; }
+  .legend-item{
+    display:flex; align-items:center; gap:5px;
+    font-size:12px; color:var(--tx);
+  }
+  .legend-dot{
+    width:10px; height:10px; border-radius:50%; flex-shrink:0;
+  }
 
-  .day-header{
-    display:flex; align-items:center; justify-content:space-between;
+  /* カレンダーグリッド */
+  .cal-header{
+    display:grid; grid-template-columns:repeat(7, 1fr);
+    gap:3px; margin-bottom:3px;
+  }
+  .cal-dow{
+    text-align:center; font-size:11px; font-weight:600;
+    color:var(--mu); padding:4px 0;
+  }
+  .cal-dow.sat{ color:#5a7eb5; }
+  .cal-dow.sun{ color:var(--rd); }
+
+  .cal-grid{
+    display:grid; grid-template-columns:repeat(7, 1fr);
+    gap:3px;
+  }
+
+  .cal-cell{
+    background:#fff; border-radius:8px; border:1px solid var(--bd);
+    padding:6px 5px; min-height:80px;
+    display:flex; flex-direction:column;
+  }
+  .cal-cell.empty{
+    background:transparent; border-color:transparent;
+  }
+  .cal-cell.past{
+    background:var(--sf); opacity:.7;
+  }
+  .cal-cell.today{
+    border-color:var(--ac); border-width:2px;
+  }
+  .cal-cell.sat .cell-date{ color:#5a7eb5; }
+  .cal-cell.sun .cell-date{ color:var(--rd); }
+
+  .cell-date{
+    font-size:12px; font-weight:600; color:var(--ad);
+    margin-bottom:5px; line-height:1;
+  }
+  .cell-date .today-dot{
+    display:inline-block; width:5px; height:5px;
+    background:var(--ac); border-radius:50%;
+    margin-left:3px; vertical-align:middle;
+  }
+
+  /* スタッフチェック（コンパクト） */
+  .cell-checks{
+    display:flex; flex-direction:column; gap:3px; flex:1;
+  }
+  .cell-check{
+    display:flex; align-items:center; gap:4px;
+    cursor:pointer; line-height:1;
+  }
+  .cell-check input[type=checkbox]{
+    width:13px; height:13px; accent-color:var(--ac);
+    flex-shrink:0; cursor:pointer; margin:0;
+  }
+  .cell-check-dot{
+    width:7px; height:7px; border-radius:50%; flex-shrink:0;
+  }
+  .cell-check-name{
+    font-size:10px; color:var(--tx);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .cal-cell.past .cell-check input[type=checkbox]{
+    cursor:default;
+  }
+
+  /* まとめて保存ボタン */
+  .save-bar{
+    position:fixed; bottom:0; left:0; right:0;
+    background:#fff; border-top:1px solid var(--bd);
     padding:12px 16px;
-    border-bottom:1px solid var(--bd);
-    cursor:pointer;
-    user-select:none;
+    display:flex; align-items:center; gap:12px;
+    z-index:20;
   }
-  .day-header:hover{ background:var(--sf); }
-  .day-card.today .day-header{ background:var(--al); }
-
-  .day-date{
-    font-size:15px; font-weight:600; color:var(--ad);
+  .save-bar-note{
+    font-size:12px; color:var(--mu); flex:1;
+    line-height:1.4;
   }
-  .day-card.today .day-date{ color:var(--ac); }
-  .day-dow{
-    font-size:12px; color:var(--mu); margin-left:8px;
-  }
-  .day-dow.sat{ color:#5a7eb5; }
-  .day-dow.sun{ color:var(--rd); }
-
-  .day-status{
-    font-size:12px; padding:3px 10px; border-radius:10px;
-    font-weight:600;
-  }
-  .day-status.on{ background:var(--gl); color:var(--gn); }
-  .day-status.off{ background:var(--s2); color:var(--mu); }
-
-  .day-body{ padding:14px 16px; }
-
-  /* スタッフチェックリスト */
-  .staff-checks{ display:flex; flex-direction:column; gap:10px; margin-bottom:14px; }
-  .staff-check-item{
-    display:flex; align-items:center; gap:10px;
-    cursor:pointer;
-  }
-  .staff-check-item input[type=checkbox]{
-    width:18px; height:18px; accent-color:var(--ac);
-    flex-shrink:0; cursor:pointer;
-  }
-  .staff-color-dot{
-    width:12px; height:12px; border-radius:50%; flex-shrink:0;
-  }
-  .staff-check-name{ font-size:14px; color:var(--tx); }
-
-  .save-btn{
-    width:100%; padding:11px;
+  .save-all-btn{
+    flex-shrink:0;
     background:var(--ac); color:#fff;
-    border:none; border-radius:10px;
-    font-size:14px; font-weight:600;
+    border:none; border-radius:12px;
+    padding:13px 28px;
+    font-size:15px; font-weight:600;
     cursor:pointer; font-family:inherit;
+    white-space:nowrap;
   }
-  .save-btn:active{ opacity:.85; }
-  .save-btn:disabled{ opacity:.5; cursor:default; }
-
-  .no-staff{
-    font-size:13px; color:var(--mu); text-align:center; padding:8px 0;
-  }
-
-  /* 折りたたみ状態 */
-  .day-body{ display:none; }
-  .day-body.open{ display:block; }
-
-  /* 今日マーク */
-  .today-mark{
-    display:inline-block;
-    background:var(--ac); color:#fff;
-    font-size:10px; padding:1px 6px; border-radius:6px;
-    margin-left:6px; vertical-align:middle;
-  }
+  .save-all-btn:active{ opacity:.85; }
+  .save-all-btn:disabled{ opacity:.5; cursor:default; }
 </style>
 </head>
 <body>
@@ -151,12 +175,34 @@
 </div>
 
 <div class="wrap">
-  <div class="week-nav">
-    <button class="nav-btn" id="prevBtn" onclick="changeWeek(-1)">&#8592; 前の週</button>
-    <div class="week-label" id="weekLabel"></div>
-    <button class="nav-btn" id="nextBtn" onclick="changeWeek(1)">次の週 &#8594;</button>
+  <div class="month-nav">
+    <button class="nav-btn" id="prevBtn" onclick="changeMonth(-1)">&#8592; 前月</button>
+    <div class="month-label" id="monthLabel"></div>
+    <button class="nav-btn" id="nextBtn" onclick="changeMonth(1)">翌月 &#8594;</button>
   </div>
-  <div class="day-list" id="dayList"></div>
+
+  <!-- スタッフ凡例 -->
+  <div class="legend" id="legend"></div>
+
+  <!-- カレンダー曜日ヘッダー -->
+  <div class="cal-header">
+    <div class="cal-dow">月</div>
+    <div class="cal-dow">火</div>
+    <div class="cal-dow">水</div>
+    <div class="cal-dow">木</div>
+    <div class="cal-dow">金</div>
+    <div class="cal-dow sat">土</div>
+    <div class="cal-dow sun">日</div>
+  </div>
+
+  <!-- カレンダーグリッド -->
+  <div class="cal-grid" id="calGrid"></div>
+</div>
+
+<!-- まとめて保存バー -->
+<div class="save-bar">
+  <div class="save-bar-note">チェックを変更したらまとめて保存してください</div>
+  <button class="save-all-btn" id="saveAllBtn" onclick="saveAll()">まとめて保存</button>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -170,14 +216,20 @@
 <script>
 (function () {
 
-  var DOW_LABELS = ['日', '月', '火', '水', '木', '金', '土'];
-  var WEEK_OFFSET = 0; // 0=今週, 1=来週, 2=再来週 ...
-  var MAX_FUTURE_WEEKS = 4;
-
   var _salonId   = null;
   var _staffList = []; // [{id, name, color}]
-  var _shiftMap  = {}; // { 'YYYY-MM-DD': [staffId, ...] }
-  var _today     = toDateKey(new Date());
+  var _shiftMap  = {}; // { 'YYYY-MM-DD': [staffId,...] }
+  var _today     = dateKey(new Date());
+
+  // 表示中の年月
+  var _curYear  = new Date().getFullYear();
+  var _curMonth = new Date().getMonth(); // 0-indexed
+
+  // 過去に戻れる月数・未来に進める月数
+  var MIN_MONTH_OFFSET = -1;
+  var MAX_MONTH_OFFSET = 3;
+  var _baseYear  = new Date().getFullYear();
+  var _baseMonth = new Date().getMonth();
 
   /* ===== 起動 ===== */
   onFbReady(function () {
@@ -190,7 +242,7 @@
     });
   });
 
-  /* ===== スタッフ読み込み → 週表示 ===== */
+  /* ===== スタッフ読み込み ===== */
   function loadStaffThenRender() {
     uiShowLoading('読み込み中...');
     firebase.firestore()
@@ -203,7 +255,8 @@
           var d = doc.data();
           _staffList.push({ id: doc.id, name: d.name || doc.id, color: d.color || '#ccc' });
         });
-        return loadWeekShifts();
+        buildLegend();
+        return loadMonthShifts();
       })
       .catch(function (e) {
         uiForceHideLoading();
@@ -211,11 +264,32 @@
       });
   }
 
-  /* ===== 週のシフトを読み込む ===== */
-  function loadWeekShifts() {
-    var days = getWeekDays(WEEK_OFFSET);
-    var startKey = days[0];
-    var endKey   = days[6];
+  /* ===== 凡例 ===== */
+  function buildLegend() {
+    var leg = document.getElementById('legend');
+    leg.innerHTML = '';
+    if (_staffList.length === 0) {
+      leg.textContent = 'スタッフが登録されていません';
+      return;
+    }
+    for (var i = 0; i < _staffList.length; i++) {
+      var item = document.createElement('div');
+      item.className = 'legend-item';
+      var dot = document.createElement('div');
+      dot.className = 'legend-dot';
+      dot.style.background = _staffList[i].color;
+      item.appendChild(dot);
+      var name = document.createElement('span');
+      name.textContent = _staffList[i].name;
+      item.appendChild(name);
+      leg.appendChild(item);
+    }
+  }
+
+  /* ===== 月シフト読み込み ===== */
+  function loadMonthShifts() {
+    var startKey = dateKey(new Date(_curYear, _curMonth, 1));
+    var endKey   = dateKey(new Date(_curYear, _curMonth + 1, 0));
 
     return firebase.firestore()
       .collection('salons').doc(_salonId)
@@ -228,246 +302,181 @@
         _shiftMap = {};
         snap.forEach(function (doc) {
           var d = doc.data();
-          _shiftMap[d.date] = d.staffIds || [];
+          if (d.date) { _shiftMap[d.date] = d.staffIds || []; }
         });
-        renderWeek(days);
+        renderCalendar();
       });
   }
 
-  /* ===== 週描画 ===== */
-  function renderWeek(days) {
-    var label = document.getElementById('weekLabel');
-    label.textContent = days[0] + ' 〜 ' + days[6];
+  /* ===== カレンダー描画 ===== */
+  function renderCalendar() {
+    // 月ラベル
+    document.getElementById('monthLabel').textContent =
+      _curYear + '年' + (_curMonth + 1) + '月';
 
-    document.getElementById('prevBtn').disabled = (WEEK_OFFSET <= 0);
-    document.getElementById('nextBtn').disabled = (WEEK_OFFSET >= MAX_FUTURE_WEEKS);
+    // ナビボタン制御
+    var offset = (_curYear - _baseYear) * 12 + (_curMonth - _baseMonth);
+    document.getElementById('prevBtn').disabled = (offset <= MIN_MONTH_OFFSET);
+    document.getElementById('nextBtn').disabled = (offset >= MAX_MONTH_OFFSET);
 
-    var list = document.getElementById('dayList');
-    list.innerHTML = '';
+    var grid = document.getElementById('calGrid');
+    grid.innerHTML = '';
 
-    for (var i = 0; i < days.length; i++) {
-      list.appendChild(buildDayCard(days[i]));
+    // 月の1日の曜日（月曜始まり: 月=0, 日=6）
+    var firstDay = new Date(_curYear, _curMonth, 1).getDay();
+    var blanks = (firstDay === 0) ? 6 : firstDay - 1;
+    var daysInMonth = new Date(_curYear, _curMonth + 1, 0).getDate();
+
+    // 空白セル
+    for (var b = 0; b < blanks; b++) {
+      var empty = document.createElement('div');
+      empty.className = 'cal-cell empty';
+      grid.appendChild(empty);
     }
 
-    // 今日のカードを自動で開く
-    var todayCard = document.getElementById('body_' + _today);
-    if (todayCard) { todayCard.classList.add('open'); }
+    // 日付セル
+    for (var d = 1; d <= daysInMonth; d++) {
+      grid.appendChild(buildCell(d));
+    }
   }
 
-  /* ===== 日カード生成 ===== */
-  function buildDayCard(dateKey) {
-    var date   = parseDate(dateKey);
-    var dow    = date.getDay();
-    var isPast = dateKey < _today;
-    var isToday = dateKey === _today;
-    var staffIds = _shiftMap[dateKey] || [];
-    var hasShift = staffIds.length > 0;
+  /* ===== 日付セル生成 ===== */
+  function buildCell(day) {
+    var dk = dateKey(new Date(_curYear, _curMonth, day));
+    var dow = new Date(_curYear, _curMonth, day).getDay(); // 0=日,6=土
+    var isPast   = dk < _today;
+    var isToday  = dk === _today;
+    var staffIds = _shiftMap[dk] || [];
 
-    var card = document.createElement('div');
-    card.className = 'day-card' +
-      (isToday ? ' today' : '') +
-      (isPast   ? ' past'  : '');
+    var cell = document.createElement('div');
+    cell.className = 'cal-cell' +
+      (isPast   ? ' past'   : '') +
+      (isToday  ? ' today'  : '') +
+      (dow === 6 ? ' sat'   : '') +
+      (dow === 0 ? ' sun'   : '');
 
-    /* ヘッダー（クリックで開閉） */
-    var header = document.createElement('div');
-    header.className = 'day-header';
-    header.onclick = function () { toggleBody(dateKey); };
-
-    var left = document.createElement('div');
-    left.style.display = 'flex';
-    left.style.alignItems = 'center';
-
-    var dateEl = document.createElement('span');
-    dateEl.className = 'day-date';
-    dateEl.textContent = (date.getMonth() + 1) + '/' + date.getDate();
-    left.appendChild(dateEl);
-
+    // 日付
+    var dateEl = document.createElement('div');
+    dateEl.className = 'cell-date';
+    dateEl.textContent = day;
     if (isToday) {
-      var todayMark = document.createElement('span');
-      todayMark.className = 'today-mark';
-      todayMark.textContent = '今日';
-      left.appendChild(todayMark);
+      var dot = document.createElement('span');
+      dot.className = 'today-dot';
+      dateEl.appendChild(dot);
     }
+    cell.appendChild(dateEl);
 
-    var dowEl = document.createElement('span');
-    dowEl.className = 'day-dow' + (dow === 0 ? ' sun' : dow === 6 ? ' sat' : '');
-    dowEl.textContent = '（' + DOW_LABELS[dow] + '）';
-    left.appendChild(dowEl);
-
-    header.appendChild(left);
-
-    /* 出勤状況バッジ */
-    var status = document.createElement('div');
-    if (hasShift) {
-      status.className = 'day-status on';
-      status.textContent = staffIds.length + '人出勤';
-    } else {
-      status.className = 'day-status off';
-      status.textContent = '全員オフ';
-    }
-    header.appendChild(status);
-    card.appendChild(header);
-
-    /* ボディ（チェックリスト） */
-    var body = document.createElement('div');
-    body.className = 'day-body';
-    body.id = 'body_' + dateKey;
-
-    if (_staffList.length === 0) {
-      var ns = document.createElement('div');
-      ns.className = 'no-staff';
-      ns.textContent = 'スタッフが登録されていません';
-      body.appendChild(ns);
-    } else {
+    // スタッフチェック
+    if (_staffList.length > 0) {
       var checks = document.createElement('div');
-      checks.className = 'staff-checks';
-
-      for (var j = 0; j < _staffList.length; j++) {
+      checks.className = 'cell-checks';
+      for (var i = 0; i < _staffList.length; i++) {
         (function (staff) {
-          var label = document.createElement('label');
-          label.className = 'staff-check-item';
+          var lbl = document.createElement('label');
+          lbl.className = 'cell-check';
 
           var cb = document.createElement('input');
           cb.type = 'checkbox';
-          cb.id = 'chk_' + dateKey + '_' + staff.id;
+          cb.id = 'chk_' + dk + '_' + staff.id;
           cb.value = staff.id;
           cb.checked = staffIds.indexOf(staff.id) >= 0;
           if (isPast) { cb.disabled = true; }
-          label.appendChild(cb);
+          lbl.appendChild(cb);
 
-          var dot = document.createElement('div');
-          dot.className = 'staff-color-dot';
-          dot.style.background = staff.color;
-          label.appendChild(dot);
+          var cdot = document.createElement('div');
+          cdot.className = 'cell-check-dot';
+          cdot.style.background = staff.color;
+          lbl.appendChild(cdot);
 
-          var name = document.createElement('span');
-          name.className = 'staff-check-name';
-          name.textContent = staff.name;
-          label.appendChild(name);
+          var cname = document.createElement('span');
+          cname.className = 'cell-check-name';
+          cname.textContent = staff.name;
+          lbl.appendChild(cname);
 
-          checks.appendChild(label);
-        })(_staffList[j]);
+          checks.appendChild(lbl);
+        })(_staffList[i]);
       }
-      body.appendChild(checks);
+      cell.appendChild(checks);
+    }
 
-      /* 保存ボタン（過去日は非表示） */
-      if (!isPast) {
-        var saveBtn = document.createElement('button');
-        saveBtn.className = 'save-btn';
-        saveBtn.textContent = '保存';
-        saveBtn.onclick = (function (dk) {
-          return function () { saveShift(dk); };
-        })(dateKey);
-        body.appendChild(saveBtn);
+    return cell;
+  }
+
+  /* ===== まとめて保存 ===== */
+  function saveAll() {
+    var daysInMonth = new Date(_curYear, _curMonth + 1, 0).getDate();
+    var batch = firebase.firestore().batch();
+    var col = firebase.firestore()
+      .collection('salons').doc(_salonId).collection('shifts');
+    var count = 0;
+
+    for (var d = 1; d <= daysInMonth; d++) {
+      var dk = dateKey(new Date(_curYear, _curMonth, d));
+      if (dk < _today) { continue; } // 過去日はスキップ
+
+      var checkedIds = [];
+      for (var i = 0; i < _staffList.length; i++) {
+        var cb = document.getElementById('chk_' + dk + '_' + _staffList[i].id);
+        if (cb && cb.checked) { checkedIds.push(_staffList[i].id); }
+      }
+
+      // チェックがある日 or 既存データがある日（解除も保存）
+      var hadData = !!_shiftMap[dk];
+      if (checkedIds.length > 0 || hadData) {
+        batch.set(col.doc(dk), {
+          date: dk,
+          staffIds: checkedIds,
+          updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+        });
+        _shiftMap[dk] = checkedIds;
+        count++;
       }
     }
 
-    card.appendChild(body);
-    return card;
-  }
-
-  /* ===== 開閉トグル ===== */
-  function toggleBody(dateKey) {
-    var body = document.getElementById('body_' + dateKey);
-    if (!body) { return; }
-    body.classList.toggle('open');
-  }
-
-  /* ===== シフト保存 ===== */
-  function saveShift(dateKey) {
-    var checkedIds = [];
-    for (var i = 0; i < _staffList.length; i++) {
-      var cb = document.getElementById('chk_' + dateKey + '_' + _staffList[i].id);
-      if (cb && cb.checked) { checkedIds.push(_staffList[i].id); }
+    if (count === 0) {
+      uiToast('変更がありません');
+      return;
     }
 
+    var btn = document.getElementById('saveAllBtn');
+    btn.disabled = true;
     uiShowLoading('保存中...');
-    firebase.firestore()
-      .collection('salons').doc(_salonId)
-      .collection('shifts').doc(dateKey)
-      .set({
-        date: dateKey,
-        staffIds: checkedIds,
-        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-      })
+
+    batch.commit()
       .then(function () {
         uiForceHideLoading();
-        _shiftMap[dateKey] = checkedIds;
-        uiToast(checkedIds.length > 0
-          ? checkedIds.length + '人の出勤を保存しました'
-          : 'この日は全員オフとして保存しました');
-        // バッジだけ更新
-        refreshDayCard(dateKey);
+        btn.disabled = false;
+        uiToast('シフトを保存しました');
       })
       .catch(function (e) {
         uiForceHideLoading();
+        btn.disabled = false;
         uiToast('保存に失敗しました: ' + e.message);
       });
   }
+  window.saveAll = saveAll;
 
-  /* ===== バッジ更新（カード全体を再描画しない軽量版） ===== */
-  function refreshDayCard(dateKey) {
-    var staffIds = _shiftMap[dateKey] || [];
-    var hasShift = staffIds.length > 0;
-    // status バッジを探して更新
-    var body = document.getElementById('body_' + dateKey);
-    if (!body) { return; }
-    var card = body.parentElement;
-    var status = card.querySelector('.day-status');
-    if (!status) { return; }
-    if (hasShift) {
-      status.className = 'day-status on';
-      status.textContent = staffIds.length + '人出勤';
-    } else {
-      status.className = 'day-status off';
-      status.textContent = '全員オフ';
-    }
-  }
-
-  /* ===== 週切り替え ===== */
-  function changeWeek(dir) {
-    var next = WEEK_OFFSET + dir;
-    if (next < 0 || next > MAX_FUTURE_WEEKS) { return; }
-    WEEK_OFFSET = next;
+  /* ===== 月切り替え ===== */
+  function changeMonth(dir) {
+    var offset = (_curYear - _baseYear) * 12 + (_curMonth - _baseMonth) + dir;
+    if (offset < MIN_MONTH_OFFSET || offset > MAX_MONTH_OFFSET) { return; }
+    _curMonth += dir;
+    if (_curMonth < 0) { _curMonth = 11; _curYear--; }
+    if (_curMonth > 11) { _curMonth = 0;  _curYear++; }
     uiShowLoading('読み込み中...');
-    loadWeekShifts().catch(function (e) {
+    loadMonthShifts().catch(function (e) {
       uiForceHideLoading();
       uiToast('読み込みに失敗しました: ' + e.message);
     });
   }
-  window.changeWeek = changeWeek;
+  window.changeMonth = changeMonth;
 
   /* ===== ユーティリティ ===== */
-  function toDateKey(d) {
-    var y = d.getFullYear();
-    var m = ('0' + (d.getMonth() + 1)).slice(-2);
-    var day = ('0' + d.getDate()).slice(-2);
-    return y + '-' + m + '-' + day;
-  }
-
-  function parseDate(key) {
-    var parts = key.split('-');
-    return new Date(
-      parseInt(parts[0], 10),
-      parseInt(parts[1], 10) - 1,
-      parseInt(parts[2], 10)
-    );
-  }
-
-  /* 指定週オフセットの月〜日（月曜始まり）7日分を返す */
-  function getWeekDays(weekOffset) {
-    var today = new Date();
-    var dow   = today.getDay(); // 0=日
-    // 月曜日に揃える
-    var monday = new Date(today);
-    monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1) + weekOffset * 7);
-    var days = [];
-    for (var i = 0; i < 7; i++) {
-      var d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      days.push(toDateKey(d));
-    }
-    return days;
+  function dateKey(d) {
+    var y  = d.getFullYear();
+    var m  = ('0' + (d.getMonth() + 1)).slice(-2);
+    var dd = ('0' + d.getDate()).slice(-2);
+    return y + '-' + m + '-' + dd;
   }
 
 })();
