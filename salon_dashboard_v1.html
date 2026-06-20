@@ -5,12 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>TORITA - ダッシュボード</title>
 <!--
-  salon_dashboard_v1.html  -  TORITA Phase C / C-2
-  修正: 2026/6/7
-    - 左上ロゴ画像化 (torita_logo.png)
-    - トライアル残日数バナー追加
-    - 解約リンク追加（プラン・解約ボタン）
-    - 操作マニュアルPDFリンク追加
+  salon_dashboard_v1.html  -  TORITA Phase I-step2
+  修正: 2026/6/19
+    - チームプラン対応：planId='team' の時にチーム管理セクションを表示
+    - ソロプランはチーム管理セクションの代わりに「アップグレード」カードを表示
+    - NAV3（チーム管理）：スタッフ登録・設備設定・シフト管理
 -->
 <style>
   :root{
@@ -20,6 +19,7 @@
     --gn:#7b9e87; --gl:#eef3ef;
     --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
     --go:#c9a84c; --gol:#fdf6e3;
+    --tm:#7b8eb5; --tl:#eef0f8;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{height:100%;}
@@ -138,6 +138,17 @@
     border-style:dashed; border-color:var(--ac);
     background:var(--al);
   }
+  /* チームプランアップグレードカード */
+  .nav-card.upgrade-card{
+    border-style:dashed; border-color:var(--tm);
+    background:var(--tl);
+    cursor:pointer;
+  }
+  .nav-card.upgrade-card:hover{
+    border-color:var(--tm); border-style:solid;
+    box-shadow:0 8px 22px rgba(123,142,181,.18);
+  }
+  .nav-card.upgrade-card .nav-label{ color:var(--tm); }
   .nav-ico{
     font-size:26px; margin-bottom:9px; line-height:1;
   }
@@ -151,6 +162,9 @@
     font-size:10px; color:var(--mu);
     background:var(--s2); border-radius:10px;
     padding:2px 9px;
+  }
+  .nav-badge.team-badge{
+    color:var(--tm); background:var(--tl);
   }
 
   /* ===== 顧客用URL ===== */
@@ -246,16 +260,29 @@
     </div>
   </div>
 
-  <!-- 機能ナビ -->
+  <!-- 予約・顧客 -->
   <div class="sec-title">予約・顧客</div>
   <div class="nav-grid" id="navGrid1"></div>
 
+  <!-- 店舗設定 -->
   <div class="sec-title" style="margin-top:22px;">店舗設定</div>
   <div class="nav-grid" id="navGrid2"></div>
 
-  <!-- マニュアル・プラン管理 -->
+  <!-- チーム管理（planId='team' のみ表示） -->
+  <div id="teamSection" style="display:none;">
+    <div class="sec-title" style="margin-top:22px;">チーム管理</div>
+    <div class="nav-grid" id="navGrid3"></div>
+  </div>
+
+  <!-- ソロプラン：アップグレード誘導（planId!='team' の時表示） -->
+  <div id="upgradeSection" style="display:none;">
+    <div class="sec-title" style="margin-top:22px;">チーム管理</div>
+    <div class="nav-grid" id="navGrid3upgrade"></div>
+  </div>
+
+  <!-- サポート・契約 -->
   <div class="sec-title" style="margin-top:22px;">サポート・契約</div>
-  <div class="nav-grid" id="navGrid3"></div>
+  <div class="nav-grid" id="navGrid4"></div>
 
   <!-- 解約エリア（JS で表示） -->
   <div id="planArea" style="display:none;"></div>
@@ -276,30 +303,58 @@
 <script>
 (function () {
 
+  /* ===== ナビ定義 ===== */
+
   var NAV1 = [
-    { ico: '\uD83D\uDCC5', label: 'カレンダー',   desc: '予約の確認・登録',    href: 'salon_calendar_v8.html',   ready: true },
-    { ico: '\uD83D\uDC65', label: '顧客管理',     desc: '顧客一覧・詳細',      href: 'salon_customers_v1.html',  ready: true },
-    { ico: '\uD83D\uDCCB', label: '顧客カルテ',   desc: '施術履歴・メモ・写真', href: 'salon_karte_v1.html',      ready: true }
+    { ico: '\uD83D\uDCC5', label: 'カレンダー',   desc: '予約の確認・登録',     href: 'salon_calendar_v8.html',   ready: true },
+    { ico: '\uD83D\uDC65', label: '顧客管理',     desc: '顧客一覧・詳細',       href: 'salon_customers_v1.html',  ready: true },
+    { ico: '\uD83D\uDCCB', label: '顧客カルテ',   desc: '施術履歴・メモ・写真',  href: 'salon_karte_v1.html',      ready: true }
   ];
+
   var NAV2 = [
     { ico: '\u2702\uFE0F', label: 'メニュー設定',   desc: 'メニュー・料金',    href: 'salon_menus_v1.html',   ready: true },
     { ico: '\uD83D\uDD52', label: '営業時間',       desc: '開店・定休日',      href: 'salon_hours_v1.html',   ready: true },
     { ico: '\uD83D\uDCDD', label: 'キャンセル規定', desc: 'キャンセル受付',    href: 'salon_cancel_v1.html',  ready: true },
     { ico: '\u2B50',       label: 'スタンプ設定',   desc: 'スタンプカード',    href: 'salon_stamp_v1.html',   ready: true }
   ];
-  var NAV3 = [
+
+  /* チームプラン専用ナビ */
+  var NAV3_TEAM = [
+    { ico: '\uD83D\uDC64', label: 'スタッフ管理',  desc: '登録・編集・削除',   href: 'salon_staff_v1.html',     ready: true },
+    { ico: '\uD83D\uDECB\uFE0F', label: '設備設定', desc: 'ベッド・スペース管理', href: 'salon_resource_v1.html', ready: true },
+    { ico: '\uD83D\uDDD3\uFE0F', label: 'シフト管理', desc: '出勤スタッフの設定', href: 'salon_shift_v1.html',   ready: false }
+  ];
+
+  /* ソロプラン：アップグレード誘導カード */
+  var NAV3_UPGRADE = [
+    { ico: '\uD83D\uDC64', label: 'スタッフ管理',    desc: 'チームプランで利用可', upgrade: true },
+    { ico: '\uD83D\uDECB\uFE0F', label: '設備設定',  desc: 'チームプランで利用可', upgrade: true },
+    { ico: '\uD83D\uDDD3\uFE0F', label: 'シフト管理', desc: 'チームプランで利用可', upgrade: true }
+  ];
+
+  var NAV4 = [
     { ico: '\uD83D\uDCD6', label: '操作マニュアル', desc: 'PDF で確認',
       href: 'TORITA_manual.pdf', ready: true, isManual: true }
   ];
 
+  /* ===== カード生成 ===== */
   function buildCard(item) {
-    var card = document.createElement(item.ready ? 'a' : 'div');
-    card.className = 'nav-card' + (item.ready ? '' : ' disabled') + (item.isManual ? ' manual-card' : '');
-    if (item.ready) {
-      card.setAttribute('href', item.href);
-      if (item.href.indexOf('.pdf') >= 0) {
-        card.setAttribute('target', '_blank');
-        card.setAttribute('rel', 'noopener');
+    var card;
+    if (item.upgrade) {
+      card = document.createElement('div');
+      card.className = 'nav-card upgrade-card';
+      card.onclick = function () {
+        uiToast('チームプランへのアップグレードはサポートまでお問い合わせください');
+      };
+    } else {
+      card = document.createElement(item.ready ? 'a' : 'div');
+      card.className = 'nav-card' + (item.ready ? '' : ' disabled') + (item.isManual ? ' manual-card' : '');
+      if (item.ready) {
+        card.setAttribute('href', item.href);
+        if (item.href && item.href.indexOf('.pdf') >= 0) {
+          card.setAttribute('target', '_blank');
+          card.setAttribute('rel', 'noopener');
+        }
       }
     }
     var ico = document.createElement('div');
@@ -314,23 +369,40 @@
     desc.className = 'nav-desc';
     desc.textContent = item.desc;
     card.appendChild(desc);
-    if (!item.ready) {
+    if (item.upgrade) {
       var badge = document.createElement('span');
-      badge.className = 'nav-badge';
-      badge.textContent = '準備中';
+      badge.className = 'nav-badge team-badge';
+      badge.textContent = 'チームプラン';
       card.appendChild(badge);
+    } else if (!item.ready) {
+      var badge2 = document.createElement('span');
+      badge2.className = 'nav-badge';
+      badge2.textContent = '準備中';
+      card.appendChild(badge2);
     }
     return card;
   }
 
-  function renderNav() {
+  /* ===== ナビ描画（planId を見てチーム/ソロ分岐） ===== */
+  function renderNav(planId) {
     var g1 = document.getElementById('navGrid1');
     var g2 = document.getElementById('navGrid2');
     var g3 = document.getElementById('navGrid3');
+    var g3u = document.getElementById('navGrid3upgrade');
+    var g4 = document.getElementById('navGrid4');
     var i;
+
     for (i = 0; i < NAV1.length; i++) { g1.appendChild(buildCard(NAV1[i])); }
     for (i = 0; i < NAV2.length; i++) { g2.appendChild(buildCard(NAV2[i])); }
-    for (i = 0; i < NAV3.length; i++) { g3.appendChild(buildCard(NAV3[i])); }
+    for (i = 0; i < NAV4.length; i++) { g4.appendChild(buildCard(NAV4[i])); }
+
+    if (planId === 'team') {
+      document.getElementById('teamSection').style.display = '';
+      for (i = 0; i < NAV3_TEAM.length; i++) { g3.appendChild(buildCard(NAV3_TEAM[i])); }
+    } else {
+      document.getElementById('upgradeSection').style.display = '';
+      for (i = 0; i < NAV3_UPGRADE.length; i++) { g3u.appendChild(buildCard(NAV3_UPGRADE[i])); }
+    }
   }
 
   function setText(id, text) {
@@ -338,7 +410,7 @@
     if (el) { el.textContent = (text == null) ? '' : String(text); }
   }
 
-  // ----- トライアルバナー表示 -----
+  /* ===== トライアルバナー ===== */
   function renderTrialBanner(planStatus, trialEndsAt) {
     var banner = document.getElementById('trialBanner');
     if (!banner) { return; }
@@ -350,11 +422,7 @@
       var diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
 
       banner.style.display = 'flex';
-      if (diffDays <= 3) {
-        banner.className = 'trial-banner warn';
-      } else {
-        banner.className = 'trial-banner';
-      }
+      banner.className = diffDays <= 3 ? 'trial-banner warn' : 'trial-banner';
 
       var daysText = diffDays > 0 ? ('残り ' + diffDays + ' 日') : '本日終了';
       banner.innerHTML =
@@ -379,13 +447,11 @@
   }
 
   function formatDate(d) {
-    return (d.getFullYear()) + '/' +
-      pad2(d.getMonth() + 1) + '/' +
-      pad2(d.getDate());
+    return d.getFullYear() + '/' + pad2(d.getMonth() + 1) + '/' + pad2(d.getDate());
   }
   function pad2(n) { return n < 10 ? '0' + n : String(n); }
 
-  // ----- 解約エリア表示 -----
+  /* ===== 解約エリア ===== */
   function renderPlanArea(planStatus) {
     var area = document.getElementById('planArea');
     if (!area) { return; }
@@ -404,7 +470,6 @@
       var btn = document.getElementById('cancelPlanBtn');
       btn.disabled = true;
       btn.textContent = '開いています...';
-
       var fns = firebase.app().functions('asia-northeast1');
       var callable = fns.httpsCallable('createCustomerPortalSession');
       callable({}).then(function (res) {
@@ -424,7 +489,7 @@
     };
   }
 
-  // ----- サロン情報表示 -----
+  /* ===== サロン情報 ===== */
   function renderSalon(data) {
     var info     = (data && data.info)     ? data.info     : null;
     var settings = (data && data.settings) ? data.settings : null;
@@ -444,7 +509,7 @@
     }
   }
 
-  // ----- 顧客用URL -----
+  /* ===== 顧客用URL ===== */
   var _customerUrl = '';
 
   function setCustomerUrl(salonId) {
@@ -478,7 +543,7 @@
     document.body.removeChild(ta);
   }
 
-  // ----- ログアウト -----
+  /* ===== ログアウト ===== */
   function doLogout() {
     uiConfirm('ログアウトしますか?', function () {
       authLogout(function () {
@@ -488,9 +553,7 @@
   }
   window.doLogout = doLogout;
 
-  // ----- 起動 -----
-  renderNav();
-
+  /* ===== 起動 ===== */
   onFbReady(function () {
     requireSalonStaff(function (isStaff) {
       if (!isStaff) {
@@ -521,12 +584,14 @@
           .collection('config').doc('settings')
           .get()
           .then(function (doc) {
-            var d          = doc.exists ? doc.data() : {};
-            var st         = d.planStatus    || null;
-            var trialEnds  = d.trialEndsAt   || null;
+            var d         = doc.exists ? doc.data() : {};
+            var st        = d.planStatus  || null;
+            var trialEnds = d.trialEndsAt || null;
+            var planId    = d.planId      || 'solo'; // 未設定はソロ扱い
 
             if (st === 'trial' || st === 'active') {
               setCustomerUrl(uid);
+              renderNav(planId);
               renderTrialBanner(st, trialEnds);
               renderPlanArea(st);
               dbLoadSalonDashboard(function (data) {

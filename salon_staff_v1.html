@@ -1,0 +1,544 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TORITA - スタッフ管理</title>
+<!--
+  salon_staff_v1.html  -  TORITA Phase I-step2
+  作成: 2026/6/19
+  機能:
+    - スタッフ一覧表示
+    - スタッフ追加（名前・色）
+    - スタッフ名・色の編集
+    - スタッフ削除（予約が残っている場合は削除不可、非表示のみ）
+    - 上限10人
+  DB: salons/{salonId}/staffs/{staffId}
+    staffId = Firestoreの自動採番ID（Auth UIDとは無関係）
+    フィールド: name, color, active, createdAt, updatedAt
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --gn:#7b9e87; --gl:#eef3ef;
+    --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2); color:var(--tx);
+    -webkit-text-size-adjust:100%; min-height:100vh;
+  }
+
+  /* ===== ヘッダー ===== */
+  .topbar{
+    background:#fff; border-bottom:1px solid var(--bd);
+    padding:12px 20px;
+    display:flex; align-items:center; gap:12px;
+    position:sticky; top:0; z-index:10;
+  }
+  .back-btn{
+    background:none; border:none; font-size:20px;
+    cursor:pointer; padding:4px 6px; color:var(--ac);
+    line-height:1;
+  }
+  .page-title{
+    font-size:16px; font-weight:600; color:var(--ad); flex:1;
+  }
+
+  /* ===== コンテナ ===== */
+  .wrap{max-width:600px; margin:0 auto; padding:22px 18px 60px;}
+
+  /* ===== 追加ボタン ===== */
+  .add-btn{
+    width:100%; padding:14px;
+    background:var(--ac); color:#fff;
+    border:none; border-radius:12px;
+    font-size:15px; font-weight:600;
+    cursor:pointer; font-family:inherit;
+    margin-bottom:20px;
+    display:flex; align-items:center; justify-content:center; gap:8px;
+  }
+  .add-btn:active{ opacity:.85; }
+  .add-btn:disabled{ opacity:.5; cursor:default; }
+
+  /* ===== スタッフカード ===== */
+  .staff-list{ display:flex; flex-direction:column; gap:10px; }
+
+  .staff-card{
+    background:#fff; border-radius:14px;
+    border:1px solid var(--bd);
+    padding:16px 18px;
+    display:flex; align-items:center; gap:14px;
+  }
+  .staff-card.inactive{ opacity:.5; }
+
+  .staff-color-dot{
+    width:36px; height:36px; border-radius:50%;
+    flex-shrink:0; border:2px solid rgba(0,0,0,.08);
+  }
+  .staff-info{ flex:1; min-width:0; }
+  .staff-name{
+    font-size:15px; font-weight:600; color:var(--ad);
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+  .staff-sub{
+    font-size:11.5px; color:var(--mu); margin-top:2px;
+  }
+  .staff-actions{ display:flex; gap:8px; flex-shrink:0; }
+  .icon-btn{
+    background:none; border:1.5px solid var(--bd);
+    border-radius:8px; padding:7px 10px;
+    font-size:14px; cursor:pointer;
+    font-family:inherit; color:var(--mu);
+    transition:border-color .12s, color .12s;
+  }
+  .icon-btn:hover{ border-color:var(--ac); color:var(--ac); }
+  .icon-btn.del:hover{ border-color:var(--rd); color:var(--rd); }
+
+  /* ===== 空状態 ===== */
+  .empty-state{
+    text-align:center; padding:48px 20px;
+    color:var(--mu); font-size:14px; line-height:2;
+  }
+  .empty-ico{ font-size:40px; margin-bottom:12px; }
+
+  /* ===== モーダル ===== */
+  .modal-overlay{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,.45);
+    z-index:100;
+    display:flex; align-items:center; justify-content:center;
+    padding:20px;
+  }
+  .modal{
+    background:#fff; border-radius:18px;
+    padding:26px 24px; width:100%; max-width:420px;
+    box-shadow:0 20px 60px rgba(0,0,0,.2);
+  }
+  .modal-title{
+    font-size:17px; font-weight:600; color:var(--ad);
+    margin-bottom:20px;
+  }
+  .form-row{ margin-bottom:16px; }
+  .form-label{
+    display:block; font-size:12px; color:var(--ac);
+    font-weight:600; margin-bottom:6px; letter-spacing:.04em;
+  }
+  .form-input{
+    width:100%; border:1.5px solid var(--bd);
+    border-radius:9px; padding:10px 12px;
+    font-size:14px; font-family:inherit; color:var(--tx);
+    background:#fff; outline:none;
+    -webkit-appearance:none;
+  }
+  .form-input:focus{ border-color:var(--ac); }
+
+  /* カラーパレット */
+  .color-palette{
+    display:flex; flex-wrap:wrap; gap:10px; margin-top:4px;
+  }
+  .color-swatch{
+    width:32px; height:32px; border-radius:50%;
+    border:2px solid transparent;
+    cursor:pointer; transition:transform .1s, border-color .1s;
+  }
+  .color-swatch:hover{ transform:scale(1.15); }
+  .color-swatch.selected{
+    border-color:var(--tx);
+    transform:scale(1.15);
+  }
+
+  .modal-actions{
+    display:flex; gap:10px; margin-top:22px;
+  }
+  .btn-cancel{
+    flex:1; padding:12px;
+    background:none; border:1.5px solid var(--bd);
+    border-radius:10px; font-size:14px;
+    cursor:pointer; font-family:inherit; color:var(--mu);
+  }
+  .btn-save{
+    flex:2; padding:12px;
+    background:var(--ac); color:#fff;
+    border:none; border-radius:10px; font-size:14px;
+    font-weight:600; cursor:pointer; font-family:inherit;
+  }
+  .btn-save:disabled{ opacity:.5; cursor:default; }
+  .btn-del{
+    flex:1; padding:12px;
+    background:none; border:1.5px solid var(--rd);
+    border-radius:10px; font-size:14px;
+    cursor:pointer; font-family:inherit; color:var(--rd);
+  }
+
+  /* ===== 上限バッジ ===== */
+  .count-badge{
+    text-align:right; font-size:12px; color:var(--mu);
+    margin-bottom:12px;
+  }
+  .count-badge.warn{ color:var(--rd); font-weight:600; }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back-btn" onclick="history.back()">&#8592;</button>
+  <div class="page-title">スタッフ管理</div>
+</div>
+
+<div class="wrap">
+  <div class="count-badge" id="countBadge"></div>
+  <button class="add-btn" id="addBtn" onclick="openAddModal()">
+    &#43; スタッフを追加
+  </button>
+  <div class="staff-list" id="staffList">
+    <!-- JSで描画 -->
+  </div>
+</div>
+
+<!-- 追加・編集モーダル -->
+<div class="modal-overlay" id="modalOverlay" style="display:none;" onclick="overlayClick(event)">
+  <div class="modal">
+    <div class="modal-title" id="modalTitle">スタッフを追加</div>
+
+    <div class="form-row">
+      <label class="form-label">名前（10文字以内）</label>
+      <input class="form-input" id="inputName" type="text" maxlength="10" placeholder="例：田中 花子">
+    </div>
+
+    <div class="form-row">
+      <label class="form-label">カレンダー表示色</label>
+      <div class="color-palette" id="colorPalette"></div>
+    </div>
+
+    <div class="modal-actions" id="modalActions">
+      <button class="btn-cancel" onclick="closeModal()">キャンセル</button>
+      <button class="btn-save" id="saveBtn" onclick="saveStaff()">保存</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script src="firebase-init.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_ui.js"></script>
+
+<script>
+(function () {
+
+  var MAX_STAFF = 10;
+
+  /* カラーパレット定義 */
+  var COLORS = [
+    '#F4A8B2', '#F4C8A0', '#F4E0A0',
+    '#A8D4A8', '#A8C8D4', '#A8A8D4',
+    '#D4A8D4', '#C4A882', '#9ABFBF',
+    '#E8B4A0', '#B4D4A0', '#A0B4D4'
+  ];
+
+  var _salonId = null;
+  var _staffList = [];       // 現在のスタッフ一覧
+  var _editingId = null;     // 編集中のstaffId（null=新規追加）
+  var _selectedColor = COLORS[0];
+
+  /* ===== 起動 ===== */
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (!isStaff) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+      var user = firebase.auth().currentUser;
+      _salonId = user ? user.uid : null;
+      if (!_salonId) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+      buildColorPalette();
+      loadStaffList();
+    });
+  });
+
+  /* ===== カラーパレット生成 ===== */
+  function buildColorPalette() {
+    var palette = document.getElementById('colorPalette');
+    palette.innerHTML = '';
+    for (var i = 0; i < COLORS.length; i++) {
+      (function (color) {
+        var sw = document.createElement('div');
+        sw.className = 'color-swatch' + (color === _selectedColor ? ' selected' : '');
+        sw.style.background = color;
+        sw.onclick = function () { selectColor(color); };
+        palette.appendChild(sw);
+      })(COLORS[i]);
+    }
+  }
+
+  function selectColor(color) {
+    _selectedColor = color;
+    var swatches = document.querySelectorAll('.color-swatch');
+    for (var i = 0; i < swatches.length; i++) {
+      swatches[i].className = 'color-swatch' +
+        (swatches[i].style.background === color ||
+         rgbToHex(swatches[i].style.background) === color.toLowerCase()
+         ? ' selected' : '');
+    }
+  }
+
+  /* rgb(r,g,b) → #rrggbb 変換（ブラウザがstyle.backgroundをrgbで返すため） */
+  function rgbToHex(rgb) {
+    var m = (rgb || '').match(/\d+/g);
+    if (!m || m.length < 3) { return ''; }
+    return '#' + [m[0], m[1], m[2]].map(function (v) {
+      return ('0' + parseInt(v).toString(16)).slice(-2);
+    }).join('');
+  }
+
+  /* ===== スタッフ一覧ロード ===== */
+  function loadStaffList() {
+    uiShowLoading('読み込み中...');
+    firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('staffs')
+      .orderBy('createdAt', 'asc')
+      .get()
+      .then(function (snap) {
+        uiForceHideLoading();
+        _staffList = [];
+        snap.forEach(function (doc) {
+          _staffList.push({ id: doc.id, data: doc.data() });
+        });
+        renderList();
+      })
+      .catch(function (e) {
+        uiForceHideLoading();
+        uiToast('読み込みに失敗しました: ' + e.message);
+      });
+  }
+
+  /* ===== 一覧描画 ===== */
+  function renderList() {
+    var list = document.getElementById('staffList');
+    list.innerHTML = '';
+
+    /* ownerドキュメントは表示しない（フェーズ1の残留データ） */
+    var displayList = [];
+    for (var i = 0; i < _staffList.length; i++) {
+      if (_staffList[i].id !== 'owner') {
+        displayList.push(_staffList[i]);
+      }
+    }
+
+    /* 上限バッジ */
+    var badge = document.getElementById('countBadge');
+    var count = displayList.length;
+    badge.textContent = count + ' / ' + MAX_STAFF + ' 人';
+    badge.className = 'count-badge' + (count >= MAX_STAFF ? ' warn' : '');
+
+    /* 追加ボタン制御 */
+    document.getElementById('addBtn').disabled = count >= MAX_STAFF;
+
+    if (displayList.length === 0) {
+      list.innerHTML =
+        '<div class="empty-state">' +
+          '<div class="empty-ico">\uD83D\uDC64</div>' +
+          'スタッフがまだ登録されていません<br>' +
+          '「スタッフを追加」から登録してください' +
+        '</div>';
+      return;
+    }
+
+    for (var j = 0; j < displayList.length; j++) {
+      list.appendChild(buildCard(displayList[j]));
+    }
+  }
+
+  function buildCard(item) {
+    var d = item.data;
+    var card = document.createElement('div');
+    card.className = 'staff-card' + (d.active === false ? ' inactive' : '');
+
+    /* 色ドット */
+    var dot = document.createElement('div');
+    dot.className = 'staff-color-dot';
+    dot.style.background = d.color || '#ccc';
+    card.appendChild(dot);
+
+    /* 名前・サブ情報 */
+    var info = document.createElement('div');
+    info.className = 'staff-info';
+    var name = document.createElement('div');
+    name.className = 'staff-name';
+    name.textContent = d.name || '（名前なし）';
+    info.appendChild(name);
+    if (d.active === false) {
+      var sub = document.createElement('div');
+      sub.className = 'staff-sub';
+      sub.textContent = '非表示中';
+      info.appendChild(sub);
+    }
+    card.appendChild(info);
+
+    /* 操作ボタン */
+    var actions = document.createElement('div');
+    actions.className = 'staff-actions';
+
+    var editBtn = document.createElement('button');
+    editBtn.className = 'icon-btn';
+    editBtn.textContent = '\u270F\uFE0F';
+    editBtn.title = '編集';
+    editBtn.onclick = (function (id, data) {
+      return function () { openEditModal(id, data); };
+    })(item.id, d);
+    actions.appendChild(editBtn);
+
+    var delBtn = document.createElement('button');
+    delBtn.className = 'icon-btn del';
+    delBtn.textContent = '\uD83D\uDDD1\uFE0F';
+    delBtn.title = '削除';
+    delBtn.onclick = (function (id, data) {
+      return function () { confirmDelete(id, data); };
+    })(item.id, d);
+    actions.appendChild(delBtn);
+
+    card.appendChild(actions);
+    return card;
+  }
+
+  /* ===== モーダル：追加 ===== */
+  function openAddModal() {
+    _editingId = null;
+    _selectedColor = COLORS[0];
+    document.getElementById('modalTitle').textContent = 'スタッフを追加';
+    document.getElementById('inputName').value = '';
+    buildColorPalette();
+    document.getElementById('modalActions').innerHTML =
+      '<button class="btn-cancel" onclick="closeModal()">キャンセル</button>' +
+      '<button class="btn-save" id="saveBtn" onclick="saveStaff()">追加する</button>';
+    document.getElementById('modalOverlay').style.display = 'flex';
+    setTimeout(function () {
+      document.getElementById('inputName').focus();
+    }, 100);
+  }
+  window.openAddModal = openAddModal;
+
+  /* ===== モーダル：編集 ===== */
+  function openEditModal(id, data) {
+    _editingId = id;
+    _selectedColor = data.color || COLORS[0];
+    document.getElementById('modalTitle').textContent = 'スタッフを編集';
+    document.getElementById('inputName').value = data.name || '';
+    buildColorPalette();
+    /* 選択色をセット */
+    selectColor(_selectedColor);
+    document.getElementById('modalActions').innerHTML =
+      '<button class="btn-cancel" onclick="closeModal()">キャンセル</button>' +
+      '<button class="btn-save" id="saveBtn" onclick="saveStaff()">保存</button>';
+    document.getElementById('modalOverlay').style.display = 'flex';
+    setTimeout(function () {
+      document.getElementById('inputName').focus();
+    }, 100);
+  }
+
+  /* ===== 保存 ===== */
+  function saveStaff() {
+    var name = (document.getElementById('inputName').value || '').trim();
+    if (!name) {
+      uiToast('名前を入力してください');
+      return;
+    }
+    if (name.length > 10) {
+      uiToast('名前は10文字以内にしてください');
+      return;
+    }
+
+    var saveBtn = document.getElementById('saveBtn');
+    if (saveBtn) { saveBtn.disabled = true; }
+
+    var db = firebase.firestore();
+    var col = db.collection('salons').doc(_salonId).collection('staffs');
+
+    if (_editingId) {
+      /* 更新 */
+      col.doc(_editingId).update({
+        name: name,
+        color: _selectedColor,
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).then(function () {
+        closeModal();
+        uiToast('保存しました');
+        loadStaffList();
+      }).catch(function (e) {
+        if (saveBtn) { saveBtn.disabled = false; }
+        uiToast('保存に失敗しました: ' + e.message);
+      });
+    } else {
+      /* 新規追加 */
+      col.add({
+        name: name,
+        color: _selectedColor,
+        active: true,
+        createdAt: firebase.firestore.FieldValue.serverTimestamp(),
+        updatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      }).then(function () {
+        closeModal();
+        uiToast(name + ' を追加しました');
+        loadStaffList();
+      }).catch(function (e) {
+        if (saveBtn) { saveBtn.disabled = false; }
+        uiToast('追加に失敗しました: ' + e.message);
+      });
+    }
+  }
+  window.saveStaff = saveStaff;
+
+  /* ===== 削除確認 ===== */
+  function confirmDelete(id, data) {
+    uiConfirm(
+      '"' + (data.name || 'このスタッフ') + '" を削除しますか？\n' +
+      '過去の予約データは残ります。',
+      function () { deleteStaff(id, data); }
+    );
+  }
+
+  function deleteStaff(id, data) {
+    uiShowLoading('削除中...');
+    firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('staffs').doc(id)
+      .delete()
+      .then(function () {
+        uiForceHideLoading();
+        uiToast((data.name || 'スタッフ') + ' を削除しました');
+        loadStaffList();
+      })
+      .catch(function (e) {
+        uiForceHideLoading();
+        uiToast('削除に失敗しました: ' + e.message);
+      });
+  }
+
+  /* ===== モーダルを閉じる ===== */
+  function closeModal() {
+    document.getElementById('modalOverlay').style.display = 'none';
+  }
+  window.closeModal = closeModal;
+
+  function overlayClick(e) {
+    if (e.target === document.getElementById('modalOverlay')) {
+      closeModal();
+    }
+  }
+  window.overlayClick = overlayClick;
+
+})();
+</script>
+</body>
+</html>
