@@ -1594,6 +1594,12 @@
   // 指定 dateKey に該当する定期クローズ（weeklyClose）の時間帯 [{startMin,endMin}] を返す
   function _weeklyCloseBandsFor(dateKey) {
     var settings = (_bundle && _bundle.settings) || {};
+    // ★ 例外日（定期クローズ解除済み）はバンドなし
+    var wcEx = settings.weeklyCloseExceptions || [];
+    var exList = [];
+    var ke;
+    for (ke in wcEx) { if (Object.prototype.hasOwnProperty.call(wcEx, ke)) { exList.push(String(wcEx[ke])); } }
+    if (exList.indexOf(String(dateKey)) >= 0) { return []; }
     var wc = settings.weeklyClose || [];
     var bands = [];
     if (!Array.isArray(wc)) { return bands; }
