@@ -209,72 +209,137 @@ exports.onAppointmentCreate = onDocumentCreated(
         }
       }
 
-      const sameDaySnap = await db.collection('salons').doc(salonId).collection('appointments')
-        .where('dateKey', '==', dateKey)
-        .where('status', '==', 'confirmed')
-        .get();
+      // ===== Phase I-step6: フェーズ2対応 =====
+      // メニューの eligible 設定を取得
+      const eligibleStaffIds     = Array.isArray(menu.eligibleStaffIds)     ? menu.eligibleStaffIds     : [];
+      const eligibleSpaceIds     = Array.isArray(menu.eligibleSpaceIds)     ? menu.eligibleSpaceIds     : [];
+      const eligibleEquipmentIds = Array.isArray(menu.eligibleEquipmentIds) ? menu.eligibleEquipmentIds : [];
+
+      // フェーズ1互換判定
+      const isPhase1Menu = eligibleStaffIds.length === 0 ||
+        (eligibleStaffIds.length === 1 && eligibleStaffIds[0] === 'owner');
+
+      // シフト（フェーズ2のみ）
+      let shiftStaffIds = [];
+      if (!isPhase1Menu) {
+        const shiftDoc = await db.collection('salons').doc(salonId).collection('shifts').doc(dateKey).get();
+        shiftStaffIds = shiftDoc.exists ? (shiftDoc.data().staffIds || []) : [];
+      }
+
+      // 同日の確定済み予約を取得
+      const [sameDaySnap, closeBlocksSnap, customerDoc, salonDoc] = await Promise.all([
+        db.collection('salons').doc(salonId).collection('appointments')
+          .where('dateKey', '==', dateKey)
+          .where('status', '==', 'confirmed')
+          .get(),
+        db.collection('salons').doc(salonId).collection('closeBlocks')
+          .where('dateKey', '==', dateKey)
+          .get(),
+        db.collection('salons').doc(salonId).collection('customers').doc(customerDocId).get(),
+        db.collection('salons').doc(salonId).get()
+      ]);
+
+      if (!customerDoc.exists) {
+        await failAppointment(ref, salonId, 'customer_not_found', { customerDocId });
+        return;
+      }
+      if (!salonDoc.exists) {
+        await failAppointment(ref, salonId, 'salon_not_found', { salonId });
+        return;
+      }
+      const customer = customerDoc.data();
+      const salon = salonDoc.data();
 
       const newStart = startAt.getTime();
       const newEnd = blockedUntil.getTime();
 
-      let conflict = false;
-      sameDaySnap.forEach((d) => {
-        if (d.id === appointmentId) return;
-        const other = d.data();
-        if (!other.startAt || !other.endAt) return;
-        const otherStart = other.startAt.toMillis ? other.startAt.toMillis() : new Date(other.startAt).getTime();
-        const otherEnd = other.endAt.toMillis ? other.endAt.toMillis() : new Date(other.endAt).getTime();
-        if (newStart < otherEnd && otherStart < newEnd) {
-          conflict = true;
-        }
-      });
-
-      if (conflict) {
-        await failAppointment(ref, salonId, 'time_conflict', { dateKey, start, end });
-        return;
-      }
-
-      const closeBlocksSnap = await db.collection('salons').doc(salonId).collection('closeBlocks')
-        .where('dateKey', '==', dateKey)
-        .get();
-
+      // closeBlocks チェック
       let closeConflict = false;
       closeBlocksSnap.forEach((d) => {
         const blk = d.data();
         if (!blk.startAt || !blk.endAt) return;
         const bStart = blk.startAt.toMillis ? blk.startAt.toMillis() : new Date(blk.startAt).getTime();
         const bEnd = blk.endAt.toMillis ? blk.endAt.toMillis() : new Date(blk.endAt).getTime();
-        if (newStart < bEnd && bStart < newEnd) {
-          closeConflict = true;
-        }
+        if (newStart < bEnd && bStart < newEnd) { closeConflict = true; }
       });
-
       if (closeConflict) {
         await failAppointment(ref, salonId, 'close_block_conflict', { dateKey, start, end });
         return;
       }
 
-      const customerDoc = await db.collection('salons').doc(salonId).collection('customers').doc(customerDocId).get();
-      if (!customerDoc.exists) {
-        await failAppointment(ref, salonId, 'customer_not_found', { customerDocId });
-        return;
-      }
-      const customer = customerDoc.data();
+      // 同時間帯の確定済み予約を収集
+      const conflictAppts = [];
+      sameDaySnap.forEach((d) => {
+        if (d.id === appointmentId) return;
+        const other = d.data();
+        if (!other.startAt || !other.endAt) return;
+        const oStart = other.startAt.toMillis ? other.startAt.toMillis() : new Date(other.startAt).getTime();
+        const oEnd   = other.blockedUntil
+          ? (other.blockedUntil.toMillis ? other.blockedUntil.toMillis() : new Date(other.blockedUntil).getTime())
+          : (other.endAt.toMillis ? other.endAt.toMillis() : new Date(other.endAt).getTime());
+        if (newStart < oEnd && oStart < newEnd) {
+          conflictAppts.push({
+            staffId:     other.staffId     || 'owner',
+            spaceId:     other.spaceId     || 'default',
+            equipmentId: other.equipmentId || null
+          });
+        }
+      });
 
-      const salonDoc = await db.collection('salons').doc(salonId).get();
-      if (!salonDoc.exists) {
-        await failAppointment(ref, salonId, 'salon_not_found', { salonId });
-        return;
-      }
-      const salon = salonDoc.data();
+      // 確定するスタッフ・場所・機器を決定
+      let assignedStaffId     = 'owner';
+      let assignedSpaceId     = null;
+      let assignedEquipmentId = null;
 
-      await ref.update({
+      if (isPhase1Menu) {
+        // フェーズ1: owner が埋まっていれば conflict
+        if (conflictAppts.some(a => a.staffId === 'owner')) {
+          await failAppointment(ref, salonId, 'time_conflict', { dateKey, start, end });
+          return;
+        }
+        assignedStaffId = 'owner';
+      } else {
+        // フェーズ2: スタッフ選択
+        const busyStaffIds = new Set(conflictAppts.map(a => a.staffId));
+        const shiftSet     = new Set(shiftStaffIds);
+        const availableStaff = eligibleStaffIds.filter(sid => shiftSet.has(sid) && !busyStaffIds.has(sid));
+        if (availableStaff.length === 0) {
+          await failAppointment(ref, salonId, 'time_conflict', { dateKey, start, end, reason: 'no_available_staff' });
+          return;
+        }
+        // 予約件数が最も少ないスタッフを選択（簡易負荷均等）
+        assignedStaffId = availableStaff[0];
+
+        // フェーズ2: 場所選択
+        if (eligibleSpaceIds.length > 0) {
+          const busySpaceIds = new Set(conflictAppts.map(a => a.spaceId).filter(Boolean));
+          const availableSpaces = eligibleSpaceIds.filter(sid => !busySpaceIds.has(sid));
+          if (availableSpaces.length === 0) {
+            await failAppointment(ref, salonId, 'time_conflict', { dateKey, start, end, reason: 'no_available_space' });
+            return;
+          }
+          assignedSpaceId = availableSpaces[0];
+        }
+
+        // フェーズ2: 機器選択（未設定なら無視）
+        if (eligibleEquipmentIds.length > 0) {
+          const busyEquipIds = new Set(conflictAppts.map(a => a.equipmentId).filter(Boolean));
+          const availableEquips = eligibleEquipmentIds.filter(eid => !busyEquipIds.has(eid));
+          if (availableEquips.length === 0) {
+            await failAppointment(ref, salonId, 'time_conflict', { dateKey, start, end, reason: 'no_available_equipment' });
+            return;
+          }
+          assignedEquipmentId = availableEquips[0];
+        }
+      }
+
+      // 予約確定 update
+      const updatePayload = {
         end: end,
         startAt: admin.firestore.Timestamp.fromDate(startAt),
         endAt: admin.firestore.Timestamp.fromDate(endAt),
         blockedUntil: admin.firestore.Timestamp.fromDate(blockedUntil),
-        staffId: 'owner',
-        resourceIds: ['default'],
+        staffId: assignedStaffId,
         status: 'confirmed',
         priceSnapshot: totalPrice,
         durationSnapshot: totalDuration,
@@ -282,7 +347,17 @@ exports.onAppointmentCreate = onDocumentCreated(
         editingBy: null,
         confirmedAt: admin.firestore.FieldValue.serverTimestamp(),
         pendingCreate: admin.firestore.FieldValue.delete()
-      });
+      };
+      // フェーズ2フィールド（フェーズ1は保存しない）
+      if (!isPhase1Menu) {
+        if (assignedSpaceId)     { updatePayload.spaceId     = assignedSpaceId; }
+        if (assignedEquipmentId) { updatePayload.equipmentId = assignedEquipmentId; }
+      } else {
+        // フェーズ1互換フィールドは残す
+        updatePayload.resourceIds = ['default'];
+      }
+
+      await ref.update(updatePayload);
 
       logger.info('Appointment confirmed', { salonId, appointmentId });
 
