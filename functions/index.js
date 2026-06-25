@@ -620,6 +620,21 @@ exports.onAppointmentUpdate = onDocumentUpdated(
 // ========================================
 // getAvailableSlots callable
 // ========================================
+// ========================================
+// getAvailableSlots (callable Function)
+// ========================================
+// Phase I-step6 2026/6/26 フェーズ2対応:
+//   スタッフ × 場所 × 機器 × シフトで空き計算
+//   フェーズ1互換: eligibleStaffIds=['owner']または未設定はスタッフ条件スキップ
+//
+// 予約可能条件:
+//   ① eligibleStaffIds のうち出勤中（shifts）かつ予定が空いているスタッフが1人以上
+//   ② eligibleSpaceIds のうち予定が空いている場所が1つ以上（未設定なら無視）
+//   ③ eligibleEquipmentIds のうち予定が空いている機器が1つ以上（未設定なら無視）
+//
+// appointments 互換:
+//   既存予約の spaceId 未設定 → 'default' 扱い
+//   既存予約の equipmentId 未設定 → null 扱い（機器条件に影響しない）
 exports.getAvailableSlots = onCall(
   async (request) => {
     if (!request.auth) {
@@ -641,11 +656,13 @@ exports.getAvailableSlots = onCall(
 
     const salonRef = db.collection('salons').doc(salonId);
 
-    const [settingsDoc, menuDoc, apptSnap, closeBlockSnap] = await Promise.all([
+    // フェーズ2: シフトも並行取得
+    const [settingsDoc, menuDoc, apptSnap, closeBlockSnap, shiftDoc] = await Promise.all([
       salonRef.collection('config').doc('settings').get(),
       salonRef.collection('menus').doc(menuId).get(),
       salonRef.collection('appointments').where('dateKey', '==', dateKey).get(),
-      salonRef.collection('closeBlocks').get()
+      salonRef.collection('closeBlocks').get(),
+      salonRef.collection('shifts').doc(dateKey).get()
     ]);
 
     const optDocs = await Promise.all(
@@ -670,50 +687,73 @@ exports.getAvailableSlots = onCall(
     const needMin  = totalDuration > 0 ? totalDuration : slotMin;
     const latestStart = closeMin - needMin;
 
+    // ===== フェーズ2: スタッフ・場所・機器の設定を取得 =====
+    const eligibleStaffIds     = Array.isArray(menu.eligibleStaffIds)     ? menu.eligibleStaffIds     : [];
+    const eligibleSpaceIds     = Array.isArray(menu.eligibleSpaceIds)     ? menu.eligibleSpaceIds     : [];
+    const eligibleEquipmentIds = Array.isArray(menu.eligibleEquipmentIds) ? menu.eligibleEquipmentIds : [];
+
+    // フェーズ1互換判定: staffIds が ['owner'] のみ or 空 → シフト・スタッフ条件スキップ
+    const isPhase1Menu = eligibleStaffIds.length === 0 ||
+      (eligibleStaffIds.length === 1 && eligibleStaffIds[0] === 'owner');
+
+    // その日出勤しているスタッフIDセット
+    const shiftStaffIds = shiftDoc.exists
+      ? (shiftDoc.data().staffIds || [])
+      : [];
+    const shiftSet = new Set(shiftStaffIds);
+
+    // CANCEL_STATUSES
     const CANCEL_STATUSES = new Set([
       'cancelled', 'cancelled_by_customer', 'cancelled_by_salon',
       'no_show', 'time_conflict', 'failed'
     ]);
-    const busy = [];
+
+    // 既存予約を時間範囲に変換（フェーズ2: staffId / spaceId / equipmentId も保持）
+    const busyAppts = []; // { startMin, endMin, staffId, spaceId, equipmentId }
 
     apptSnap.forEach(doc => {
       const a = doc.data();
-      const isConfirmed  = a.status === 'confirmed';
-      const isPending    = a.pendingCreate === true;
       if (CANCEL_STATUSES.has(a.status)) return;
+      const isConfirmed = a.status === 'confirmed';
+      const isPending   = a.pendingCreate === true;
       if (!isConfirmed && !isPending) return;
 
-      let s, e;
+      // フェーズ2互換: spaceId 未設定は 'default'、equipmentId 未設定は null
+      const apptStaffId     = a.staffId     || 'owner';
+      const apptSpaceId     = a.spaceId     || 'default';
+      const apptEquipmentId = a.equipmentId || null;
+
+      let startMin, endMin;
       if (a.startAt && a.startAt.toMillis) {
-        s = a.startAt.toMillis();
-        const endTs = a.blockedUntil || a.endAt;
-        e = endTs && endTs.toMillis ? endTs.toMillis() : (s + needMin * 60000);
+        const baseMs = a.startAt.toMillis();
+        const endTs  = a.blockedUntil || a.endAt;
+        const endMs  = endTs && endTs.toMillis ? endTs.toMillis() : (baseMs + needMin * 60000);
+        const base   = new Date(dateKey + 'T00:00:00+09:00').getTime();
+        startMin = Math.round((baseMs - base) / 60000);
+        endMin   = Math.round((endMs  - base) / 60000);
       } else {
-        const sMin = hhmmToMin(a.start);
-        if (isNaN(sMin)) return;
-        const eMin = a.end ? hhmmToMin(a.end) : (sMin + (a.durationSnapshot || slotMin));
-        s = sMin;
-        e = eMin + intervalMin;
-        busy.push({ startMin: sMin - intervalMin, endMin: eMin + intervalMin, isMin: true });
-        return;
+        startMin = hhmmToMin(a.start);
+        if (isNaN(startMin)) return;
+        const rawEnd = a.end ? hhmmToMin(a.end) : (startMin + (a.durationSnapshot || slotMin));
+        startMin = startMin - intervalMin;
+        endMin   = rawEnd   + intervalMin;
       }
-      busy.push({ startMs: s, endMs: e, isMin: false });
+
+      busyAppts.push({ startMin, endMin, staffId: apptStaffId, spaceId: apptSpaceId, equipmentId: apptEquipmentId });
     });
 
+    // closeBlocks をグローバルbusy（スタッフ・設備を問わず全てブロック）に入れる
+    const globalBusy = [];
     closeBlockSnap.forEach(doc => {
       const b = doc.data();
       if (b.dateKey && b.dateKey !== dateKey) return;
       const bs = hhmmToMin(b.start || settings.openTime  || '10:00');
       const be = hhmmToMin(b.end   || settings.closeTime || '19:00');
-      busy.push({ startMin: bs, endMin: be, isMin: true });
+      globalBusy.push({ startMin: bs, endMin: be });
     });
 
     const dObj = new Date(dateKey + 'T12:00:00+09:00');
     const dow = dObj.getDay();
-    // ★ 2026/6/13: 定期クローズの例外日（weeklyCloseExceptions）はこの日の
-    //   weeklyClose を適用しない。サロンがカレンダーで「この日は営業」にした日に
-    //   顧客が予約できるようにするため。切り出し済みの日は別途 closeBlocks 側で
-    //   ブロックされる（切り出し時に closeBlocks を作っているため二重にはならない）。
     const wcExceptions = Array.isArray(settings.weeklyCloseExceptions)
       ? settings.weeklyCloseExceptions : [];
     const isWcException = wcExceptions.indexOf(dateKey) >= 0;
@@ -721,7 +761,7 @@ exports.getAvailableSlots = onCall(
     if (!isWcException) {
       for (const wc of weeklyClose) {
         if (wc && wc.dow === dow) {
-          busy.push({ startMin: hhmmToMin(wc.start), endMin: hhmmToMin(wc.end), isMin: true });
+          globalBusy.push({ startMin: hhmmToMin(wc.start), endMin: hhmmToMin(wc.end) });
         }
       }
     }
@@ -739,23 +779,57 @@ exports.getAvailableSlots = onCall(
     ].join('-');
     const nowMin = (dateKey === todayKey) ? (now.getHours() * 60 + now.getMinutes()) : -1;
 
+    // ===== スロット判定 =====
     const slots = [];
     for (let t = openMin; t <= latestStart; t += slotMin) {
       const slotStart = t;
       const slotEnd   = t + needMin + intervalAfter;
       let available = true;
 
+      // 過去スロットはスキップ
       if (nowMin >= 0 && slotStart <= nowMin) { available = false; }
 
+      // グローバルブロック（closeBlocks / weeklyClose）チェック
       if (available) {
-        const slotStartMs = new Date(dateKey + 'T' + minToHHMM(slotStart) + ':00+09:00').getTime();
-        const slotEndMs   = new Date(dateKey + 'T' + minToHHMM(slotEnd)   + ':00+09:00').getTime();
+        for (const b of globalBusy) {
+          if (slotStart < b.endMin && slotEnd > b.startMin) { available = false; break; }
+        }
+      }
 
-        for (const b of busy) {
-          if (b.isMin) {
-            if (slotStart < b.endMin && slotEnd > b.startMin) { available = false; break; }
-          } else {
-            if (slotStartMs < b.endMs && slotEndMs > b.startMs) { available = false; break; }
+      if (available) {
+        // このスロットで各予約と重なるか
+        const conflictAppts = busyAppts.filter(a =>
+          slotStart < a.endMin && slotEnd > a.startMin
+        );
+
+        if (isPhase1Menu) {
+          // ===== フェーズ1互換: staffId='owner' の予約が1件でもあれば埋まり =====
+          const ownerBusy = conflictAppts.some(a => a.staffId === 'owner');
+          if (ownerBusy) { available = false; }
+        } else {
+          // ===== フェーズ2: スタッフ・場所・機器をそれぞれチェック =====
+
+          // ① スタッフ: eligibleStaffIds のうち出勤中かつ空きがある人が1人以上
+          const busyStaffIds = new Set(conflictAppts.map(a => a.staffId));
+          const availableStaff = eligibleStaffIds.filter(sid =>
+            shiftSet.has(sid) && !busyStaffIds.has(sid)
+          );
+          if (availableStaff.length === 0) { available = false; }
+
+          // ② 場所: eligibleSpaceIds のうち空きがある場所が1つ以上（未設定なら無視）
+          if (available && eligibleSpaceIds.length > 0) {
+            const busySpaceIds = new Set(conflictAppts.map(a => a.spaceId).filter(Boolean));
+            const availableSpaces = eligibleSpaceIds.filter(sid => !busySpaceIds.has(sid));
+            if (availableSpaces.length === 0) { available = false; }
+          }
+
+          // ③ 機器: eligibleEquipmentIds のうち空きがある機器が1つ以上（未設定なら無視）
+          if (available && eligibleEquipmentIds.length > 0) {
+            const busyEquipIds = new Set(
+              conflictAppts.map(a => a.equipmentId).filter(Boolean)
+            );
+            const availableEquips = eligibleEquipmentIds.filter(eid => !busyEquipIds.has(eid));
+            if (availableEquips.length === 0) { available = false; }
           }
         }
       }
