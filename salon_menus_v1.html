@@ -707,8 +707,8 @@
     if (cat) { patch.category = cat; }
     if (_planId === 'team') {
       patch.eligibleStaffIds     = _getChecked('fStaff', _staffList);
-      patch.requiredSpaceIds     = _getChecked('fSpace', _spaceList);
-      patch.requiredEquipmentIds = _getChecked('fEquip', _equipList);
+      patch.eligibleSpaceIds     = _getChecked('fSpace', _spaceList);
+      patch.eligibleEquipmentIds = _getChecked('fEquip', _equipList);
     }
 
     uiShowLoading('保存中...');
@@ -854,8 +854,8 @@
     if (cat) { data.category = cat; }
     if (_planId === 'team') {
       data.eligibleStaffIds     = _getChecked('fStaff', _staffList);
-      data.requiredSpaceIds     = _getChecked('fSpace', _spaceList);
-      data.requiredEquipmentIds = _getChecked('fEquip', _equipList);
+      data.eligibleSpaceIds     = _getChecked('fSpace', _spaceList);
+      data.eligibleEquipmentIds = _getChecked('fEquip', _equipList);
     }
 
     uiShowLoading('追加中...');
@@ -1009,14 +1009,14 @@
       ));
       body.appendChild(_buildCheckSection(
         '場所 必要な場所（スペース）', 'fSpace', _spaceList,
-        m ? (m.requiredSpaceIds || []) : [],
+        m ? (m.eligibleSpaceIds || []) : [],
         '場所が登録されていません',
         '選択した場所が空いている時に予約可能（1つ選択推奨）'
       ));
       if (_equipList.length > 0) {
         body.appendChild(_buildCheckSection(
           '機器 必要な機器（不要な場合は空白）', 'fEquip', _equipList,
-          m ? (m.requiredEquipmentIds || []) : [],
+          m ? (m.eligibleEquipmentIds || []) : [],
           '',
           '機器が不要なメニューは何も選択しなくてOK'
         ));
