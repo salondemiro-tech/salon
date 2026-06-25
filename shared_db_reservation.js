@@ -622,8 +622,11 @@
       menuId: String(data.menuId),
       status: 'confirmed',
       source: 'manual',
-      staffId: 'owner',                  // フェーズ1固定
-      resourceIds: ['default'],          // フェーズ1固定
+      // Phase I-step6: data から staffId/spaceId/equipmentId を受け取る
+      staffId: (typeof data.staffId === 'string' && data.staffId) ? data.staffId : 'owner',
+      spaceId: (typeof data.spaceId === 'string' && data.spaceId) ? data.spaceId : 'default',
+      equipmentId: (typeof data.equipmentId === 'string' && data.equipmentId) ? data.equipmentId : null,
+      resourceIds: ['default'],          // フェーズ1互換フィールド（残置）
       editingBy: null,                   // DESIGN_NOTES 項目6: 箱だけ用意
       createdAt: firebase.firestore.FieldValue.serverTimestamp()
     };
@@ -918,6 +921,36 @@
     return true;
   }
 
+  // Phase I-step6: 場所（spaceId）の空き判定
+  function _isSpaceFree(spaceId, qStart, qEnd, appts) {
+    if (!appts || !appts.length) { return true; }
+    var i;
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      if (!a) { continue; }
+      // spaceId 未設定の予約（フェーズ1）は 'default' 扱い
+      var aSpace = a.spaceId ? a.spaceId : 'default';
+      if (aSpace !== spaceId) { continue; }
+      if (_apptOverlaps(a, qStart, qEnd)) { return false; }
+    }
+    return true;
+  }
+
+  // Phase I-step6: 機器（equipmentId）の空き判定
+  function _isEquipmentFree(equipmentId, qStart, qEnd, appts) {
+    if (!appts || !appts.length) { return true; }
+    var i;
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      if (!a) { continue; }
+      // equipmentId 未設定の予約は機器を使っていない扱い → 競合しない
+      if (!a.equipmentId) { continue; }
+      if (a.equipmentId !== equipmentId) { continue; }
+      if (_apptOverlaps(a, qStart, qEnd)) { return false; }
+    }
+    return true;
+  }
+
   // ------------------------------------------------------------
   // 内部: 区間 [qStart,qEnd) が営業時間内かつ休憩(weeklyClose)と
   //   重ならないか。bh = calendarGetBusinessHours の戻り値
@@ -1051,14 +1084,21 @@
     }
 
     // 1. 候補スタッフ抽出 (設計書 B-5 手順1)
-    //    メニューの eligibleStaffIds。未設定ならフェーズ1の ['owner']。
+    //    Phase I-step6: eligibleStaffIds を使用。未設定なら ['owner']。
     var eligibleStaffIds = (menu.eligibleStaffIds && menu.eligibleStaffIds.length)
                             ? menu.eligibleStaffIds : ['owner'];
 
-    // 2. 必要設備抽出 (設計書 B-5 手順2)
-    //    メニューの requiredResourceIds。未設定なら ['default']。
-    var requiredResourceIds = (menu.requiredResourceIds && menu.requiredResourceIds.length)
-                               ? menu.requiredResourceIds : ['default'];
+    // 2. 必要場所・機器抽出
+    //    Phase I-step6: eligibleSpaceIds / eligibleEquipmentIds を使用
+    //    未設定または空なら判定スキップ（フェーズ1互換）
+    var eligibleSpaceIds = (menu.eligibleSpaceIds && menu.eligibleSpaceIds.length)
+                            ? menu.eligibleSpaceIds : [];
+    var eligibleEquipmentIds = (menu.eligibleEquipmentIds && menu.eligibleEquipmentIds.length)
+                                ? menu.eligibleEquipmentIds : [];
+
+    // フェーズ1互換判定: staffIds が ['owner'] のみ or 空 → シフト条件スキップ
+    var isPhase1Menu = eligibleStaffIds.length === 0 ||
+      (eligibleStaffIds.length === 1 && eligibleStaffIds[0] === 'owner');
 
     // 営業時間 (= フェーズ1のシフト)。calendar.js があれば委譲。
     var bh;
@@ -1121,23 +1161,38 @@
         continue; // どのスタッフも埋まっている
       }
 
-      // 必要設備が全て確保できるか (3次元: 設備軸)
-      // フェーズ1では requiredResourceIds=['default'] 固定だが、
-      // 複数設備が必要なメニューでも全部空いていることを要求する。
-      var allResOk = true;
-      var ri;
-      for (ri = 0; ri < requiredResourceIds.length; ri++) {
-        var res = requiredResourceIds[ri];
-        if (!_isResourceFree(res, qStart, qEnd, appts)) {
-          allResOk = false;
-          break;
+      // Phase I-step6: 場所・機器の空き判定
+      // eligibleSpaceIds が空なら判定スキップ（フェーズ1互換）
+      var chosenSpace = null;
+      if (eligibleSpaceIds.length > 0) {
+        var si2;
+        for (si2 = 0; si2 < eligibleSpaceIds.length; si2++) {
+          if (_isSpaceFree(eligibleSpaceIds[si2], qStart, qEnd, appts)) {
+            chosenSpace = eligibleSpaceIds[si2];
+            break;
+          }
+        }
+        if (chosenSpace === null) {
+          continue; // 空いている場所がない
         }
       }
-      if (!allResOk) {
-        continue; // 必要な設備が埋まっている
+
+      // eligibleEquipmentIds が空なら判定スキップ
+      var chosenEquipment = null;
+      if (eligibleEquipmentIds.length > 0) {
+        var ei;
+        for (ei = 0; ei < eligibleEquipmentIds.length; ei++) {
+          if (_isEquipmentFree(eligibleEquipmentIds[ei], qStart, qEnd, appts)) {
+            chosenEquipment = eligibleEquipmentIds[ei];
+            break;
+          }
+        }
+        if (chosenEquipment === null) {
+          continue; // 空いている機器がない
+        }
       }
 
-      // 4. スタッフも設備も両方OK → 予約可能スロット
+      // スタッフ・場所・機器 全てOK → 予約可能スロット
       var startLabel = reservationFormatTime(qStart);
       var endLabel = reservationFormatTime(qEnd);
       if (startLabel === null || endLabel === null) {
@@ -1147,7 +1202,8 @@
         start: startLabel,
         end: endLabel,
         staffId: chosenStaff,
-        resourceIds: requiredResourceIds.slice(0)
+        spaceId: chosenSpace,
+        equipmentId: chosenEquipment
       });
     }
 

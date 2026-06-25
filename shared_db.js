@@ -551,14 +551,16 @@
     if (isNaN(pr) || pr < 0) { pr = 0; }
     var typ = (data.type === 'option') ? 'option' : 'main';
     var pub = (data.public !== false);
+    // Phase I-step6 2026/6/26: eligible フィールドを data から受け取る
     var doc = {
       name: String(data.name),
       duration: dur,
       price: pr,
       type: typ,
       public: pub,
-      eligibleStaffIds: ['owner'],
-      requiredResourceIds: ['default'],
+      eligibleStaffIds: Array.isArray(data.eligibleStaffIds) ? data.eligibleStaffIds : ['owner'],
+      eligibleSpaceIds: Array.isArray(data.eligibleSpaceIds) ? data.eligibleSpaceIds : [],
+      eligibleEquipmentIds: Array.isArray(data.eligibleEquipmentIds) ? data.eligibleEquipmentIds : [],
       createdAt: _serverTimestamp()
     };
     // ★ 2026/6/12: category（facial/body/other、省略可）。main のみ意味を持つ。
@@ -583,7 +585,18 @@
     var sid = getCurrentSalonId();
     if (!sid || !menuId) { _safeCb(cb, null); return; }
     if (patch) {
-      var _protected = ['createdAt', 'eligibleStaffIds', 'requiredResourceIds'];
+      // Phase I-step6 2026/6/26: eligibleStaffIds/Space/Equipment は更新可能に
+      var _protected = ['createdAt', 'requiredResourceIds'];
+      // eligible フィールドは配列チェックのみ行う
+      if (patch.hasOwnProperty('eligibleStaffIds') && !Array.isArray(patch.eligibleStaffIds)) {
+        delete patch.eligibleStaffIds;
+      }
+      if (patch.hasOwnProperty('eligibleSpaceIds') && !Array.isArray(patch.eligibleSpaceIds)) {
+        delete patch.eligibleSpaceIds;
+      }
+      if (patch.hasOwnProperty('eligibleEquipmentIds') && !Array.isArray(patch.eligibleEquipmentIds)) {
+        delete patch.eligibleEquipmentIds;
+      }
       var i;
       for (i = 0; i < _protected.length; i++) {
         if (patch.hasOwnProperty(_protected[i])) { delete patch[_protected[i]]; }
@@ -942,7 +955,10 @@
       menuId: String(data.menuId),
       status: 'confirmed',
       source: 'manual',
-      staffId: 'owner',
+      // Phase I-step6 2026/6/26: サロン手動登録時も staffId/spaceId/equipmentId を受け取る
+      staffId: (typeof data.staffId === 'string' && data.staffId) ? data.staffId : 'owner',
+      spaceId: (typeof data.spaceId === 'string' && data.spaceId) ? data.spaceId : 'default',
+      equipmentId: (typeof data.equipmentId === 'string' && data.equipmentId) ? data.equipmentId : null,
       resourceIds: ['default'],
       createdAt: _serverTimestamp()
     };
