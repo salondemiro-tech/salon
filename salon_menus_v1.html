@@ -728,6 +728,12 @@
           _all[i].description = patch.description;
           _all[i].contraindications = patch.contraindications;
           if (patch.category) { _all[i].category = patch.category; }
+          // Phase I-step6: eligible フィールドをローカルにも反映
+          if (_planId === 'team') {
+            _all[i].eligibleStaffIds     = patch.eligibleStaffIds     || [];
+            _all[i].eligibleSpaceIds     = patch.eligibleSpaceIds     || [];
+            _all[i].eligibleEquipmentIds = patch.eligibleEquipmentIds || [];
+          }
           break;
         }
       }
@@ -877,8 +883,9 @@
         description: data.description,
         contraindications: data.contraindications,
         sortOrder: data.sortOrder,
-        eligibleStaffIds: ['owner'],
-        requiredResourceIds: ['default']
+        eligibleStaffIds:     data.eligibleStaffIds     || ['owner'],
+        eligibleSpaceIds:     data.eligibleSpaceIds     || [],
+        eligibleEquipmentIds: data.eligibleEquipmentIds || []
       };
       _all.push(newM);
       _all.sort(function (a, b) {

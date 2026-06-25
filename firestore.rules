@@ -202,16 +202,21 @@ service cloud.firestore {
         // ★ v8.1: intervalBefore/intervalAfter は廃止。
         //   インターバルは settings.intervalMin（サロン共通設定）に1本化
         // ★ 2026/6/12: category 追加（facial/body/other、省略可。DESIGN.md 0-2 と1対1）
+        // ★ Phase I-step6 2026/6/26:
+        //   eligibleSpaceIds / eligibleEquipmentIds を追加
+        //   requiredResourceIds は廃止（互換のため hasOnly には残す）
         allow create: if isSalonStaff(salonId) &&
                         request.resource.data.keys().hasOnly([
                           'name', 'duration', 'price', 'type', 'public',
-                          'eligibleStaffIds', 'requiredResourceIds',
+                          'eligibleStaffIds', 'eligibleSpaceIds', 'eligibleEquipmentIds',
+                          'requiredResourceIds',
                           'description', 'contraindications',
-                          'photoUrl', 'sortOrder', 'category', 'createdAt'
+                          'photoUrl', 'sortOrder', 'category', 'createdAt',
+                          'intervalBefore', 'intervalAfter'
                         ]) &&
                         request.resource.data.keys().hasAll([
                           'name', 'duration', 'price', 'type', 'public',
-                          'eligibleStaffIds', 'requiredResourceIds'
+                          'eligibleStaffIds'
                         ]) &&
                         request.resource.data.name is string &&
                         request.resource.data.duration is int &&
@@ -221,7 +226,6 @@ service cloud.firestore {
                         request.resource.data.type in ['main', 'option'] &&
                         request.resource.data.public is bool &&
                         request.resource.data.eligibleStaffIds is list &&
-                        request.resource.data.requiredResourceIds is list &&
                         (!('category' in request.resource.data) ||
                           request.resource.data.category in ['facial', 'body', 'other']) &&
                         (!('sortOrder' in request.resource.data) ||

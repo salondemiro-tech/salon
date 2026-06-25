@@ -335,14 +335,24 @@
         //                  photoUrl,sortOrder,createdAt]
         // ルール: hasAll [name,duration,price,type,public,
         //                 eligibleStaffIds,requiredResourceIds]
+        // Phase I-step6: eligibleStaffIds/eligibleSpaceIds/eligibleEquipmentIds に対応
+        // フェーズ1互換: 未指定なら ['owner']/[]/[] をデフォルト
+        var eligibleStaffIds = Array.isArray(data.eligibleStaffIds)
+          ? data.eligibleStaffIds : DEFAULT_STAFF_IDS.slice();
+        var eligibleSpaceIds = Array.isArray(data.eligibleSpaceIds)
+          ? data.eligibleSpaceIds : [];
+        var eligibleEquipmentIds = Array.isArray(data.eligibleEquipmentIds)
+          ? data.eligibleEquipmentIds : [];
+
         var doc = {
           name: String(data.name).trim(),
           duration: data.duration,
           price: data.price,
           type: data.type,
           public: data.public,
-          eligibleStaffIds: DEFAULT_STAFF_IDS.slice(),    // フェーズ1自動付与
-          requiredResourceIds: DEFAULT_RESOURCE_IDS.slice(), // フェーズ1自動付与
+          eligibleStaffIds: eligibleStaffIds,
+          eligibleSpaceIds: eligibleSpaceIds,
+          eligibleEquipmentIds: eligibleEquipmentIds,
           intervalBefore: (typeof data.intervalBefore === 'number') ? data.intervalBefore : 0,
           intervalAfter: (typeof data.intervalAfter === 'number') ? data.intervalAfter : 0,
           sortOrder: newSortOrder,
