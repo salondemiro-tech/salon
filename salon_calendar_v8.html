@@ -440,30 +440,32 @@
     <button class="view-tab-btn" id="tabDayBtn" onclick="switchView('day')">日ビュー（スタッフ別）</button>
   </div>
 
-  <div class="week-nav">
-    <button id="prevBtn" onclick="changeWeek(-1)">&#8249;</button>
-    <span class="week-label" id="weekLabel">---- 〜 ----</span>
-    <button id="nextBtn" onclick="changeWeek(1)">&#8250;</button>
-    <button class="week-today" onclick="goToday()">今日</button>
-  </div>
-
-  <div class="action-bar">
-    <button class="action-btn" onclick="openBookingModal()">＋ 予約を登録</button>
-    <button class="action-btn alt" onclick="openCloseModal()">＋ クローズ時間</button>
-  </div>
-
-  <div class="legend">
-    <div class="legend-item"><div class="ld manual"></div>手動登録</div>
-    <div class="legend-item"><div class="ld online"></div>アプリ予約</div>
-    <div class="legend-item"><div class="ld interval"></div>インターバル</div>
-    <div class="legend-item"><div class="ld cb"></div>クローズ</div>
-  </div>
-
-  <div class="week-card">
-    <div class="week-dow-row" id="weekDowRow">
-      <div></div>
+  <div id="weekViewArea">
+    <div class="week-nav">
+      <button id="prevBtn" onclick="changeWeek(-1)">&#8249;</button>
+      <span class="week-label" id="weekLabel">---- 〜 ----</span>
+      <button id="nextBtn" onclick="changeWeek(1)">&#8250;</button>
+      <button class="week-today" onclick="goToday()">今日</button>
     </div>
-    <div class="time-grid" id="timeGrid"></div>
+
+    <div class="action-bar">
+      <button class="action-btn" onclick="openBookingModal()">＋ 予約を登録</button>
+      <button class="action-btn alt" onclick="openCloseModal()">＋ クローズ時間</button>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="ld manual"></div>手動登録</div>
+      <div class="legend-item"><div class="ld online"></div>アプリ予約</div>
+      <div class="legend-item"><div class="ld interval"></div>インターバル</div>
+      <div class="legend-item"><div class="ld cb"></div>クローズ</div>
+    </div>
+
+    <div id="weekCardArea" class="week-card">
+      <div class="week-dow-row" id="weekDowRow">
+        <div></div>
+      </div>
+      <div class="time-grid" id="timeGrid"></div>
+    </div>
   </div>
 
   <!-- 日ビューコンテナ -->
