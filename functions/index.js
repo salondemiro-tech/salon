@@ -307,8 +307,15 @@ exports.onAppointmentCreate = onDocumentCreated(
           await failAppointment(ref, salonId, 'time_conflict', { dateKey, start, end, reason: 'no_available_staff' });
           return;
         }
-        // 予約件数が最も少ないスタッフを選択（簡易負荷均等）
-        assignedStaffId = availableStaff[0];
+        // I-step8: 顧客が指名した場合は優先。指名なし or 指名スタッフが埋まっている場合は未割当（null）
+        const nominatedStaffId = event.data.after.data().nominatedStaffId || null;
+        if (nominatedStaffId && availableStaff.includes(nominatedStaffId)) {
+          // 指名スタッフが空いている → そのスタッフに確定
+          assignedStaffId = nominatedStaffId;
+        } else {
+          // 指名なし or 指名スタッフが埋まっている → 未割当（オーナーが手動で割り当て）
+          assignedStaffId = null;
+        }
 
         // フェーズ2: 場所選択
         if (eligibleSpaceIds.length > 0) {
@@ -339,7 +346,9 @@ exports.onAppointmentCreate = onDocumentCreated(
         startAt: admin.firestore.Timestamp.fromDate(startAt),
         endAt: admin.firestore.Timestamp.fromDate(endAt),
         blockedUntil: admin.firestore.Timestamp.fromDate(blockedUntil),
+        // staffId: null = 未割当（指名なし）。オーナーがカレンダーで手動割り当て
         staffId: assignedStaffId,
+        nominatedStaffId: nominatedStaffId || null,
         status: 'confirmed',
         priceSnapshot: totalPrice,
         durationSnapshot: totalDuration,
