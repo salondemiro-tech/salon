@@ -1381,7 +1381,7 @@
       }
       // デバッグ: 書き込み直前のdocを画面表示
       if (typeof debugLog === 'function') {
-        debugLog('[5.shared_db] doc.nom=' + doc.nominatedStaffId + ' data.nom=' + data.nominatedStaffId);
+        debugLog('[5.doc keys] ' + JSON.stringify(doc));
       }
       dbAddDoc('salons/' + sid + '/appointments', doc, function (addRes) {
         if (!addRes) { _safeCb(cb, new Error('予約作成に失敗しました'), null); }
