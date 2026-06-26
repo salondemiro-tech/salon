@@ -1841,7 +1841,6 @@ function doBooking(){
     if (!stillAvailable){
       // 埋まっていた → stateを最新に更新して日時選択へ戻す
       appState.busy = false;
-      appState.dayData = freshDayData;
       appState.availableSlots = freshSlots;
       appState.selectedSlot = null;
       appState.slotConflictMsg = 'その時間は先に埋まりました。別の時間をお選びください。';
