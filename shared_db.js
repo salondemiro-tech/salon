@@ -1263,7 +1263,8 @@
   }
   window.dbCustomerClaimMyCard = dbCustomerClaimMyCard;
 
-  function dbCustomerGetAvailableSlots(dateKey, menuId, optionMenuIds, cb) {
+  // I-step8: nominatedStaffId を第5引数で受け取り Cloud Function に渡す
+  function dbCustomerGetAvailableSlots(dateKey, menuId, optionMenuIds, cb, nominatedStaffId) {
     var sid = getCurrentSalonId();
     if (!sid) { _safeCb(cb, new Error('salonId が取得できません。'), null); return; }
     var callable;
@@ -1273,10 +1274,12 @@
       _safeCb(cb, e, null);
       return;
     }
-    callable({
+    var payload = {
       salonId: sid, dateKey: dateKey, menuId: menuId,
       optionMenuIds: optionMenuIds || []
-    }).then(function (res) {
+    };
+    if (nominatedStaffId) { payload.nominatedStaffId = nominatedStaffId; }
+    callable(payload).then(function (res) {
       _safeCb(cb, null, (res && res.data) ? res.data : null);
     }).catch(function (err) {
       _logErr('dbCustomerGetAvailableSlots', err);

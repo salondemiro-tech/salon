@@ -379,7 +379,7 @@ function updateAuthBar(){
 
 // ステップバーの更新
 function updateStepsBar(){
-  var order = ['menu','nominate','date','identity','confirm'];
+  var order = ['menu','date','identity','confirm'];
   var curIdx = order.indexOf(appState.step);
   // option は menu 扱い、complete は全部 done
   if (appState.step === 'option') curIdx = 0;
@@ -413,7 +413,6 @@ function render(){
     case 'accountCheck': renderAccountCheckStep(); break;
     case 'menu':     renderMenuStep(); break;
     case 'option':   renderOptionStep(); break;
-    case 'nominate': renderNominateStep(); break;
     case 'date':     renderDateStep(); break;
     case 'identity': renderIdentityStep(); break;
     case 'confirm':  renderConfirmStep(); break;
@@ -692,11 +691,7 @@ function renderMenuStep(){
         if (appState.menus[j] && appState.menus[j].type === 'option'){ hasOptions = true; break; }
       }
       if (hasOptions){ goStep('option'); }
-      else {
-        appState.selectedOptions = [];
-        if (shouldShowNominate()){ goStep('nominate'); }
-        else { goStep('date'); }
-      }
+      else { appState.selectedOptions = []; goStep('date'); }
     });
   }
   setFooter('');
@@ -743,11 +738,7 @@ function renderOptionStep(){
     '<button class="pbtn" id="optNextBtn">日時を選ぶ</button>' +
     '<button class="gbtn" id="optBackBtn">メニュー選択に戻る</button>'
   );
-  $('optNextBtn').addEventListener('click', function(){
-    // チームプランかつ指名可能スタッフが2人以上いる場合は指名ステップへ
-    if (shouldShowNominate()){ goStep('nominate'); }
-    else { goStep('date'); }
-  });
+  $('optNextBtn').addEventListener('click', function(){ goStep('date'); });
   $('optBackBtn').addEventListener('click', function(){ goStep('menu'); });
 }
 
@@ -1112,6 +1103,14 @@ function pad2(n){ return (n < 10 ? '0' : '') + n; }
 function loadAndDrawSlots(dateKey){
   var area = $('slotArea');
   if (!area) return;
+
+  // チームプランの場合：スタッフ選択 → スロット表示
+  if (shouldShowNominate()){
+    loadStaffForDate(dateKey);
+    return;
+  }
+
+  // ソロプラン：従来通りスロット直接表示
   area.innerHTML = '<div class="loading" style="padding:24px;"><div class="spinner"></div>空き状況を確認中...</div>';
 
   if (typeof dbCustomerGetAvailableSlots !== 'function'){
@@ -1134,6 +1133,195 @@ function loadAndDrawSlots(dateKey){
     appState.availableSlots = result.slots;
     drawSlots(result.slots);
   });
+}
+
+// チームプラン：その日出勤中 × メニュー対応可能 なスタッフを表示
+function loadStaffForDate(dateKey){
+  var area = $('slotArea');
+  if (!area) return;
+  area.innerHTML = '<div class="loading" style="padding:24px;"><div class="spinner"></div>スタッフ情報を確認中...</div>';
+
+  var eligibleIds = (appState.selectedMenu && appState.selectedMenu.eligibleStaffIds) || [];
+
+  // シフトとスタッフ情報を並行取得
+  var p1 = firebase.firestore()
+    .collection('salons').doc(appState.salonId)
+    .collection('shifts').doc(dateKey).get();
+  var p2 = appState.staffList
+    ? Promise.resolve(appState.staffList)
+    : firebase.firestore()
+        .collection('salons').doc(appState.salonId)
+        .collection('staffs').orderBy('name','asc').get()
+        .then(function(snap){
+          var list = [];
+          snap.forEach(function(doc){
+            if (doc.id === 'owner') { return; }
+            var d = doc.data();
+            list.push({ id: doc.id, name: d.name || doc.id, color: d.color || '#ccc' });
+          });
+          appState.staffList = list;
+          return list;
+        });
+
+  Promise.all([p1, p2]).then(function(results){
+    var shiftDoc = results[0];
+    var allStaff = results[1];
+    var shiftIds = shiftDoc.exists ? (shiftDoc.data().staffIds || []) : [];
+
+    // メニュー対応可能 かつ 出勤中 のスタッフに絞る
+    var availableStaff = [];
+    var i;
+    for (i = 0; i < allStaff.length; i++){
+      var s = allStaff[i];
+      if (eligibleIds.indexOf(s.id) >= 0 && shiftIds.indexOf(s.id) >= 0){
+        availableStaff.push(s);
+      }
+    }
+
+    drawStaffAndSlots(dateKey, availableStaff);
+  }).catch(function(){
+    area.innerHTML = '<div class="error-box">スタッフ情報の取得に失敗しました。</div>';
+  });
+}
+
+// スタッフ選択UI + スロット表示（同一ページ）
+function drawStaffAndSlots(dateKey, availableStaff){
+  var area = $('slotArea');
+  if (!area) return;
+
+  if (availableStaff.length === 0){
+    area.innerHTML = '<div class="empty-msg">この日は対応可能なスタッフが出勤していません。<br>別の日をお選びください。</div>';
+    return;
+  }
+
+  var html = '<div style="margin-top:18px;font-size:13px;color:var(--mu);font-weight:600;">スタッフを選ぶ</div>';
+
+  // スタッフ選択ボタン群（横並び）
+  html += '<div style="display:flex;flex-wrap:wrap;gap:8px;margin:10px 0 16px;">';
+  // 「指名なし」ボタン
+  var noneSelected = (!appState.nominatedStaffId) ? 'background:var(--ac);color:#fff;border-color:var(--ac);' : '';
+  html += '<button class="cal-btn" style="width:auto;padding:6px 14px;font-size:13px;border-radius:20px;' + noneSelected + '" data-nomid="">指名なし</button>';
+  var i;
+  for (i = 0; i < availableStaff.length; i++){
+    var s = availableStaff[i];
+    var isSelected = (appState.nominatedStaffId === s.id);
+    var selStyle = isSelected
+      ? 'background:' + s.color + ';color:#fff;border-color:' + s.color + ';'
+      : '';
+    html += '<button class="cal-btn" style="width:auto;padding:6px 14px;font-size:13px;border-radius:20px;' + selStyle + '" data-nomid="' + esc(s.id) + '">' + esc(s.name) + '</button>';
+  }
+  html += '</div>';
+  html += '<div id="staffSlotArea"></div>';
+
+  area.innerHTML = html;
+
+  // スタッフボタンのクリックイベント
+  var btns = area.querySelectorAll('[data-nomid]');
+  for (i = 0; i < btns.length; i++){
+    (function(btn){
+      btn.addEventListener('click', function(){
+        appState.nominatedStaffId = btn.getAttribute('data-nomid') || null;
+        appState.selectedSlot = null;
+        // ボタンの選択状態を更新
+        var allBtns = area.querySelectorAll('[data-nomid]');
+        var j;
+        for (j = 0; j < allBtns.length; j++){
+          var sid = allBtns[j].getAttribute('data-nomid');
+          var staffColor = '';
+          var k;
+          for (k = 0; k < availableStaff.length; k++){
+            if (availableStaff[k].id === sid){ staffColor = availableStaff[k].color; break; }
+          }
+          var isSel = (sid === (appState.nominatedStaffId || ''));
+          if (isSel){
+            allBtns[j].style.cssText = 'width:auto;padding:6px 14px;font-size:13px;border-radius:20px;background:' +
+              (staffColor || 'var(--ac)') + ';color:#fff;border-color:' + (staffColor || 'var(--ac)') + ';';
+          } else {
+            allBtns[j].style.cssText = 'width:auto;padding:6px 14px;font-size:13px;border-radius:20px;';
+          }
+        }
+        // スロットを取得
+        loadSlotsForStaff(dateKey);
+      });
+    })(btns[i]);
+  }
+
+  // 初期スロット読み込み（指名なし or 選択中スタッフ）
+  loadSlotsForStaff(dateKey);
+}
+
+// 選択中スタッフの空きスロットを取得して表示
+function loadSlotsForStaff(dateKey){
+  var slotArea = $('staffSlotArea');
+  if (!slotArea) return;
+  slotArea.innerHTML = '<div class="loading" style="padding:16px;"><div class="spinner"></div>空きを確認中...</div>';
+
+  var menuId = appState.selectedMenu ? appState.selectedMenu._id : '';
+  var optIds = [];
+  var i;
+  for (i = 0; i < appState.selectedOptions.length; i++){
+    optIds.push(appState.selectedOptions[i]._id);
+  }
+
+  // getAvailableSlots に nominatedStaffId を渡す
+  // shared_db.js の dbCustomerGetAvailableSlots → Cloud Function に staffId を追加で渡す
+  if (typeof dbCustomerGetAvailableSlots !== 'function'){
+    slotArea.innerHTML = '<div class="error-box">空き状況の取得に失敗しました。</div>';
+    return;
+  }
+
+  dbCustomerGetAvailableSlots(dateKey, menuId, optIds, function(err, result){
+    if (err || !result || !result.slots){
+      slotArea.innerHTML = '<div class="error-box">空き状況の取得に失敗しました。</div>';
+      return;
+    }
+    appState.availableSlots = result.slots;
+    drawSlotsInArea(result.slots, slotArea);
+  }, appState.nominatedStaffId);  // ← staffId を追加引数で渡す
+}
+
+// 指定エリアにスロットを描画
+function drawSlotsInArea(slots, area){
+  if (!slots || slots.length === 0){
+    area.innerHTML = '<div class="empty-msg">この日はご予約いただけません。</div>';
+    return;
+  }
+  var anyAvail = false;
+  var i;
+  for (i = 0; i < slots.length; i++){ if (slots[i].available){ anyAvail = true; break; } }
+  if (!anyAvail){
+    area.innerHTML = '<div class="empty-msg">この日は空きがありません。<br>別の日をお選びください。</div>';
+    return;
+  }
+
+  var html = '<div class="slot-grid">';
+  for (i = 0; i < slots.length; i++){
+    var s = slots[i];
+    var sel = (appState.selectedSlot === s.start) ? ' selected' : '';
+    if (s.available){
+      html += '<div class="slot' + sel + '" data-slot="' + esc(s.start) + '">' + esc(s.start) + '</div>';
+    } else {
+      html += '<div class="slot disabled">' + esc(s.start) + '</div>';
+    }
+  }
+  html += '</div>';
+  area.innerHTML = html;
+
+  var slotEls = area.querySelectorAll('.slot[data-slot]');
+  for (i = 0; i < slotEls.length; i++){
+    slotEls[i].addEventListener('click', function(){
+      appState.selectedSlot = this.getAttribute('data-slot');
+      drawSlotsInArea(slots, area);
+      setFooter(
+        '<div class="footer-summary">' +
+          esc(formatDateJp(appState.selectedDate)) + ' ' + esc(appState.selectedSlot) + '〜　' +
+          esc(appState.selectedMenu ? appState.selectedMenu.name : '') +
+        '</div>' +
+        '<button class="pbtn" id="toConfirmBtn">予約内容を確認する</button>'
+      );
+      $('toConfirmBtn').addEventListener('click', function(){ goStep('confirm'); });
+    });
+  }
 }
 
 // 空きスロット計算
