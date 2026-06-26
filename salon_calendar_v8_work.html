@@ -1,0 +1,2339 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<title>TORITA - カレンダー</title>
+<!--
+  salon_calendar_v8.html  -  TORITA Phase C / C-3 (週ビュー版)
+  改修: 2026/5/22 - 月ビュー → 週ビュー(旧版v7踏襲)
+
+  設計準拠:
+    - DESIGN.md C-3 (週ビュー仕様)・B-1 dbLoadSalonCalendar 週単位
+    - 0-2 appointment スキーマ (customerDocId, source==manual, etc)
+    - 0-2 closeBlocks スキーマ
+    - settings.openTime/closeTime/intervalMin/weeklyClose 連動
+
+  ロード順序:
+    firebase-*-compat → firebase-init.js → shared_db.js → shared_auth.js
+      → shared_db_calendar.js → shared_db_menu.js → shared_ui.js
+
+  ES5 互換: var / function のみ
+-->
+<style>
+  :root{
+    --ac:#b5845a; --al:#f5ede4; --ad:#7a5535;
+    --bg:#fff; --sf:#f8f7f4; --s2:#f0ede8;
+    --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
+    --gn:#7b9e87; --gl:#eef3ef;
+    --rd:#c47b7b; --rl:#faeaea; --rt:#6b1f1f;
+    --bl:#7a8fbf; --bll:#eaeefc; --bt:#2c3a66;
+    --iv:#d4b483; --ivl:#faf3e6;
+    --cb:#c47b7b; --cbl:#faeaea;
+    --sun:#c47b7b; --sat:#7a8fbf;
+  }
+  *{box-sizing:border-box;margin:0;padding:0;}
+  html,body{height:100%;}
+  body{
+    font-family:'Georgia','Hiragino Mincho ProN',serif;
+    background:var(--s2); color:var(--tx);
+    -webkit-text-size-adjust:100%; min-height:100vh;
+  }
+
+  .topbar{
+    background:#fff; border-bottom:1px solid var(--bd);
+    padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+    position:sticky; top:0; z-index:10;
+  }
+  .back-link{
+    background:none; border:none; cursor:pointer;
+    font-family:inherit; font-size:13px; color:var(--mu);
+    display:flex; align-items:center; gap:5px;
+  }
+  .back-link:hover{color:var(--ac);}
+  .topbar-title{
+    font-size:15px; font-weight:600; color:var(--ad);
+    letter-spacing:.03em;
+  }
+  .topbar-spacer{width:60px;}
+
+  .wrap{max-width:980px; margin:0 auto; padding:14px 10px 40px;}
+
+  /* ===== 週ナビ ===== */
+  .week-nav{
+    display:flex; align-items:center; justify-content:space-between;
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    padding:11px 14px; margin-bottom:10px; gap:8px;
+  }
+  .week-nav button{
+    background:var(--al); border:none; color:var(--ad);
+    width:38px; height:38px; border-radius:10px;
+    font-size:17px; cursor:pointer; font-family:inherit;
+    flex-shrink:0;
+  }
+  .week-nav button:hover{background:var(--ac); color:#fff;}
+  .week-nav button:disabled{opacity:.4; cursor:default;}
+  .week-label{
+    font-size:14px; font-weight:600; color:var(--ad);
+    flex:1; text-align:center; min-width:0;
+  }
+  .week-today{
+    background:#fff !important; color:var(--ac) !important;
+    border:1.5px solid var(--ac) !important; width:auto !important;
+    padding:0 12px; font-size:12px;
+  }
+  .week-today:hover{background:var(--ac) !important; color:#fff !important;}
+
+  /* ===== アクションバー ===== */
+  .action-bar{display:flex; gap:8px; margin-bottom:10px;}
+  .action-btn{
+    flex:1; background:var(--ac); color:#fff; border:none;
+    border-radius:10px; padding:10px; cursor:pointer;
+    font-family:inherit; font-size:13px; font-weight:600;
+  }
+  .action-btn:hover{background:var(--ad);}
+  .action-btn.alt{
+    background:#fff; color:var(--ad);
+    border:1.5px solid var(--ac);
+  }
+  .action-btn.alt:hover{background:var(--al);}
+
+  /* ===== 凡例 ===== */
+  .legend{
+    display:flex; gap:10px; flex-wrap:wrap;
+    font-size:11px; color:var(--mu);
+    padding:8px 12px; margin-bottom:10px;
+    background:#fff; border-radius:10px;
+  }
+  .legend-item{display:flex; align-items:center; gap:5px;}
+  .ld{width:14px; height:10px; border-radius:3px; border-left:3px solid;}
+  .ld.online{background:var(--gl); border-color:var(--gn);}
+  .ld.manual{background:var(--bll); border-color:var(--bl);}
+  .ld.interval{background:var(--ivl); border-color:var(--iv);}
+  .ld.cb{background:var(--cbl); border-color:var(--cb);}
+
+  /* ===== 週グリッド ===== */
+  .week-card{
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    overflow:hidden; margin-bottom:14px;
+  }
+  .week-dow-row{
+    display:grid;
+    grid-template-columns:42px repeat(7, 1fr);
+    background:var(--sf);
+    border-bottom:1px solid var(--bd);
+  }
+  .wdl{
+    text-align:center; padding:7px 2px; font-size:10px;
+    font-weight:600; color:var(--mu);
+    border-left:1px solid var(--bd);
+  }
+  .wdl.sun{color:var(--sun);}
+  .wdl.sat{color:var(--sat);}
+  .wdl .day-num{
+    font-size:15px; font-weight:600; display:block;
+    line-height:1.3; color:var(--tx);
+  }
+  .wdl .today-num{
+    background:var(--ac); color:#fff;
+    border-radius:50%; width:24px; height:24px;
+    display:inline-flex; align-items:center; justify-content:center;
+    font-size:12px;
+  }
+  .time-grid{
+    display:grid;
+    grid-template-columns:42px repeat(7, 1fr);
+  }
+  .tlabel{
+    font-size:10px; color:var(--mu);
+    text-align:right; padding-right:4px; padding-top:2px;
+    height:48px; border-top:1px solid var(--bd);
+  }
+  .dcol{
+    border-left:1px solid var(--bd);
+    border-top:1px solid var(--bd);
+    min-height:48px; position:relative;
+  }
+  .dcol.hol{background:var(--sf); cursor:not-allowed;}
+  .dcol.today-col{background:#fffbf7;}
+  .hol-label{
+    font-size:10px; color:var(--mu);
+    text-align:center; padding-top:5px;
+    pointer-events:none;
+  }
+
+  /* ===== 予約ブロック ===== */
+  .appt{
+    position:absolute; left:2px; right:2px;
+    border-radius:5px; padding:3px 4px;
+    font-size:10px; cursor:pointer; overflow:hidden;
+    border-left:3px solid; line-height:1.3;
+    z-index:5;
+  }
+  .appt:hover{opacity:.85;}
+  .appt.online{background:var(--gl); border-color:var(--gn); color:#2e5c3a;}
+  .appt.manual{background:var(--bll); border-color:var(--bl); color:var(--bt);}
+  .appt.interval{background:var(--ivl); border-color:var(--iv); color:#5a4010; z-index:4;}
+  .appt.cb{background:var(--cbl); border-color:var(--cb); color:var(--rt);}
+  /* ★ 定期クローズ由来（weeklyClose展開）。実クローズと区別するため破線＋淡色 */
+  .appt.wcb{background:repeating-linear-gradient(45deg,var(--cbl),var(--cbl) 6px,rgba(255,255,255,.5) 6px,rgba(255,255,255,.5) 12px);
+            border-color:var(--cb); color:var(--rt); border-left-style:dashed;}
+  .appt-name{
+    font-weight:600; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis;
+  }
+  .appt-sub{
+    font-size:9px; opacity:.85;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+  }
+
+  /* ===== モーダル共通 ===== */
+  .modal-ov{
+    display:none; position:fixed; inset:0;
+    background:rgba(0,0,0,.42); z-index:60;
+    overflow-y:auto; padding:24px 12px;
+  }
+  .modal-ov.show{display:block;}
+  .modal{
+    max-width:520px; margin:0 auto;
+    background:#fff; border-radius:15px;
+    box-shadow:0 12px 40px rgba(0,0,0,.22);
+    overflow:hidden;
+  }
+  .modal-head{
+    background:var(--al); padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .modal-title{font-size:16px; color:var(--ad); font-weight:600;}
+  .modal-close{
+    background:none; border:none; cursor:pointer;
+    font-size:22px; color:var(--mu); line-height:1;
+  }
+
+  .tab-row{
+    display:flex; border-bottom:1px solid var(--bd);
+    background:var(--sf);
+  }
+  .tab-btn{
+    flex:1; background:none; border:none; cursor:pointer;
+    padding:12px; font-family:inherit; font-size:13px;
+    color:var(--mu); font-weight:600;
+    border-bottom:2px solid transparent;
+  }
+  .tab-btn.active{
+    color:var(--ad); border-bottom-color:var(--ac);
+    background:#fff;
+  }
+  .modal-body{padding:16px 18px;}
+  .modal-body.hidden{display:none;}
+
+  /* 詳細表示 */
+  .detail-row{
+    display:flex; justify-content:space-between;
+    padding:7px 0; border-bottom:1px solid var(--bd);
+    font-size:13px;
+  }
+  .detail-row:last-child{border-bottom:none;}
+  .detail-label{color:var(--mu); font-size:11px;}
+  .detail-value{font-weight:600; color:var(--tx); text-align:right;}
+
+  .field{margin-bottom:14px;}
+  .field label{
+    display:block; font-size:12px; color:var(--mu);
+    margin-bottom:5px;
+  }
+  .field input, .field select, .field textarea{
+    width:100%; background:var(--sf);
+    border:1px solid var(--bd); border-radius:9px;
+    padding:9px 12px;
+    font-family:inherit; font-size:14px; color:var(--tx);
+  }
+  .field input:focus, .field select:focus, .field textarea:focus{
+    outline:none; border-color:var(--ac); background:#fff;
+  }
+  .row-2{display:flex; gap:10px;}
+  .row-2 .field{flex:1; margin-bottom:0;}
+
+  /* 顧客選択 */
+  .cust-mode{display:flex; gap:8px; margin-bottom:10px;}
+  .cust-mode-btn{
+    flex:1; background:#fff; border:1.5px solid var(--bd);
+    border-radius:9px; padding:9px;
+    cursor:pointer; font-family:inherit;
+    font-size:13px; color:var(--mu);
+  }
+  .cust-mode-btn.on{
+    background:var(--al); border-color:var(--ac);
+    color:var(--ad); font-weight:600;
+  }
+  .cust-search-box{position:relative;}
+  .cust-results{
+    position:absolute; left:0; right:0; top:100%;
+    background:#fff; border:1px solid var(--bd);
+    border-radius:9px; margin-top:3px;
+    max-height:200px; overflow-y:auto;
+    box-shadow:0 4px 14px rgba(0,0,0,.12);
+    z-index:5; display:none;
+  }
+  .cust-results.show{display:block;}
+  .cust-result-item{
+    padding:9px 12px; cursor:pointer;
+    border-bottom:1px solid var(--bd);
+    font-size:13px;
+  }
+  .cust-result-item:last-child{border-bottom:none;}
+  .cust-result-item:hover{background:var(--al);}
+  .cust-result-sub{
+    font-size:11px; color:var(--mu); margin-top:1px;
+  }
+  .cust-picked{
+    background:var(--al); border:1px solid var(--ac);
+    border-radius:9px; padding:10px 12px;
+    display:flex; justify-content:space-between; align-items:center;
+  }
+  .cust-picked-name{
+    font-size:13px; color:var(--ad); font-weight:600;
+  }
+  .cust-picked-clear{
+    background:none; border:none; cursor:pointer;
+    color:var(--mu); font-size:18px; line-height:1;
+  }
+
+  /* オプション */
+  .opt-list{display:flex; flex-direction:column; gap:6px; margin-bottom:8px;}
+  .opt-row{display:flex; gap:6px; align-items:center;}
+  .opt-row select{flex:1;}
+  .opt-del{
+    width:28px; height:28px;
+    background:none; border:1px solid var(--bd); border-radius:6px;
+    cursor:pointer; color:var(--mu); font-size:13px;
+    font-family:inherit;
+  }
+  .opt-del:hover{border-color:var(--rd); color:var(--rd);}
+  .add-opt{
+    width:100%; padding:8px;
+    background:none; border:1px dashed var(--bd);
+    border-radius:8px; cursor:pointer;
+    font-family:inherit; font-size:12px; color:var(--mu);
+  }
+  .add-opt:hover{border-color:var(--ac); color:var(--ac);}
+
+  /* ボタン */
+  .modal-actions{
+    display:flex; gap:8px; padding:14px 18px;
+    border-top:1px solid var(--bd); background:var(--sf);
+    flex-wrap:wrap;
+  }
+  .btn{
+    flex:1; border:none; border-radius:10px;
+    padding:11px; cursor:pointer;
+    font-family:inherit; font-size:13px; font-weight:600;
+    min-width:90px;
+  }
+  .btn-primary{background:var(--ac); color:#fff;}
+  .btn-primary:hover{background:var(--ad);}
+  .btn-primary:disabled{opacity:.5; cursor:not-allowed;}
+  .btn-ghost{background:var(--s2); color:var(--mu);}
+  .btn-ghost:hover{background:var(--bd);}
+  .btn-danger{background:var(--rl); color:var(--rt);}
+  .btn-danger:hover{background:var(--cb); color:#fff;}
+
+  footer{
+    text-align:center; padding:20px 0;
+    color:var(--mu); font-size:10px;
+  }
+
+  /* ===== ビュー切り替えタブ（チームプランのみ表示） ===== */
+  .view-tabs{
+    display:flex; gap:0; margin-bottom:10px;
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    overflow:hidden;
+  }
+  .view-tab-btn{
+    flex:1; background:none; border:none; cursor:pointer;
+    padding:11px; font-family:inherit; font-size:13px;
+    color:var(--mu); font-weight:600;
+    border-bottom:2px solid transparent;
+    transition:background .12s, color .12s;
+  }
+  .view-tab-btn.active{
+    background:var(--al); color:var(--ad);
+    border-bottom-color:var(--ac);
+  }
+
+  /* ===== 日ビュー ===== */
+  .day-nav{
+    display:flex; align-items:center; justify-content:space-between;
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    padding:11px 14px; margin-bottom:10px; gap:8px;
+  }
+  .day-nav button{
+    background:var(--al); border:none; color:var(--ad);
+    width:38px; height:38px; border-radius:10px;
+    font-size:17px; cursor:pointer; font-family:inherit;
+    flex-shrink:0;
+  }
+  .day-nav button:hover{background:var(--ac); color:#fff;}
+  .day-nav button:disabled{opacity:.4; cursor:default;}
+  .day-label{
+    font-size:14px; font-weight:600; color:var(--ad);
+    flex:1; text-align:center;
+  }
+  .day-today-btn{
+    background:#fff !important; color:var(--ac) !important;
+    border:1.5px solid var(--ac) !important; width:auto !important;
+    padding:0 12px; font-size:12px;
+  }
+
+  /* スタッフ列ヘッダー */
+  .staff-dow-row{
+    display:grid;
+    background:var(--sf);
+    border-bottom:1px solid var(--bd);
+  }
+  .sdl{
+    text-align:center; padding:8px 4px; font-size:11px;
+    font-weight:600; color:var(--mu);
+    border-left:1px solid var(--bd);
+  }
+  .sdl .staff-color-bar{
+    display:block; height:3px; border-radius:2px;
+    margin:4px auto 0; width:60%;
+  }
+  .sdl.off-shift{
+    opacity:.45;
+    background:var(--s2);
+  }
+
+  /* 日ビューグリッド */
+  .day-time-grid{
+    display:grid;
+  }
+  .day-col{
+    border-left:1px solid var(--bd);
+    border-top:1px solid var(--bd);
+    min-height:48px; position:relative;
+  }
+  .day-col.off-shift{
+    background:var(--s2); opacity:.6;
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <button class="back-link" onclick="goDashboard()">&#8592; ダッシュボード</button>
+  <span class="topbar-title">カレンダー</span>
+  <span class="topbar-spacer"></span>
+</div>
+
+<div class="wrap">
+
+  <!-- ビュー切り替えタブ（チームプランのみJS側で表示） -->
+  <div class="view-tabs" id="viewTabs" style="display:none;">
+    <button class="view-tab-btn active" id="tabWeekBtn" onclick="switchView('week')">週ビュー</button>
+    <button class="view-tab-btn" id="tabDayBtn" onclick="switchView('day')">日ビュー（スタッフ別）</button>
+  </div>
+
+  <div id="weekViewArea">
+    <div class="week-nav">
+      <button id="prevBtn" onclick="changeWeek(-1)">&#8249;</button>
+      <span class="week-label" id="weekLabel">---- 〜 ----</span>
+      <button id="nextBtn" onclick="changeWeek(1)">&#8250;</button>
+      <button class="week-today" onclick="goToday()">今日</button>
+    </div>
+
+    <div class="action-bar">
+      <button class="action-btn" onclick="openBookingModal()">＋ 予約を登録</button>
+      <button class="action-btn alt" onclick="openCloseModal()">＋ クローズ時間</button>
+    </div>
+
+    <div class="legend">
+      <div class="legend-item"><div class="ld manual"></div>手動登録</div>
+      <div class="legend-item"><div class="ld online"></div>アプリ予約</div>
+      <div class="legend-item"><div class="ld interval"></div>インターバル</div>
+      <div class="legend-item"><div class="ld cb"></div>クローズ</div>
+    </div>
+
+    <div id="weekCardArea" class="week-card">
+      <div class="week-dow-row" id="weekDowRow">
+        <div></div>
+      </div>
+      <div class="time-grid" id="timeGrid"></div>
+    </div>
+  </div>
+
+  <!-- 日ビューコンテナ -->
+  <div id="dayView" style="display:none;">
+    <div class="day-nav">
+      <button id="prevDayBtn" onclick="changeDay(-1)">&#8249;</button>
+      <span class="day-label" id="dayLabel">----</span>
+      <button id="nextDayBtn" onclick="changeDay(1)">&#8250;</button>
+      <button class="day-today-btn day-nav button" onclick="goDayToday()" style="background:#fff;color:var(--ac);border:1.5px solid var(--ac);border-radius:10px;padding:0 12px;font-size:12px;cursor:pointer;font-family:inherit;height:38px;">今日</button>
+    </div>
+    <div class="week-card">
+      <div class="staff-dow-row" id="staffDowRow"></div>
+      <div class="day-time-grid" id="dayTimeGrid"></div>
+    </div>
+  </div>
+
+  <footer>&copy; TORITA</footer>
+</div>
+
+<!-- 予約・クローズ詳細モーダル -->
+<div class="modal-ov" id="detailModalOv">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="detailModalTitle">予約詳細</div>
+      <button class="modal-close" onclick="closeDetailModal()">&times;</button>
+    </div>
+    <div class="modal-body" id="detailModalBody"></div>
+    <div class="modal-actions" id="detailModalActions"></div>
+  </div>
+</div>
+
+<!-- 予約登録 / クローズ時間モーダル -->
+<div class="modal-ov" id="modalOv">
+  <div class="modal">
+    <div class="modal-head">
+      <div class="modal-title" id="modalTitle">予約を登録</div>
+      <button class="modal-close" onclick="closeModal()">&times;</button>
+    </div>
+    <div class="tab-row">
+      <button class="tab-btn active" id="tabBookBtn" onclick="switchTab('book')">予約登録</button>
+      <button class="tab-btn" id="tabCloseBtn" onclick="switchTab('close')">クローズ時間</button>
+    </div>
+
+    <div class="modal-body" id="bookBody">
+      <div class="cust-mode">
+        <button class="cust-mode-btn on" id="modeExistBtn" onclick="setCustMode('exist')">既存顧客から選ぶ</button>
+        <button class="cust-mode-btn" id="modeNewBtn" onclick="setCustMode('new')">新規顧客を登録</button>
+      </div>
+
+      <div id="custExistPane">
+        <div id="custPickedArea" style="display:none;">
+          <div class="cust-picked">
+            <div>
+              <div class="cust-picked-name" id="custPickedName">—</div>
+              <div class="cust-result-sub" id="custPickedSub">—</div>
+            </div>
+            <button class="cust-picked-clear" onclick="clearPickedCustomer()">&times;</button>
+          </div>
+        </div>
+        <div id="custSearchArea" class="cust-search-box">
+          <div class="field" style="margin-bottom:0;">
+            <label>顧客を検索</label>
+            <input type="text" id="custSearchInp" placeholder="名前・電話" autocomplete="off">
+          </div>
+          <div class="cust-results" id="custResults"></div>
+        </div>
+      </div>
+
+      <div id="custNewPane" style="display:none;">
+        <div class="field">
+          <label>お名前（必須）</label>
+          <input type="text" id="newName" placeholder="例：山田 花子">
+        </div>
+        <div class="row-2">
+          <div class="field">
+            <label>電話番号</label>
+            <input type="tel" id="newPhone" placeholder="090-1234-5678">
+          </div>
+          <div class="field">
+            <label>メール（任意）</label>
+            <input type="email" id="newEmail">
+          </div>
+        </div>
+      </div>
+
+      <div style="height:14px;"></div>
+
+      <div class="row-2" style="margin-bottom:14px;">
+        <div class="field" style="margin-bottom:0;">
+          <label>日付</label>
+          <input type="date" id="bDate">
+        </div>
+        <div class="field" style="margin-bottom:0;">
+          <label>開始時間</label>
+          <input type="time" id="bTime" value="10:00">
+        </div>
+      </div>
+
+      <div class="field">
+        <label>メインメニュー</label>
+        <select id="bMenu"></select>
+      </div>
+
+      <div class="field">
+        <label>オプション（任意）</label>
+        <div class="opt-list" id="optList"></div>
+        <button class="add-opt" onclick="addOption()">＋ オプションを追加</button>
+      </div>
+
+      <div class="field">
+        <label>メモ（任意・サロン内部用）</label>
+        <input type="text" id="bMemo" placeholder="備考など">
+      </div>
+    </div>
+
+    <div class="modal-body hidden" id="closeBody">
+      <div class="field">
+        <label>日付</label>
+        <input type="date" id="cDate">
+      </div>
+      <div class="row-2">
+        <div class="field">
+          <label>開始時間</label>
+          <input type="time" id="cStart" value="12:00">
+        </div>
+        <div class="field">
+          <label>終了時間</label>
+          <input type="time" id="cEnd" value="13:00">
+        </div>
+      </div>
+      <div class="field">
+        <label>理由（任意）</label>
+        <input type="text" id="cReason" placeholder="例：ランチ休憩 / 私用">
+      </div>
+    </div>
+
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeModal()">キャンセル</button>
+      <button class="btn btn-primary" id="modalSaveBtn" onclick="saveModal()">登録する</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+
+<script src="firebase-init.js"></script>
+<script src="shared_db.js"></script>
+<script src="shared_auth.js"></script>
+<script src="shared_db_calendar.js"></script>
+<script src="shared_db_menu.js"></script>
+<script src="shared_ui.js"></script>
+
+<script>
+(function () {
+
+  // ===== 定数 =====
+  var DOWS = ['日','月','火','水','木','金','土'];
+  var SLOT_H = 48;
+  var DEFAULT_OPEN = '09:00';
+  var DEFAULT_CLOSE = '21:00';
+
+  // ===== 状態 =====
+  var _weekStart = null;
+  var _bundle = null;
+  var _customerNameCache = {};
+  var _modalTab = 'book';
+  var _custMode = 'exist';
+  var _pickedCust = null;
+  var _allCust = [];
+  var _optionSelects = [];
+  // Phase I-step7: 日ビュー
+  var _viewMode  = 'week';  // 'week' | 'day'
+  var _dayDate   = null;    // 日ビューの表示日
+  var _planId    = 'solo';  // 'solo' | 'team'
+  var _staffList = [];      // [{id, name, color}]
+  var _shiftMap  = {};      // { 'YYYY-MM-DD': [staffId,...] }
+  var _salonId   = null;
+
+  function pad2(n) {
+    n = String(n);
+    return (n.length < 2) ? ('0' + n) : n;
+  }
+  function dateKeyOf(d) {
+    return d.getFullYear() + '-' + pad2(d.getMonth() + 1)
+         + '-' + pad2(d.getDate());
+  }
+  function todayKey() {
+    return dateKeyOf(new Date());
+  }
+  // ★ 2026/5/23 改訂: 「今日始まりローリング7日」仕様
+  //   旧仕様（日曜始まり）から変更。
+  //   この関数は「今日0時」の Date を返す（起動時・「今日」ボタンで使う）。
+  function getTodayStart() {
+    var d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  }
+  function timeToHour(hhmm) {
+    if (!hhmm) { return null; }
+    var p = String(hhmm).split(':');
+    if (p.length !== 2) { return null; }
+    var h = parseInt(p[0], 10), m = parseInt(p[1], 10);
+    if (isNaN(h) || isNaN(m)) { return null; }
+    return h + m / 60;
+  }
+  function esc(s) {
+    s = (s == null) ? '' : String(s);
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  function formatDateKey(dk) {
+    if (!dk) { return ''; }
+    var p = String(dk).split('-');
+    if (p.length !== 3) { return dk; }
+    var y = parseInt(p[0], 10), m = parseInt(p[1], 10), d = parseInt(p[2], 10);
+    var dow = '';
+    try {
+      var dt = new Date(y, m - 1, d);
+      dow = DOWS[dt.getDay()];
+    } catch (e) {}
+    return y + '年' + m + '月' + d + '日' + (dow ? '（' + dow + '）' : '');
+  }
+
+  function goDashboard() {
+    window.location.href = 'salon_dashboard_v1.html';
+  }
+  window.goDashboard = goDashboard;
+
+  // ===== 週ナビ =====
+  function changeWeek(delta) {
+    var dt = new Date(_weekStart.getTime());
+    dt.setDate(dt.getDate() + 7 * delta);
+    _weekStart = dt;
+    loadWeek();
+  }
+  window.changeWeek = changeWeek;
+
+  function goToday() {
+    _weekStart = getTodayStart();
+    loadWeek();
+  }
+  window.goToday = goToday;
+
+  function setNavDisabled(disabled) {
+    document.getElementById('prevBtn').disabled = disabled;
+    document.getElementById('nextBtn').disabled = disabled;
+  }
+
+  // ===== 週データ取得 =====
+  function loadWeek() {
+    var ws = _weekStart;
+    var we = new Date(ws.getTime()); we.setDate(we.getDate() + 6);
+    var fromTxt = (ws.getMonth() + 1) + '月' + ws.getDate() + '日';
+    var toTxt = (we.getMonth() + 1) + '月' + we.getDate() + '日';
+    document.getElementById('weekLabel').textContent =
+      ws.getFullYear() + '年 ' + fromTxt + ' 〜 ' + toTxt;
+    setNavDisabled(true);
+    uiShowLoading('読み込み中...');
+
+    dbLoadSalonCalendar(ws, function (bundle) {
+      uiHideLoading();
+      setNavDisabled(false);
+      if (!bundle) {
+        uiToast('カレンダーの取得に失敗しました');
+        _bundle = null;
+        renderEmpty();
+        return;
+      }
+      _bundle = bundle;
+      renderWeek();
+    });
+  }
+
+  function renderEmpty() {
+    document.getElementById('weekDowRow').innerHTML = '<div></div>';
+    document.getElementById('timeGrid').innerHTML = '';
+  }
+
+  // ===== 週グリッド描画 =====
+  function renderWeek() {
+    var settings = (_bundle && _bundle.settings) || {};
+    var openTime = settings.openTime || DEFAULT_OPEN;
+    var closeTime = settings.closeTime || DEFAULT_CLOSE;
+    var weeklyClose = settings.weeklyClose || [];
+    // ★ 2026/6/13 修正: 終日定休は closedDows（settings.closedDows）で判定する。
+    //   従来は weeklyClose の dow を終日定休扱いにしていたため、
+    //   時間帯クローズ（16:30〜21:00 等）を設定すると全曜日が終日定休になるバグがあった。
+    //   weeklyClose は下で時間帯クローズブロックとして展開描画する（方式A）。
+    var closedDows = [];
+    var cdRaw = settings.closedDows || [];
+    if (Array.isArray(cdRaw)) {
+      var kc;
+      for (kc = 0; kc < cdRaw.length; kc++) {
+        if (typeof cdRaw[kc] === 'number') { closedDows.push(cdRaw[kc]); }
+      }
+    }
+    // ★ 定期クローズの例外日（この日は定期クローズを描画しない）
+    var wcExceptions = [];
+    var weRaw = settings.weeklyCloseExceptions || [];
+    if (Array.isArray(weRaw)) {
+      var ke;
+      for (ke = 0; ke < weRaw.length; ke++) {
+        wcExceptions.push(String(weRaw[ke]));
+      }
+    }
+
+    var oh = timeToHour(openTime);
+    var ch = timeToHour(closeTime);
+    if (oh == null) { oh = 9; }
+    if (ch == null) { ch = 21; }
+    var startHour = Math.floor(oh);
+    var endHour = Math.ceil(ch);
+    if (endHour <= startHour) { endHour = startHour + 1; }
+
+    // 曜日ヘッダー
+    var dowRow = document.getElementById('weekDowRow');
+    dowRow.innerHTML = '<div></div>';
+    var today = todayKey();
+    var days = [];
+    var i, dt;
+    for (i = 0; i < 7; i++) {
+      dt = new Date(_weekStart.getTime());
+      dt.setDate(dt.getDate() + i);
+      var dow = dt.getDay();
+      var dk = dateKeyOf(dt);
+      days.push({ date: dt, dateKey: dk, dow: dow });
+
+      var wdl = document.createElement('div');
+      wdl.className = 'wdl';
+      if (dow === 0) { wdl.className += ' sun'; }
+      if (dow === 6) { wdl.className += ' sat'; }
+      var dayNum = '<span class="' + (dk === today ? 'today-num' : 'day-num') + '">'
+                 + dt.getDate() + '</span>';
+      wdl.innerHTML = DOWS[dow] + dayNum;
+      dowRow.appendChild(wdl);
+    }
+
+    // 時間グリッド
+    var grid = document.getElementById('timeGrid');
+    grid.innerHTML = '';
+    var hour, di, daysCols = [];
+    var rowCount = endHour - startHour;
+    for (hour = startHour; hour < endHour; hour++) {
+      var tlabel = document.createElement('div');
+      tlabel.className = 'tlabel';
+      tlabel.textContent = hour + ':00';
+      grid.appendChild(tlabel);
+      for (di = 0; di < 7; di++) {
+        var d = days[di];
+        var col = document.createElement('div');
+        col.className = 'dcol';
+        if (d.dateKey === today) { col.className += ' today-col'; }
+        if (closedDows.indexOf(d.dow) >= 0) {
+          col.className += ' hol';
+          if (hour === startHour) {
+            var lbl = document.createElement('div');
+            lbl.className = 'hol-label';
+            lbl.textContent = '定休日';
+            col.appendChild(lbl);
+          }
+        }
+        grid.appendChild(col);
+        daysCols.push({ col: col, hour: hour, di: di, day: d });
+      }
+    }
+
+    function colAt(hour, di) {
+      var rowIdx = hour - startHour;
+      if (rowIdx < 0 || rowIdx >= rowCount) { return null; }
+      return daysCols[rowIdx * 7 + di].col;
+    }
+
+    // 予約ブロック
+    var appts = (_bundle && _bundle.appointments) || [];
+    var intervalMin = (settings.intervalMin != null) ? parseInt(settings.intervalMin, 10) : 0;
+    if (isNaN(intervalMin) || intervalMin < 0) { intervalMin = 0; }
+
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      var aDi = -1;
+      var j;
+      for (j = 0; j < 7; j++) {
+        if (days[j].dateKey === a.dateKey) { aDi = j; break; }
+      }
+      if (aDi < 0) { continue; }
+      var sh = timeToHour(a.start);
+      if (sh == null) { continue; }
+      var dur = (typeof a.durationMin === 'number') ? a.durationMin : 60;
+      var hRow = Math.floor(sh);
+      var anchor = colAt(hRow, aDi);
+      if (!anchor) { continue; }
+
+      var b = document.createElement('div');
+      var srcCls = (a.source === 'online') ? 'online' : 'manual';
+      b.className = 'appt ' + srcCls;
+      var topPx = (sh - hRow) * SLOT_H;
+      var heightPx = (dur / 60) * SLOT_H - 2;
+      if (heightPx < 16) { heightPx = 16; }
+      b.style.top = topPx + 'px';
+      b.style.height = heightPx + 'px';
+      var nm = _customerNameCache[a.customerDocId] || '読込中…';
+      var mn = a.menuNameSnapshot || '';
+      b.innerHTML = '<div class="appt-name">' + esc(nm) + '</div>'
+                  + '<div class="appt-sub">' + esc(mn) + '</div>';
+      (function (ap) {
+        b.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openApptDetail(ap);
+        });
+      })(a);
+      anchor.appendChild(b);
+
+      // 顧客名キャッシュ未取得なら遅延取得
+      if (!_customerNameCache[a.customerDocId] && a.customerDocId) {
+        (function (docId, blockEl) {
+          dbSalonGetCustomer(docId, function (c) {
+            var nameEl = blockEl.querySelector('.appt-name');
+            if (c && c.name) {
+              _customerNameCache[docId] = c.name;
+              if (nameEl) { nameEl.textContent = c.name; }
+            } else {
+              _customerNameCache[docId] = '(顧客情報なし)';
+              if (nameEl) { nameEl.textContent = '(顧客情報なし)'; }
+            }
+          });
+        })(a.customerDocId, b);
+      }
+
+      // インターバル
+      if (intervalMin > 0) {
+        var eh = sh + dur / 60;
+        var ihRow = Math.floor(eh);
+        var iAnchor = colAt(ihRow, aDi);
+        if (iAnchor) {
+          var ib = document.createElement('div');
+          ib.className = 'appt interval';
+          var iTop = (eh - ihRow) * SLOT_H;
+          var iHeight = (intervalMin / 60) * SLOT_H - 2;
+          if (iHeight < 12) { iHeight = 12; }
+          ib.style.top = iTop + 'px';
+          ib.style.height = iHeight + 'px';
+          ib.innerHTML = '<div class="appt-name" style="font-size:9px;font-weight:400;">準備 '
+                       + intervalMin + '分</div>';
+          (function (ap) {
+            ib.addEventListener('click', function (e) {
+              e.stopPropagation();
+              openApptDetail(ap);
+            });
+          })(a);
+          iAnchor.appendChild(ib);
+        }
+      }
+    }
+
+    // クローズブロック
+    var cbs = (_bundle && _bundle.closeBlocks) || [];
+    for (i = 0; i < cbs.length; i++) {
+      var cb = cbs[i];
+      var cDi = -1;
+      for (j = 0; j < 7; j++) {
+        if (days[j].dateKey === cb.dateKey) { cDi = j; break; }
+      }
+      if (cDi < 0) { continue; }
+      var cs = timeToHour(cb.start);
+      var ce = timeToHour(cb.end);
+      if (cs == null || ce == null || ce <= cs) { continue; }
+      var cHRow = Math.floor(cs);
+      var cAnchor = colAt(cHRow, cDi);
+      if (!cAnchor) { continue; }
+
+      var cbEl = document.createElement('div');
+      cbEl.className = 'appt cb';
+      var cTop = (cs - cHRow) * SLOT_H;
+      var cHeight = (ce - cs) * SLOT_H - 2;
+      if (cHeight < 16) { cHeight = 16; }
+      cbEl.style.top = cTop + 'px';
+      cbEl.style.height = cHeight + 'px';
+      cbEl.innerHTML = '<div class="appt-name">クローズ</div>'
+                     + '<div class="appt-sub">' + esc(cb.reason || '—') + '</div>';
+      (function (c) {
+        cbEl.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openCloseDetail(c);
+        });
+      })(cb);
+      cAnchor.appendChild(cbEl);
+    }
+
+    // ★ 2026/6/13 追加: 定期クローズ（weeklyClose）を各週の該当曜日に
+    //   時間帯クローズブロックとして展開描画（方式A）。
+    //   見た目は破線で実クローズと区別。クリックで「実クローズに切り出す」操作。
+    //   例外日リスト（weeklyCloseExceptions）にある日は描画しない
+    //   ＝切り出し済み or 個別に解除された日。これにより closeBlocks を
+    //   削除しても定期クローズが復活しない（バグ修正の核心）。
+    var wcList = [];
+    if (Array.isArray(weeklyClose)) {
+      var wi;
+      for (wi = 0; wi < weeklyClose.length; wi++) {
+        var w = weeklyClose[wi];
+        if (w && typeof w.dow === 'number' && w.start && w.end) {
+          wcList.push(w);
+        }
+      }
+    }
+    for (i = 0; i < wcList.length; i++) {
+      var wc = wcList[i];
+      var wDi = -1;
+      for (j = 0; j < 7; j++) {
+        if (days[j].dow === wc.dow) { wDi = j; break; }
+      }
+      if (wDi < 0) { continue; }
+      var wDay = days[wDi];
+      // 終日定休の曜日には定期クローズを重ねない
+      if (closedDows.indexOf(wDay.dow) >= 0) { continue; }
+      // 例外日（切り出し済み・解除済み）は定期クローズを描画しない
+      if (wcExceptions.indexOf(wDay.dateKey) >= 0) { continue; }
+      var ws2 = timeToHour(wc.start);
+      var we2 = timeToHour(wc.end);
+      if (ws2 == null || we2 == null || we2 <= ws2) { continue; }
+      var wHRow = Math.floor(ws2);
+      var wAnchor = colAt(wHRow, wDi);
+      if (!wAnchor) { continue; }
+      var wEl = document.createElement('div');
+      wEl.className = 'appt wcb';
+      var wTop = (ws2 - wHRow) * SLOT_H;
+      var wHeight = (we2 - ws2) * SLOT_H - 2;
+      if (wHeight < 16) { wHeight = 16; }
+      wEl.style.top = wTop + 'px';
+      wEl.style.height = wHeight + 'px';
+      wEl.innerHTML = '<div class="appt-name">定期クローズ</div>'
+                    + '<div class="appt-sub">' + esc(wc.start) + '〜' + esc(wc.end) + '</div>';
+      (function (wcObj, dayObj) {
+        wEl.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openWeeklyCloseDetail(wcObj, dayObj);
+        });
+      })(wc, wDay);
+      wAnchor.appendChild(wEl);
+    }
+  }
+
+  // ★ 定期クローズの詳細モーダル：この回だけ実クローズに切り出す（方式A）
+  function openWeeklyCloseDetail(wc, day) {
+    document.getElementById('detailModalTitle').textContent = '定期クローズ';
+    var body = document.getElementById('detailModalBody');
+    var dateTxt = formatDateKey(day.dateKey);
+    var html = '';
+    html += '<div class="detail-row"><span class="detail-label">日付</span><span class="detail-value">' + esc(dateTxt) + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-label">時間</span><span class="detail-value">' + esc(wc.start) + ' 〜 ' + esc(wc.end) + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-label">種別</span><span class="detail-value">毎週' + DOWS[wc.dow] + '曜の定期クローズ</span></div>';
+    html += '<div class="detail-note" style="margin-top:10px;font-size:11px;color:var(--mu);line-height:1.5;">'
+          + 'これは営業時間設定の「毎週の定期クローズ」です。すべての週で変えるには営業時間設定から変更してください。<br><br>'
+          + '・<b>切り出す</b>＝この日だけ個別のクローズにします。あとで時間を短縮・移動・削除できます。<br>'
+          + '・<b>この日は営業</b>＝この日の定期クローズを外して終日あけます。</div>';
+    body.innerHTML = html;
+
+    var acts = document.getElementById('detailModalActions');
+    acts.innerHTML = '';
+    var cutBtn = document.createElement('button');
+    cutBtn.className = 'btn btn-primary';
+    cutBtn.textContent = 'この日を個別クローズに切り出す';
+    (function (wcObj, dayObj) {
+      cutBtn.onclick = function () { cutOutWeeklyClose(wcObj, dayObj); };
+    })(wc, day);
+    acts.appendChild(cutBtn);
+    var openBtn = document.createElement('button');
+    openBtn.className = 'btn btn-danger';
+    openBtn.textContent = 'この日は営業（定期クローズを外す）';
+    (function (dayObj) {
+      openBtn.onclick = function () { releaseWeeklyClose(dayObj); };
+    })(day);
+    acts.appendChild(openBtn);
+    var xBtn = document.createElement('button');
+    xBtn.className = 'btn btn-ghost';
+    xBtn.textContent = '閉じる';
+    xBtn.onclick = closeDetailModal;
+    acts.appendChild(xBtn);
+
+    document.getElementById('detailModalOv').className = 'modal-ov show';
+  }
+
+  // 現在の例外日リストを _bundle.settings から取得（コピーを返す）
+  function _currentWcExceptions() {
+    var settings = (_bundle && _bundle.settings) || {};
+    var list = settings.weeklyCloseExceptions || [];
+    var out = [];
+    var i;
+    if (Array.isArray(list)) {
+      for (i = 0; i < list.length; i++) { out.push(String(list[i])); }
+    }
+    return out;
+  }
+
+  // 例外日リストに dateKey を追加して保存（ローカル _bundle にも即反映）
+  function _addWcException(dateKey, cb) {
+    var list = _currentWcExceptions();
+    if (list.indexOf(dateKey) < 0) { list.push(dateKey); }
+    dbSalonSetWeeklyCloseExceptions(list, function (err) {
+      if (!err) {
+        if (!_bundle.settings) { _bundle.settings = {}; }
+        _bundle.settings.weeklyCloseExceptions = list;
+      }
+      // ★ _safeCb は shared_db.js の内部関数で当ファイルからは参照不可。
+      //   ここで呼ぶと ReferenceError で停止しローディングが残る（2026/6/13修正）。
+      if (typeof cb === 'function') { cb(err); }
+    });
+  }
+
+  // 定期クローズの1回分を closeBlocks に切り出す。
+  // 同時に例外日に追加して、定期クローズの二重表示と「削除で復活」を防ぐ。
+  function cutOutWeeklyClose(wc, day) {
+    uiShowLoading('切り出し中...');
+    dbSalonCreateCloseBlock({
+      dateKey: day.dateKey,
+      start: wc.start,
+      end: wc.end,
+      reason: '定期クローズ'
+    }, function (res) {
+      if (!res || !res._id) {
+        uiForceHideLoading();
+        uiToast('切り出しに失敗しました');
+        return;
+      }
+      _addWcException(day.dateKey, function (err) {
+        uiForceHideLoading();
+        if (err) {
+          uiToast('切り出しに失敗しました（例外保存エラー）');
+          return;
+        }
+        uiToast('個別クローズに切り出しました。短縮・移動・削除できます。');
+        closeDetailModal();
+        loadWeek();
+      });
+    });
+  }
+
+  // この日の定期クローズを外して終日あける（closeBlocksは作らない）
+  function releaseWeeklyClose(day) {
+    uiShowLoading('変更中...');
+    _addWcException(day.dateKey, function (err) {
+      uiForceHideLoading();
+      if (err) {
+        uiToast('変更に失敗しました');
+        return;
+      }
+      uiToast('この日の定期クローズを外しました。');
+      closeDetailModal();
+      loadWeek();
+    });
+  }
+
+  // ============================================================
+  // 予約詳細モーダル
+  // ============================================================
+  function openApptDetail(appt) {
+    var nm = _customerNameCache[appt.customerDocId] || '(読み込み中)';
+    document.getElementById('detailModalTitle').textContent = '予約詳細';
+
+    var body = document.getElementById('detailModalBody');
+    var dateTxt = formatDateKey(appt.dateKey);
+    var timeTxt = (appt.start || '') + (appt.end ? ' 〜 ' + appt.end : '');
+    var menuName = appt.menuNameSnapshot || '(メニュー情報なし)';
+    var price = (typeof appt.priceSnapshot === 'number')
+              ? ('\u00A5' + appt.priceSnapshot.toLocaleString()) : '—';
+    var src = (appt.source === 'online') ? 'アプリ予約' : '手動登録';
+
+    var html = '';
+    html += '<div class="detail-row"><span class="detail-label">日時</span><span class="detail-value">' + esc(dateTxt) + '<br>' + esc(timeTxt) + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-label">顧客</span><span class="detail-value">' + esc(nm) + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-label">メニュー</span><span class="detail-value">' + esc(menuName) + '</span></div>';
+    if (appt.durationMin) {
+      html += '<div class="detail-row"><span class="detail-label">所要時間</span><span class="detail-value">' + appt.durationMin + ' 分</span></div>';
+    }
+    html += '<div class="detail-row"><span class="detail-label">料金</span><span class="detail-value">' + price + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-label">区分</span><span class="detail-value">' + src + '</span></div>';
+    if (appt.memo) {
+      html += '<div class="detail-row"><span class="detail-label">メモ</span><span class="detail-value">' + esc(appt.memo) + '</span></div>';
+    }
+    body.innerHTML = html;
+
+    var acts = document.getElementById('detailModalActions');
+    acts.innerHTML = '';
+    if (appt.customerDocId) {
+      var kBtn = document.createElement('button');
+      kBtn.className = 'btn btn-primary';
+      kBtn.textContent = '📋 カルテへ';
+      (function (docId) {
+        kBtn.onclick = function () {
+          window.location.href = 'salon_karte_v1.html?docId='
+                               + encodeURIComponent(docId);
+        };
+      })(appt.customerDocId);
+      acts.appendChild(kBtn);
+    }
+
+    // ★ 2026/5/23 追加：状態別のアクションボタン
+    //   DESIGN.md status 定義（confirmed/visited/cancelled/no_show）と1対1
+    //   過去 confirmed は表示時に自動 visited 扱いだが、status自体は confirmed のまま。
+    //   例外操作（無断キャンセル等）の時だけ status を書き換える。
+    var st = appt.status || 'confirmed';
+    var endMs = _calcApptEndMs(appt);
+    var isPast = (endMs != null && endMs < Date.now());
+
+    if (st === 'confirmed') {
+      if (isPast) {
+        // 過去の予約 → 主に「無断キャンセル」記録用
+        var nsBtn = document.createElement('button');
+        nsBtn.className = 'btn btn-danger';
+        nsBtn.textContent = '無断キャンセルにする';
+        (function (ap) {
+          nsBtn.onclick = function () { changeStatus(ap, 'no_show'); };
+        })(appt);
+        acts.appendChild(nsBtn);
+      } else {
+        // 未来の予約 → キャンセル可能
+        var cBtn = document.createElement('button');
+        cBtn.className = 'btn btn-danger';
+        cBtn.textContent = '予約をキャンセル';
+        (function (ap) {
+          cBtn.onclick = function () { changeStatus(ap, 'cancelled'); };
+        })(appt);
+        acts.appendChild(cBtn);
+      }
+    } else if (st === 'visited') {
+      var revBtn = document.createElement('button');
+      revBtn.className = 'btn btn-ghost';
+      revBtn.textContent = '予定に戻す';
+      (function (ap) {
+        revBtn.onclick = function () { changeStatus(ap, 'confirmed'); };
+      })(appt);
+      acts.appendChild(revBtn);
+    } else if (st === 'cancelled' || st === 'no_show') {
+      var revBtn2 = document.createElement('button');
+      revBtn2.className = 'btn btn-ghost';
+      revBtn2.textContent = '予定に戻す';
+      (function (ap) {
+        revBtn2.onclick = function () { changeStatus(ap, 'confirmed'); };
+      })(appt);
+      acts.appendChild(revBtn2);
+    }
+
+    var xBtn = document.createElement('button');
+    xBtn.className = 'btn btn-ghost';
+    xBtn.textContent = '閉じる';
+    xBtn.onclick = closeDetailModal;
+    acts.appendChild(xBtn);
+
+    document.getElementById('detailModalOv').className = 'modal-ov show';
+  }
+
+  function openCloseDetail(closeBlock) {
+    document.getElementById('detailModalTitle').textContent = 'クローズ時間';
+
+    var body = document.getElementById('detailModalBody');
+    var dateTxt = formatDateKey(closeBlock.dateKey);
+    var html = '';
+    html += '<div class="detail-row"><span class="detail-label">日付</span><span class="detail-value">' + esc(dateTxt) + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-label">時間</span><span class="detail-value">' + esc(closeBlock.start) + ' 〜 ' + esc(closeBlock.end) + '</span></div>';
+    html += '<div class="detail-row"><span class="detail-label">理由</span><span class="detail-value">' + esc(closeBlock.reason || '—') + '</span></div>';
+    body.innerHTML = html;
+
+    var acts = document.getElementById('detailModalActions');
+    acts.innerHTML = '';
+    var dBtn = document.createElement('button');
+    dBtn.className = 'btn btn-danger';
+    dBtn.textContent = 'このクローズを削除';
+    (function (cb) {
+      dBtn.onclick = function () { deleteCloseBlock(cb); };
+    })(closeBlock);
+    acts.appendChild(dBtn);
+    // ★ 2026/6/14 ③バグ修正: 「定期クローズに戻す」は切り出し由来のクローズだけに出す。
+    //   旧実装は「その日が例外日か」だけで判定していたため、同じ日にある通常クローズにも
+    //   ボタンが出てしまった。条件を厳密化:
+    //   (1) その日が定期クローズの例外日 かつ
+    //   (2) このクローズの時間帯が、その曜日の定期クローズ(weeklyClose)の時間帯と一致
+    //   の両方を満たすクローズ＝切り出しで作られたものだけに表示する。
+    if (_isCutOutCloseBlock(closeBlock)) {
+      var rBtn = document.createElement('button');
+      rBtn.className = 'btn btn-ghost';
+      rBtn.textContent = '定期クローズに戻す';
+      (function (cb) {
+        rBtn.onclick = function () { restoreWeeklyClose(cb); };
+      })(closeBlock);
+      acts.appendChild(rBtn);
+    }
+    var xBtn = document.createElement('button');
+    xBtn.className = 'btn btn-ghost';
+    xBtn.textContent = '閉じる';
+    xBtn.onclick = closeDetailModal;
+    acts.appendChild(xBtn);
+
+    document.getElementById('detailModalOv').className = 'modal-ov show';
+  }
+
+  // この日を定期クローズに戻す：切り出しで作った closeBlock を削除し、例外日も解除。
+  // 切り出し由来のクローズか判定（例外日 かつ その曜日の定期クローズ時間帯と一致）
+  function _isCutOutCloseBlock(closeBlock) {
+    if (!closeBlock) { return false; }
+    if (_currentWcExceptions().indexOf(closeBlock.dateKey) < 0) { return false; }
+    var bands = _weeklyCloseBandsFor(closeBlock.dateKey);
+    var i;
+    for (i = 0; i < bands.length; i++) {
+      if (bands[i].start === closeBlock.start && bands[i].end === closeBlock.end) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function restoreWeeklyClose(closeBlock) {
+    if (!window.confirm('この日を定期クローズに戻しますか？\n（個別のクローズは削除されます）')) { return; }
+    uiShowLoading('戻しています...');
+    dbSalonDeleteCloseBlock(closeBlock._id, function (ok) {
+      if (!ok) {
+        uiForceHideLoading();
+        uiToast('戻す処理に失敗しました');
+        return;
+      }
+      var list = _currentWcExceptions();
+      var idx = list.indexOf(closeBlock.dateKey);
+      if (idx >= 0) { list.splice(idx, 1); }
+      dbSalonSetWeeklyCloseExceptions(list, function (err) {
+        uiForceHideLoading();
+        if (err) {
+          uiToast('戻す処理に失敗しました（例外解除エラー）');
+          return;
+        }
+        if (!_bundle.settings) { _bundle.settings = {}; }
+        _bundle.settings.weeklyCloseExceptions = list;
+        uiToast('定期クローズに戻しました。');
+        closeDetailModal();
+        loadWeek();
+      });
+    });
+  }
+
+  function closeDetailModal() {
+    document.getElementById('detailModalOv').className = 'modal-ov';
+  }
+  window.closeDetailModal = closeDetailModal;
+
+  // 予約終了時刻を ms で算出（endAt > end > dateKey 末の順で評価）
+  function _calcApptEndMs(a) {
+    if (!a) { return null; }
+    if (a.endAt && typeof a.endAt.toMillis === 'function') {
+      return a.endAt.toMillis();
+    }
+    if (a.dateKey && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(a.dateKey)
+        && a.end && /^[0-9]{2}:[0-9]{2}$/.test(a.end)) {
+      var p = a.dateKey.split('-');
+      var t = a.end.split(':');
+      var dt = new Date(parseInt(p[0], 10),
+                         parseInt(p[1], 10) - 1,
+                         parseInt(p[2], 10),
+                         parseInt(t[0], 10),
+                         parseInt(t[1], 10));
+      return dt.getTime();
+    }
+    if (a.dateKey && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(a.dateKey)) {
+      var p2 = a.dateKey.split('-');
+      var dt2 = new Date(parseInt(p2[0], 10),
+                          parseInt(p2[1], 10) - 1,
+                          parseInt(p2[2], 10),
+                          23, 59, 59);
+      return dt2.getTime();
+    }
+    return null;
+  }
+
+  // ★ 2026/5/23 改訂：ステータス変更ハンドラ
+  //   cancelled / no_show / visited / confirmed を統一的に処理
+  function changeStatus(appt, newStatus) {
+    var labels = {
+      cancelled: 'この予約をキャンセル',
+      no_show: 'この予約を無断キャンセルとして記録',
+      visited: 'この予約を来店済みに変更',
+      confirmed: 'この予約を予定に戻'
+    };
+    var label = labels[newStatus] || '変更';
+    if (!window.confirm(label + 'しますか？\n' + formatDateKey(appt.dateKey)
+                       + ' ' + (appt.start || ''))) { return; }
+    uiShowLoading('処理中...');
+    dbSalonUpdateAppointmentStatus(appt._id, newStatus, function (ok) {
+      uiHideLoading();
+      if (!ok) {
+        uiToast('変更に失敗しました');
+        return;
+      }
+      uiToast(label + 'しました');
+      closeDetailModal();
+      loadWeek();
+    });
+  }
+
+  function deleteCloseBlock(cb) {
+    if (!window.confirm('このクローズ時間を削除しますか？')) { return; }
+    uiShowLoading('処理中...');
+    dbSalonDeleteCloseBlock(cb._id, function (ok) {
+      uiHideLoading();
+      if (!ok) {
+        uiToast('削除に失敗しました');
+        return;
+      }
+      uiToast('クローズ時間を削除しました');
+      closeDetailModal();
+      loadWeek();
+    });
+  }
+
+  // ============================================================
+  // 予約登録 / クローズ時間モーダル
+  // ============================================================
+  function _norm(s) {
+    s = (s == null) ? '' : String(s);
+    s = s.replace(/[\uFF01-\uFF5E]/g, function (ch) {
+      return String.fromCharCode(ch.charCodeAt(0) - 0xFEE0);
+    });
+    s = s.replace(/[\s\u3000]+/g, '');
+    return s.toLowerCase();
+  }
+
+  function openBookingModal() {
+    _modalTab = 'book';
+    switchTabUI();
+    initBookForm();
+    initCloseForm();
+    // ★ 2026/5/23 修正：顧客一覧取得を完了してからモーダルを開く
+    //   理由：顧客検索ボックスで「該当なし」が出てしまう問題対応
+    loadCustomersForModal(function () {
+      document.getElementById('modalOv').className = 'modal-ov show';
+    });
+  }
+  window.openBookingModal = openBookingModal;
+
+  function openCloseModal() {
+    _modalTab = 'close';
+    switchTabUI();
+    initBookForm();
+    initCloseForm();
+    loadCustomersForModal(function () {
+      document.getElementById('modalOv').className = 'modal-ov show';
+    });
+  }
+  window.openCloseModal = openCloseModal;
+
+  function closeModal() {
+    document.getElementById('modalOv').className = 'modal-ov';
+  }
+  window.closeModal = closeModal;
+
+  function switchTab(tab) {
+    _modalTab = tab;
+    switchTabUI();
+  }
+  window.switchTab = switchTab;
+
+  function switchTabUI() {
+    var isBook = (_modalTab === 'book');
+    document.getElementById('tabBookBtn').className = isBook ? 'tab-btn active' : 'tab-btn';
+    document.getElementById('tabCloseBtn').className = isBook ? 'tab-btn' : 'tab-btn active';
+    document.getElementById('bookBody').className = isBook ? 'modal-body' : 'modal-body hidden';
+    document.getElementById('closeBody').className = isBook ? 'modal-body hidden' : 'modal-body';
+    document.getElementById('modalTitle').textContent =
+      isBook ? '予約を登録' : 'クローズ時間を登録';
+    document.getElementById('modalSaveBtn').textContent =
+      isBook ? '予約を登録' : 'クローズを登録';
+  }
+
+  function setCustMode(mode) {
+    _custMode = mode;
+    document.getElementById('modeExistBtn').className =
+      mode === 'exist' ? 'cust-mode-btn on' : 'cust-mode-btn';
+    document.getElementById('modeNewBtn').className =
+      mode === 'new' ? 'cust-mode-btn on' : 'cust-mode-btn';
+    document.getElementById('custExistPane').style.display =
+      mode === 'exist' ? '' : 'none';
+    document.getElementById('custNewPane').style.display =
+      mode === 'new' ? '' : 'none';
+  }
+  window.setCustMode = setCustMode;
+
+  function loadCustomersForModal(done) {
+    if (_allCust.length > 0) {
+      if (done) { done(); }
+      return;
+    }
+    if (typeof dbSalonListCustomers !== 'function') {
+      if (done) { done(); }
+      return;
+    }
+    uiShowLoading('読み込み中...');
+    dbSalonListCustomers(function (list) {
+      uiHideLoading();
+      _allCust = list || [];
+      if (done) { done(); }
+    });
+  }
+
+  function onCustSearchInput() {
+    var q = _norm(document.getElementById('custSearchInp').value);
+    var box = document.getElementById('custResults');
+    if (!q) {
+      box.className = 'cust-results';
+      box.innerHTML = '';
+      return;
+    }
+    var hits = [];
+    var i, c, hay;
+    for (i = 0; i < _allCust.length; i++) {
+      c = _allCust[i];
+      hay = _norm((c.name || '') + (c.phone || ''));
+      if (hay.indexOf(q) >= 0) { hits.push(c); }
+    }
+    box.className = 'cust-results show';
+    if (hits.length === 0) {
+      box.innerHTML = '<div class="cust-result-item" style="color:var(--mu);">該当なし</div>';
+      return;
+    }
+    box.innerHTML = '';
+    for (i = 0; i < hits.length && i < 12; i++) {
+      box.appendChild(buildCustResultItem(hits[i]));
+    }
+  }
+
+  function buildCustResultItem(c) {
+    var row = document.createElement('div');
+    row.className = 'cust-result-item';
+    var nm = document.createElement('div');
+    nm.textContent = c.name || '(名前なし)';
+    row.appendChild(nm);
+    if (c.phone) {
+      var s = document.createElement('div');
+      s.className = 'cust-result-sub';
+      s.textContent = c.phone;
+      row.appendChild(s);
+    }
+    row.onclick = function () { pickCustomer(c); };
+    return row;
+  }
+
+  function pickCustomer(c) {
+    _pickedCust = c;
+    document.getElementById('custPickedArea').style.display = '';
+    document.getElementById('custSearchArea').style.display = 'none';
+    document.getElementById('custPickedName').textContent =
+      c.name || '(名前なし)';
+    document.getElementById('custPickedSub').textContent =
+      (c.phone || '') + (c.email ? ('  ' + c.email) : '');
+    document.getElementById('custResults').className = 'cust-results';
+  }
+
+  function clearPickedCustomer() {
+    _pickedCust = null;
+    document.getElementById('custPickedArea').style.display = 'none';
+    document.getElementById('custSearchArea').style.display = '';
+    document.getElementById('custSearchInp').value = '';
+    document.getElementById('custResults').className = 'cust-results';
+  }
+  window.clearPickedCustomer = clearPickedCustomer;
+
+  function initBookForm() {
+    _pickedCust = null;
+    setCustMode('exist');
+    document.getElementById('custPickedArea').style.display = 'none';
+    document.getElementById('custSearchArea').style.display = '';
+    document.getElementById('custSearchInp').value = '';
+    document.getElementById('custResults').className = 'cust-results';
+    document.getElementById('newName').value = '';
+    document.getElementById('newPhone').value = '';
+    document.getElementById('newEmail').value = '';
+
+    var dateKey = todayKey();
+    document.getElementById('bDate').value = dateKey;
+    document.getElementById('bTime').value = '10:00';
+
+    var sel = document.getElementById('bMenu');
+    sel.innerHTML = '';
+    var menus = (_bundle && _bundle.menus) ? _bundle.menus : [];
+    // ★ 2026/6/14 ①: メインメニューをカテゴリ別（フェイシャル/ボディ/その他）に
+    //   optgroup でグループ表示。メニュー設定・顧客アプリと同じ分類ルール。
+    //   category 未設定は「その他」。存在カテゴリが1種類だけならグループ見出しなし。
+    var mains = [];
+    var i;
+    for (i = 0; i < menus.length; i++) {
+      if (menus[i].type === 'option') { continue; }
+      if (menus[i].public === false) { continue; }
+      mains.push(menus[i]);
+    }
+    function _menuOptionEl(m) {
+      var op = document.createElement('option');
+      op.value = m._id;
+      op.textContent = m.name + (m.duration ? '（' + m.duration + '分）' : '');
+      return op;
+    }
+    function _catKeyOf(m) {
+      return (m && (m.category === 'facial' || m.category === 'body')) ? m.category : 'other';
+    }
+    if (mains.length === 0) {
+      var op0 = document.createElement('option');
+      op0.value = '';
+      op0.textContent = '（メニューが登録されていません）';
+      sel.appendChild(op0);
+    } else {
+      var catDefs = [
+        { key: 'facial', label: 'フェイシャル' },
+        { key: 'body', label: 'ボディ' },
+        { key: 'other', label: 'その他' }
+      ];
+      var groups = { facial: [], body: [], other: [] };
+      for (i = 0; i < mains.length; i++) {
+        groups[_catKeyOf(mains[i])].push(mains[i]);
+      }
+      var usedCats = 0, g, gi;
+      for (g = 0; g < catDefs.length; g++) {
+        if (groups[catDefs[g].key].length > 0) { usedCats++; }
+      }
+      var useGroups = (usedCats >= 2);
+      for (g = 0; g < catDefs.length; g++) {
+        var glist = groups[catDefs[g].key];
+        if (glist.length === 0) { continue; }
+        if (useGroups) {
+          var og = document.createElement('optgroup');
+          og.label = catDefs[g].label;
+          for (gi = 0; gi < glist.length; gi++) {
+            og.appendChild(_menuOptionEl(glist[gi]));
+          }
+          sel.appendChild(og);
+        } else {
+          for (gi = 0; gi < glist.length; gi++) {
+            sel.appendChild(_menuOptionEl(glist[gi]));
+          }
+        }
+      }
+    }
+
+    _optionSelects = [];
+    document.getElementById('optList').innerHTML = '';
+
+    document.getElementById('bMemo').value = '';
+  }
+
+  function initCloseForm() {
+    document.getElementById('cDate').value = todayKey();
+    document.getElementById('cStart').value = '12:00';
+    document.getElementById('cEnd').value = '13:00';
+    document.getElementById('cReason').value = '';
+  }
+
+  function addOption() {
+    var menus = (_bundle && _bundle.menus) ? _bundle.menus : [];
+    var opts = [];
+    var i;
+    for (i = 0; i < menus.length; i++) {
+      if (menus[i].type !== 'option') { continue; }
+      if (menus[i].public === false) { continue; }
+      opts.push(menus[i]);
+    }
+    if (opts.length === 0) {
+      uiToast('オプションメニューが登録されていません');
+      return;
+    }
+
+    var row = document.createElement('div');
+    row.className = 'opt-row';
+    var sel = document.createElement('select');
+    for (i = 0; i < opts.length; i++) {
+      var op = document.createElement('option');
+      op.value = opts[i]._id;
+      op.textContent = opts[i].name;
+      sel.appendChild(op);
+    }
+    row.appendChild(sel);
+    var del = document.createElement('button');
+    del.className = 'opt-del';
+    del.textContent = '\u2715';
+    del.onclick = function () {
+      var idx = _optionSelects.indexOf(sel);
+      if (idx >= 0) { _optionSelects.splice(idx, 1); }
+      row.parentNode.removeChild(row);
+    };
+    row.appendChild(del);
+    document.getElementById('optList').appendChild(row);
+    _optionSelects.push(sel);
+  }
+  window.addOption = addOption;
+
+  // ============================================================
+  // ★ 2026/5/23 追加：重複チェックヘルパー
+  //   DESIGN.md C-3 重複チェック仕様と1対1
+  //   戻り値: { ok: boolean, reason: string }
+  //     ok=false なら登録不可（reason をエラー表示）
+  // ============================================================
+
+  // "HH:MM" → 分（10:30 → 630）
+  function _timeToMin(hhmm) {
+    var p = String(hhmm || '').split(':');
+    if (p.length !== 2) { return -1; }
+    var h = parseInt(p[0], 10), m = parseInt(p[1], 10);
+    if (isNaN(h) || isNaN(m)) { return -1; }
+    return h * 60 + m;
+  }
+
+  // 2つの時間範囲 [a1,a2) と [b1,b2) が重なるか
+  function _isOverlap(a1, a2, b1, b2) {
+    return (a1 < b2) && (b1 < a2);
+  }
+
+  // dateKey 文字列から曜日(0=日〜6=土)
+  function _dowOf(dateKey) {
+    var p = String(dateKey || '').split('-');
+    if (p.length !== 3) { return -1; }
+    var dt = new Date(parseInt(p[0], 10),
+                       parseInt(p[1], 10) - 1,
+                       parseInt(p[2], 10));
+    return dt.getDay();
+  }
+
+  // ★ 2026/6/13 修正: 終日定休は closedDows で判定する（weeklyClose ではない）
+  function _closedDows() {
+    var settings = (_bundle && _bundle.settings) || {};
+    var cd = settings.closedDows || [];
+    var dows = [];
+    var i;
+    if (!Array.isArray(cd)) { return dows; }
+    for (i = 0; i < cd.length; i++) {
+      if (typeof cd[i] === 'number') { dows.push(cd[i]); }
+    }
+    return dows;
+  }
+
+  // 指定 dateKey に該当する定期クローズ（weeklyClose）の時間帯 [{startMin,endMin}] を返す
+  function _weeklyCloseBandsFor(dateKey) {
+    var settings = (_bundle && _bundle.settings) || {};
+    // ★ 例外日（定期クローズ解除済み）はバンドなし
+    var wcEx = settings.weeklyCloseExceptions || [];
+    var exList = [];
+    var ke;
+    for (ke in wcEx) { if (Object.prototype.hasOwnProperty.call(wcEx, ke)) { exList.push(String(wcEx[ke])); } }
+    if (exList.indexOf(String(dateKey)) >= 0) { return []; }
+    var wc = settings.weeklyClose || [];
+    var bands = [];
+    if (!Array.isArray(wc)) { return bands; }
+    var dow = _dowOf(dateKey);
+    var i;
+    for (i = 0; i < wc.length; i++) {
+      var w = wc[i];
+      if (w && typeof w.dow === 'number' && w.dow === dow && w.start && w.end) {
+        var s = _timeToMin(w.start);
+        var e = _timeToMin(w.end);
+        if (s >= 0 && e >= 0 && e > s) {
+          bands.push({ startMin: s, endMin: e, start: w.start, end: w.end });
+        }
+      }
+    }
+    return bands;
+  }
+
+  // settings.intervalMin を取得（数値・0未満は0）
+  function _intervalMin() {
+    var settings = (_bundle && _bundle.settings) || {};
+    var v = parseInt(settings.intervalMin, 10);
+    if (isNaN(v) || v < 0) { return 0; }
+    return v;
+  }
+
+  // 予約の重複チェック
+  // 引数: { dateKey, startMin, endMin }
+  // 自分自身を編集中なら excludeApptId で除外可
+  function _checkApptOverlap(target, excludeApptId) {
+    // 1. 定休日チェック（closedDows = 終日定休）
+    var closeDows = _closedDows();
+    var dow = _dowOf(target.dateKey);
+    if (dow >= 0 && closeDows.indexOf(dow) >= 0) {
+      return { ok: false, reason: 'この日は定休日です。予約を登録できません。' };
+    }
+
+    // 1b. 定期クローズ（weeklyClose）の時間帯と重複していないか
+    var wbands = _weeklyCloseBandsFor(target.dateKey);
+    var wb;
+    for (wb = 0; wb < wbands.length; wb++) {
+      if (_isOverlap(target.startMin, target.endMin, wbands[wb].startMin, wbands[wb].endMin)) {
+        return { ok: false, reason: '定期クローズの時間と重なっています（'
+                                    + wbands[wb].start + '〜' + wbands[wb].end + '）'
+                                    + '\nこの回だけ予約を入れたい場合は、カレンダー上の定期クローズをタップして調整してください。' };
+      }
+    }
+
+    // 2. 営業時間チェック
+    var settings = (_bundle && _bundle.settings) || {};
+    var openTime = settings.openTime || '09:00';
+    var closeTime = settings.closeTime || '21:00';
+    var oMin = _timeToMin(openTime);
+    var cMin = _timeToMin(closeTime);
+    if (oMin >= 0 && target.startMin < oMin) {
+      return { ok: false, reason: '開始時刻が営業時間より前です（営業開始 '
+                                  + openTime + '）' };
+    }
+    if (cMin >= 0 && target.endMin > cMin) {
+      return { ok: false, reason: '終了時刻が営業時間を超えます（営業終了 '
+                                  + closeTime + '）' };
+    }
+
+    // 3. 既存予約との重複（インターバル時間も考慮）
+    var iv = _intervalMin();
+    var appts = (_bundle && _bundle.appointments) || [];
+    var i;
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      if (excludeApptId && a._id === excludeApptId) { continue; }
+      if (a.dateKey !== target.dateKey) { continue; }
+      var aStart = _timeToMin(a.start);
+      var aEnd = _timeToMin(a.end);
+      if (aStart < 0 || aEnd < 0) { continue; }
+      // 既存予約のインターバル領域も考慮
+      var aBlockEnd = aEnd + iv;
+      // 新規予約のインターバル領域も含めて比較
+      var tBlockEnd = target.endMin + iv;
+      if (_isOverlap(target.startMin, tBlockEnd, aStart, aBlockEnd)) {
+        return { ok: false, reason: '既存の予約と時間が重なっています（'
+                                    + a.start + '〜' + a.end + ' '
+                                    + (a.menuNameSnapshot || '') + '）'
+                                    + (iv > 0 ? '\n※準備時間 ' + iv + '分も含めてチェックしています' : '') };
+      }
+    }
+
+    // 4. クローズ時間との重複
+    var cbs = (_bundle && _bundle.closeBlocks) || [];
+    for (i = 0; i < cbs.length; i++) {
+      var cb = cbs[i];
+      if (cb.dateKey !== target.dateKey) { continue; }
+      var cbStart = _timeToMin(cb.start);
+      var cbEnd = _timeToMin(cb.end);
+      if (cbStart < 0 || cbEnd < 0) { continue; }
+      if (_isOverlap(target.startMin, target.endMin, cbStart, cbEnd)) {
+        return { ok: false, reason: 'クローズ時間と重なっています（'
+                                    + cb.start + '〜' + cb.end + ' '
+                                    + (cb.reason || '') + '）' };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  // クローズ時間の重複チェック
+  function _checkCloseOverlap(target) {
+    // 1. 定休日チェック（closedDows = 終日定休）
+    var closeDows = _closedDows();
+    var dow = _dowOf(target.dateKey);
+    if (dow >= 0 && closeDows.indexOf(dow) >= 0) {
+      return { ok: false, reason: 'この日は定休日です。クローズ時間を別途登録する必要はありません。' };
+    }
+
+    // 2. 既存予約との重複（インターバル時間は除外して厳密チェック）
+    var appts = (_bundle && _bundle.appointments) || [];
+    var i;
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      if (a.dateKey !== target.dateKey) { continue; }
+      var aStart = _timeToMin(a.start);
+      var aEnd = _timeToMin(a.end);
+      if (aStart < 0 || aEnd < 0) { continue; }
+      if (_isOverlap(target.startMin, target.endMin, aStart, aEnd)) {
+        return { ok: false, reason: '既存の予約と時間が重なっています（'
+                                    + a.start + '〜' + a.end + ' '
+                                    + (a.menuNameSnapshot || '') + '）' };
+      }
+    }
+
+    // 3. 既存クローズとの重複
+    var cbs = (_bundle && _bundle.closeBlocks) || [];
+    for (i = 0; i < cbs.length; i++) {
+      var cb = cbs[i];
+      if (cb.dateKey !== target.dateKey) { continue; }
+      var cbStart = _timeToMin(cb.start);
+      var cbEnd = _timeToMin(cb.end);
+      if (cbStart < 0 || cbEnd < 0) { continue; }
+      if (_isOverlap(target.startMin, target.endMin, cbStart, cbEnd)) {
+        return { ok: false, reason: '既存のクローズ時間と重なっています（'
+                                    + cb.start + '〜' + cb.end
+                                    + (cb.reason ? ' ' + cb.reason : '') + '）' };
+      }
+    }
+
+    return { ok: true };
+  }
+
+  function saveModal() {
+    if (_modalTab === 'close') {
+      saveCloseBlock();
+    } else {
+      saveBooking();
+    }
+  }
+  window.saveModal = saveModal;
+
+  function saveCloseBlock() {
+    var date = document.getElementById('cDate').value;
+    var start = document.getElementById('cStart').value;
+    var end = document.getElementById('cEnd').value;
+    var reason = document.getElementById('cReason').value;
+    if (!date || !start || !end) {
+      uiToast('日付・時刻を入力してください');
+      return;
+    }
+    if (start >= end) {
+      uiToast('終了時刻は開始より後にしてください');
+      return;
+    }
+
+    // ★ 2026/5/23 追加：重複チェック
+    var check = _checkCloseOverlap({
+      dateKey: date,
+      startMin: _timeToMin(start),
+      endMin: _timeToMin(end)
+    });
+    if (!check.ok) {
+      window.alert(check.reason);
+      return;
+    }
+
+    var btn = document.getElementById('modalSaveBtn');
+    btn.disabled = true;
+    uiShowLoading('登録中...');
+    dbSalonCreateCloseBlock({
+      dateKey: date, start: start, end: end, reason: reason
+    }, function (res) {
+      uiHideLoading();
+      btn.disabled = false;
+      if (!res || !res._id) {
+        uiToast('クローズ時間の登録に失敗しました');
+        return;
+      }
+      uiToast('クローズ時間を登録しました');
+      closeModal();
+      loadWeek();
+    });
+  }
+
+  function saveBooking() {
+    var custDocId = null;
+    var custData = null;
+    if (_custMode === 'exist') {
+      if (!_pickedCust || !_pickedCust._id) {
+        uiToast('顧客を選択してください');
+        return;
+      }
+      custDocId = _pickedCust._id;
+    } else {
+      var nm = (document.getElementById('newName').value || '').trim();
+      var ph = (document.getElementById('newPhone').value || '').trim();
+      var em = (document.getElementById('newEmail').value || '').trim();
+      if (!nm) {
+        uiToast('お名前を入力してください');
+        return;
+      }
+      custData = { name: nm, phone: ph, email: em };
+    }
+
+    var date = document.getElementById('bDate').value;
+    var time = document.getElementById('bTime').value;
+    if (!date || !time) {
+      uiToast('日時を入力してください');
+      return;
+    }
+
+    var menuSel = document.getElementById('bMenu');
+    var menuId = menuSel.value;
+    if (!menuId) {
+      uiToast('メニューを選択してください');
+      return;
+    }
+    var menus = (_bundle && _bundle.menus) ? _bundle.menus : [];
+    var i, mainMenu = null;
+    for (i = 0; i < menus.length; i++) {
+      if (menus[i]._id === menuId) { mainMenu = menus[i]; break; }
+    }
+    if (!mainMenu) {
+      uiToast('メニュー情報が見つかりません');
+      return;
+    }
+
+    var optionIds = [];
+    for (i = 0; i < _optionSelects.length; i++) {
+      if (_optionSelects[i].value) { optionIds.push(_optionSelects[i].value); }
+    }
+    var seen = {}, uniqOpt = [];
+    for (i = 0; i < optionIds.length; i++) {
+      if (!seen[optionIds[i]]) {
+        seen[optionIds[i]] = true;
+        uniqOpt.push(optionIds[i]);
+      }
+    }
+
+    var durMin = (typeof mainMenu.duration === 'number') ? mainMenu.duration : 60;
+    var totPrice = (typeof mainMenu.price === 'number') ? mainMenu.price : 0;
+    for (i = 0; i < uniqOpt.length; i++) {
+      var m;
+      for (var j = 0; j < menus.length; j++) {
+        if (menus[j]._id === uniqOpt[i]) { m = menus[j]; break; }
+      }
+      if (m) {
+        if (typeof m.duration === 'number') { durMin += m.duration; }
+        if (typeof m.price === 'number') { totPrice += m.price; }
+      }
+    }
+
+    var parts = time.split(':');
+    var startMin = parseInt(parts[0], 10) * 60 + parseInt(parts[1], 10);
+    var endMin = startMin + durMin;
+    var endH = Math.floor(endMin / 60), endM = endMin % 60;
+    var endStr = pad2(endH) + ':' + pad2(endM);
+
+    // ★ 2026/5/23 追加：重複チェック（定休日・営業時間外・既存予約・クローズ）
+    var check = _checkApptOverlap({
+      dateKey: date,
+      startMin: startMin,
+      endMin: endMin
+    }, null);
+    if (!check.ok) {
+      window.alert(check.reason);
+      return;
+    }
+
+    var memo = document.getElementById('bMemo').value || '';
+    var btn = document.getElementById('modalSaveBtn');
+    btn.disabled = true;
+
+    function _doCreateAppt(docId) {
+      var data = {
+        dateKey: date,
+        start: time,
+        end: endStr,
+        durationMin: durMin,
+        customerDocId: docId,
+        menuId: menuId,
+        priceSnapshot: totPrice,
+        menuNameSnapshot: mainMenu.name || ''
+      };
+      if (uniqOpt.length > 0) { data.optionMenuIds = uniqOpt; }
+      if (memo) { data.memo = memo; }
+      dbSalonCreateAppointment(data, function (res) {
+        uiHideLoading();
+        btn.disabled = false;
+        if (!res || !res._id) {
+          uiToast('予約の登録に失敗しました');
+          return;
+        }
+        uiToast('予約を登録しました');
+        closeModal();
+        if (custData) {
+          _customerNameCache[docId] = custData.name;
+        }
+        loadWeek();
+      });
+    }
+
+    uiShowLoading('登録中...');
+    if (custDocId) {
+      _doCreateAppt(custDocId);
+    } else {
+      dbSalonCreateCustomer(custData, function (res) {
+        if (!res || !res._id) {
+          uiHideLoading();
+          btn.disabled = false;
+          uiToast('顧客の登録に失敗しました');
+          return;
+        }
+        _allCust.push({
+          _id: res._id,
+          name: custData.name,
+          phone: custData.phone || '',
+          email: custData.email || '',
+          createdSource: 'salon',
+          isMerged: false
+        });
+        _doCreateAppt(res._id);
+      });
+    }
+  }
+
+  // ===== イベント =====
+  document.getElementById('custSearchInp').addEventListener('input', onCustSearchInput);
+  // ★ 2026/6/14 ②バグ修正: iPadで入力欄（理由など）をタップするとモーダルが
+  //   閉じてしまう問題に対応。クリックだけで判定すると、ソフトキーボード表示に伴う
+  //   レイアウト変化で合成クリックが背景に当たり閉じることがある。
+  //   「押し始め(down)も背景、離した(click)も背景」のときだけ閉じる方式に変更。
+  (function () {
+    var modalOv = document.getElementById('modalOv');
+    var detailOv = document.getElementById('detailModalOv');
+    function markModal(v) { markModal.flag = v; }
+    function markDetail(v) { markDetail.flag = v; }
+    modalOv.addEventListener('mousedown', function (e) { markModal(e.target === modalOv); });
+    modalOv.addEventListener('touchstart', function (e) { markModal(e.target === modalOv); }, { passive: true });
+    modalOv.addEventListener('click', function (e) {
+      if (e.target === modalOv && markModal.flag) { closeModal(); }
+    });
+    detailOv.addEventListener('mousedown', function (e) { markDetail(e.target === detailOv); });
+    detailOv.addEventListener('touchstart', function (e) { markDetail(e.target === detailOv); }, { passive: true });
+    detailOv.addEventListener('click', function (e) {
+      if (e.target === detailOv && markDetail.flag) { closeDetailModal(); }
+    });
+  })();
+
+  // ===== 起動 =====
+  _weekStart = getTodayStart();
+  _dayDate   = getTodayStart();
+
+  onFbReady(function () {
+    requireSalonStaff(function (isStaff) {
+      if (!isStaff) {
+        window.location.href = 'salon_auth_v2_new.html';
+        return;
+      }
+      var user = firebase.auth().currentUser;
+      _salonId = user ? user.uid : null;
+      // planId を取得してからカレンダーを初期化
+      firebase.firestore()
+        .collection('salons').doc(_salonId)
+        .collection('config').doc('settings').get()
+        .then(function (doc) {
+          var d = doc.exists ? doc.data() : {};
+          _planId = d.planId || 'solo';
+          if (_planId === 'team') {
+            // チームプランはスタッフ一覧も取得してからタブを表示
+            return firebase.firestore()
+              .collection('salons').doc(_salonId)
+              .collection('staffs').orderBy('name', 'asc').get()
+              .then(function (snap) {
+                _staffList = [];
+                snap.forEach(function (sdoc) {
+                  if (sdoc.id === 'owner') { return; }
+                  var sd = sdoc.data();
+                  _staffList.push({ id: sdoc.id, name: sd.name || sdoc.id, color: sd.color || '#ccc' });
+                });
+                document.getElementById('viewTabs').style.display = 'flex';
+                loadWeek();
+              });
+          } else {
+            loadWeek();
+          }
+        })
+        .catch(function () { loadWeek(); });
+    });
+  });
+
+  // ===== ビュー切り替え =====
+  function switchView(mode) {
+    _viewMode = mode;
+    document.getElementById('tabWeekBtn').className = mode === 'week' ? 'view-tab-btn active' : 'view-tab-btn';
+    document.getElementById('tabDayBtn').className  = mode === 'day'  ? 'view-tab-btn active' : 'view-tab-btn';
+    document.getElementById('weekViewArea').style.display  = mode === 'week' ? '' : 'none';
+    document.getElementById('weekCardArea').style.display   = mode === 'week' ? '' : 'none';
+    document.getElementById('dayView').style.display        = mode === 'day'  ? '' : 'none';
+    if (mode === 'day') { loadDay(); }
+  }
+  window.switchView = switchView;
+
+  // ===== 日ビューナビ =====
+  function changeDay(delta) {
+    _dayDate = new Date(_dayDate.getTime());
+    _dayDate.setDate(_dayDate.getDate() + delta);
+    loadDay();
+  }
+  window.changeDay = changeDay;
+
+  function goDayToday() {
+    _dayDate = getTodayStart();
+    loadDay();
+  }
+  window.goDayToday = goDayToday;
+
+  // ===== 日ビューデータ取得 =====
+  function loadDay() {
+    var dk = dateKeyOf(_dayDate);
+    var DOWS2 = ['日','月','火','水','木','金','土'];
+    var dow = _dayDate.getDay();
+    document.getElementById('dayLabel').textContent =
+      (_dayDate.getMonth() + 1) + '月' + _dayDate.getDate() + '日（' + DOWS2[dow] + '）';
+
+    uiShowLoading('読み込み中...');
+
+    // シフトと予約を並行取得
+    var p1 = firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('shifts').doc(dk).get();
+    var p2 = firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('appointments')
+      .where('dateKey', '==', dk).get();
+    var p3 = firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('config').doc('settings').get();
+
+    Promise.all([p1, p2, p3]).then(function (results) {
+      uiForceHideLoading();
+      var shiftDoc = results[0];
+      var apptSnap = results[1];
+      var settDoc  = results[2];
+
+      _shiftMap[dk] = shiftDoc.exists ? (shiftDoc.data().staffIds || []) : [];
+
+      var appts = [];
+      var CANCEL = { cancelled:1, cancelled_by_customer:1, cancelled_by_salon:1, no_show:1, time_conflict:1, failed:1 };
+      apptSnap.forEach(function (d) {
+        var a = d.data();
+        a._id = d.id;
+        if (CANCEL[a.status]) { return; }
+        appts.push(a);
+      });
+
+      var settings = settDoc.exists ? settDoc.data() : {};
+      renderDay(dk, appts, settings);
+    }).catch(function (e) {
+      uiForceHideLoading();
+      uiToast('読み込みに失敗しました: ' + e.message);
+    });
+  }
+
+  // ===== 日ビュー描画 =====
+  function renderDay(dk, appts, settings) {
+    var openTime  = settings.openTime  || DEFAULT_OPEN;
+    var closeTime = settings.closeTime || DEFAULT_CLOSE;
+    var oh = timeToHour(openTime);
+    var ch = timeToHour(closeTime);
+    if (oh == null) { oh = 9; }
+    if (ch == null) { ch = 21; }
+    var startHour = Math.floor(oh);
+    var endHour   = Math.ceil(ch);
+    if (endHour <= startHour) { endHour = startHour + 1; }
+    var rowCount = endHour - startHour;
+    var nStaff = _staffList.length;
+    if (nStaff === 0) {
+      document.getElementById('staffDowRow').innerHTML = '<div style="padding:12px;color:var(--mu);font-size:12px;">スタッフが登録されていません</div>';
+      document.getElementById('dayTimeGrid').innerHTML = '';
+      return;
+    }
+    var shiftIds = _shiftMap[dk] || [];
+
+    // グリッド列数: 時間ラベル列 + スタッフ数
+    var cols = '42px repeat(' + nStaff + ', 1fr)';
+
+    // スタッフヘッダー
+    var dowRow = document.getElementById('staffDowRow');
+    dowRow.style.gridTemplateColumns = cols;
+    dowRow.innerHTML = '<div></div>';
+    var si;
+    for (si = 0; si < _staffList.length; si++) {
+      var s = _staffList[si];
+      var isOn = shiftIds.indexOf(s.id) >= 0;
+      var sdl = document.createElement('div');
+      sdl.className = 'sdl' + (isOn ? '' : ' off-shift');
+      sdl.innerHTML = esc(s.name)
+        + '<span class="staff-color-bar" style="background:' + esc(s.color) + ';"></span>'
+        + (isOn ? '' : '<br><span style="font-size:9px;">休み</span>');
+      dowRow.appendChild(sdl);
+    }
+
+    // 時間グリッド
+    var grid = document.getElementById('dayTimeGrid');
+    grid.style.gridTemplateColumns = cols;
+    grid.innerHTML = '';
+
+    var daysCols = []; // { col, hour, si }
+    var hour, ci;
+    for (hour = startHour; hour < endHour; hour++) {
+      var tlabel = document.createElement('div');
+      tlabel.className = 'tlabel';
+      tlabel.textContent = hour + ':00';
+      grid.appendChild(tlabel);
+      for (ci = 0; ci < nStaff; ci++) {
+        var isOnShift = shiftIds.indexOf(_staffList[ci].id) >= 0;
+        var col = document.createElement('div');
+        col.className = 'day-col' + (isOnShift ? '' : ' off-shift');
+        grid.appendChild(col);
+        daysCols.push({ col: col, hour: hour, si: ci });
+      }
+    }
+
+    function dayColAt(hour, si) {
+      var rowIdx = hour - startHour;
+      if (rowIdx < 0 || rowIdx >= rowCount) { return null; }
+      return daysCols[rowIdx * nStaff + si].col;
+    }
+
+    var intervalMin = (settings.intervalMin != null) ? parseInt(settings.intervalMin, 10) : 0;
+    if (isNaN(intervalMin) || intervalMin < 0) { intervalMin = 0; }
+
+    // 予約ブロックをスタッフ列に配置
+    var i;
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      var sh2 = timeToHour(a.start);
+      if (sh2 == null) { continue; }
+      var dur = (typeof a.durationSnapshot === 'number') ? a.durationSnapshot
+              : (typeof a.durationMin === 'number') ? a.durationMin : 60;
+
+      // staffId に対応するスタッフ列インデックスを探す
+      var staffIdx = -1;
+      for (ci = 0; ci < _staffList.length; ci++) {
+        if (_staffList[ci].id === a.staffId) { staffIdx = ci; break; }
+      }
+      if (staffIdx < 0) { continue; } // staffIdが一致しない予約はスキップ
+
+      var hRow = Math.floor(sh2);
+      var anchor = dayColAt(hRow, staffIdx);
+      if (!anchor) { continue; }
+
+      var b = document.createElement('div');
+      var staffColor = _staffList[staffIdx].color || '#b5845a';
+      var srcCls = (a.source === 'online') ? 'online' : 'manual';
+      b.className = 'appt ' + srcCls;
+      // スタッフ色でボーダーを上書き
+      b.style.borderLeftColor = staffColor;
+      var topPx = (sh2 - hRow) * SLOT_H;
+      var heightPx = (dur / 60) * SLOT_H - 2;
+      if (heightPx < 16) { heightPx = 16; }
+      b.style.top = topPx + 'px';
+      b.style.height = heightPx + 'px';
+      var nm = _customerNameCache[a.customerDocId] || '読込中…';
+      var mn = a.menuNameSnapshot || '';
+      b.innerHTML = '<div class="appt-name">' + esc(nm) + '</div>'
+                  + '<div class="appt-sub">' + esc(mn) + '</div>';
+      (function (ap) {
+        b.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openApptDetail(ap);
+        });
+      })(a);
+      anchor.appendChild(b);
+
+      // 顧客名キャッシュ
+      if (!_customerNameCache[a.customerDocId] && a.customerDocId) {
+        (function (docId, blockEl) {
+          dbSalonGetCustomer(docId, function (c) {
+            var nameEl = blockEl.querySelector('.appt-name');
+            if (c && c.name) {
+              _customerNameCache[docId] = c.name;
+              if (nameEl) { nameEl.textContent = c.name; }
+            } else {
+              _customerNameCache[docId] = '(顧客情報なし)';
+              if (nameEl) { nameEl.textContent = '(顧客情報なし)'; }
+            }
+          });
+        })(a.customerDocId, b);
+      }
+
+      // インターバル
+      if (intervalMin > 0) {
+        var eh2 = sh2 + dur / 60;
+        var ihRow = Math.floor(eh2);
+        var iAnchor = dayColAt(ihRow, staffIdx);
+        if (iAnchor) {
+          var ib = document.createElement('div');
+          ib.className = 'appt interval';
+          var iTop = (eh2 - ihRow) * SLOT_H;
+          var iHeight = (intervalMin / 60) * SLOT_H - 2;
+          if (iHeight < 12) { iHeight = 12; }
+          ib.style.top = iTop + 'px';
+          ib.style.height = iHeight + 'px';
+          ib.innerHTML = '<div class="appt-name" style="font-size:9px;font-weight:400;">準備 ' + intervalMin + '分</div>';
+          iAnchor.appendChild(ib);
+        }
+      }
+    }
+  }
+
+})();
+</script>
+</body>
+</html>
