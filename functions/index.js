@@ -290,6 +290,8 @@ exports.onAppointmentCreate = onDocumentCreated(
       let assignedStaffId     = 'owner';
       let assignedSpaceId     = null;
       let assignedEquipmentId = null;
+      // I-step8: nominatedStaffId はスコープ外参照のためここで宣言
+      const nominatedStaffId = data.nominatedStaffId || null;
 
       if (isPhase1Menu) {
         // フェーズ1: owner が埋まっていれば conflict
@@ -307,13 +309,18 @@ exports.onAppointmentCreate = onDocumentCreated(
           await failAppointment(ref, salonId, 'time_conflict', { dateKey, start, end, reason: 'no_available_staff' });
           return;
         }
-        // I-step8: 顧客が指名した場合は優先。指名なし or 指名スタッフが埋まっている場合は未割当（null）
-        const nominatedStaffId = data.nominatedStaffId || null;
-        if (nominatedStaffId && availableStaff.includes(nominatedStaffId)) {
-          // 指名スタッフが空いている → そのスタッフに確定
-          assignedStaffId = nominatedStaffId;
+        // I-step8: 指名あり → 指名スタッフが空いていれば確定、埋まっていれば予約失敗
+        //          指名なし → 未割当（null）でオーナーが手動割り当て
+        if (nominatedStaffId) {
+          if (availableStaff.includes(nominatedStaffId)) {
+            assignedStaffId = nominatedStaffId;
+          } else {
+            // 指名スタッフが埋まっている or 出勤していない → 予約失敗
+            await failAppointment(ref, salonId, 'time_conflict', { dateKey, start, end, reason: 'nominated_staff_unavailable' });
+            return;
+          }
         } else {
-          // 指名なし or 指名スタッフが埋まっている → 未割当（オーナーが手動で割り当て）
+          // 指名なし → 未割当（オーナーが手動で割り当て）
           assignedStaffId = null;
         }
 
