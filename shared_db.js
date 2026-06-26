@@ -1370,6 +1370,7 @@
         pendingCreate: true
       };
       if (data.customerEmail) { doc.customerEmail = String(data.customerEmail); }
+      if (data.nominatedStaffId) { doc.nominatedStaffId = String(data.nominatedStaffId); }
       if (data.optionMenuIds && data.optionMenuIds.length > 0) {
         var opts = [];
         var i;
@@ -1377,6 +1378,10 @@
           opts.push(String(data.optionMenuIds[i]));
         }
         doc.optionMenuIds = opts;
+      }
+      // デバッグ: 書き込み直前のdocを画面表示
+      if (typeof debugLog === 'function') {
+        debugLog('[5.shared_db] doc.nom=' + doc.nominatedStaffId + ' data.nom=' + data.nominatedStaffId);
       }
       dbAddDoc('salons/' + sid + '/appointments', doc, function (addRes) {
         if (!addRes) { _safeCb(cb, new Error('予約作成に失敗しました'), null); }
