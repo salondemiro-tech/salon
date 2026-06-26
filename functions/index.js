@@ -747,13 +747,14 @@ exports.getAvailableSlots = onCall(
 
     const salonRef = db.collection('salons').doc(salonId);
 
-    // フェーズ2: シフトも並行取得
-    const [settingsDoc, menuDoc, apptSnap, closeBlockSnap, shiftDoc] = await Promise.all([
+    // フェーズ2: シフト・スタッフも並行取得
+    const [settingsDoc, menuDoc, apptSnap, closeBlockSnap, shiftDoc, staffsSnap] = await Promise.all([
       salonRef.collection('config').doc('settings').get(),
       salonRef.collection('menus').doc(menuId).get(),
       salonRef.collection('appointments').where('dateKey', '==', dateKey).get(),
       salonRef.collection('closeBlocks').get(),
-      salonRef.collection('shifts').doc(dateKey).get()
+      salonRef.collection('shifts').doc(dateKey).get(),
+      salonRef.collection('staffs').orderBy('name', 'asc').get()
     ]);
 
     const optDocs = await Promise.all(
@@ -932,7 +933,25 @@ exports.getAvailableSlots = onCall(
       slots.push({ start: minToHHMM(slotStart), available });
     }
 
-    return { dateKey, slots };
+    // I-step8: 顧客アプリ向けに対応可能スタッフ情報を返す
+    // メニュー対応可能 かつ 出勤中 のスタッフのみ（name/color のみ・最小限）
+    const availableStaffForClient = [];
+    if (!isPhase1Menu) {
+      staffsSnap.forEach(doc => {
+        if (doc.id === 'owner') return;
+        const sd = doc.data();
+        if (sd.active === false) return;
+        if (eligibleStaffIds.includes(doc.id) && shiftSet.has(doc.id)) {
+          availableStaffForClient.push({
+            id: doc.id,
+            name: sd.name || '',
+            color: sd.color || '#ccc'
+          });
+        }
+      });
+    }
+
+    return { dateKey, slots, availableStaff: availableStaffForClient };
   }
 );
 
