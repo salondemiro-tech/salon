@@ -1135,53 +1135,32 @@ function loadAndDrawSlots(dateKey){
   });
 }
 
-// チームプラン：その日出勤中 × メニュー対応可能 なスタッフを表示
+// チームプラン：getAvailableSlots のレスポンスに含まれる availableStaff を使用
+// Firestore の staffs/shifts は直接読まない（権限なし）
 function loadStaffForDate(dateKey){
   var area = $('slotArea');
   if (!area) return;
   area.innerHTML = '<div class="loading" style="padding:24px;"><div class="spinner"></div>スタッフ情報を確認中...</div>';
 
-  var eligibleIds = (appState.selectedMenu && appState.selectedMenu.eligibleStaffIds) || [];
+  var menuId = appState.selectedMenu ? appState.selectedMenu._id : '';
+  var optIds = [];
+  var i;
+  for (i = 0; i < appState.selectedOptions.length; i++){
+    optIds.push(appState.selectedOptions[i]._id);
+  }
 
-  // シフトとスタッフ情報を並行取得
-  var p1 = firebase.firestore()
-    .collection('salons').doc(appState.salonId)
-    .collection('shifts').doc(dateKey).get();
-  var p2 = appState.staffList
-    ? Promise.resolve(appState.staffList)
-    : firebase.firestore()
-        .collection('salons').doc(appState.salonId)
-        .collection('staffs').orderBy('name','asc').get()
-        .then(function(snap){
-          var list = [];
-          snap.forEach(function(doc){
-            if (doc.id === 'owner') { return; }
-            var d = doc.data();
-            list.push({ id: doc.id, name: d.name || doc.id, color: d.color || '#ccc' });
-          });
-          appState.staffList = list;
-          return list;
-        });
-
-  Promise.all([p1, p2]).then(function(results){
-    var shiftDoc = results[0];
-    var allStaff = results[1];
-    var shiftIds = shiftDoc.exists ? (shiftDoc.data().staffIds || []) : [];
-
-    // メニュー対応可能 かつ 出勤中 のスタッフに絞る
-    var availableStaff = [];
-    var i;
-    for (i = 0; i < allStaff.length; i++){
-      var s = allStaff[i];
-      if (eligibleIds.indexOf(s.id) >= 0 && shiftIds.indexOf(s.id) >= 0){
-        availableStaff.push(s);
-      }
+  // getAvailableSlots を呼ぶ（指名なしで全スタッフの空きを取得）
+  // レスポンスの availableStaff にその日対応可能かつ出勤中のスタッフが入っている
+  dbCustomerGetAvailableSlots(dateKey, menuId, optIds, function(err, result){
+    if (err || !result){
+      area.innerHTML = '<div class="error-box">スタッフ情報の取得に失敗しました。</div>';
+      return;
     }
-
-    drawStaffAndSlots(dateKey, availableStaff);
-  }).catch(function(){
-    area.innerHTML = '<div class="error-box">スタッフ情報の取得に失敗しました。</div>';
-  });
+    // availableStaff をキャッシュ（確定時の指名スタッフ名表示用）
+    appState.staffList = result.availableStaff || [];
+    appState.availableSlots = result.slots;
+    drawStaffAndSlots(dateKey, appState.staffList);
+  }, null); // nominatedStaffId=null で全スタッフの空きを取得
 }
 
 // スタッフ選択UI + スロット表示（同一ページ）
