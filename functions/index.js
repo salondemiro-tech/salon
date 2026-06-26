@@ -725,7 +725,7 @@ exports.getAvailableSlots = onCall(
       throw new HttpsError('unauthenticated', 'ログインが必要です。');
     }
 
-    const { salonId, dateKey, menuId, optionMenuIds } = request.data || {};
+    const { salonId, dateKey, menuId, optionMenuIds, nominatedStaffId } = request.data || {};
 
     if (!salonId || typeof salonId !== 'string') {
       throw new HttpsError('invalid-argument', 'salonId が不正です。');
@@ -895,7 +895,11 @@ exports.getAvailableSlots = onCall(
 
           // ① スタッフ: eligibleStaffIds のうち出勤中かつ空きがある人が1人以上
           const busyStaffIds = new Set(conflictAppts.map(a => a.staffId));
-          const availableStaff = eligibleStaffIds.filter(sid =>
+          // I-step8: nominatedStaffId が指定されている場合はそのスタッフのみで判定
+          const targetStaffIds = (nominatedStaffId && eligibleStaffIds.includes(nominatedStaffId))
+            ? [nominatedStaffId]
+            : eligibleStaffIds;
+          const availableStaff = targetStaffIds.filter(sid =>
             shiftSet.has(sid) && !busyStaffIds.has(sid)
           );
           if (availableStaff.length === 0) { available = false; }
