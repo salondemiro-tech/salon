@@ -298,6 +298,8 @@ var appState = {
   dayData: null,          // dbLoadCustomerBooking の結果
   availableSlots: null,   // computeAvailableSlots の結果
   selectedSlot: null,     // "14:00"
+  nominatedStaffId: null, // 指名スタッフID（null=指名なし）
+  staffList: null,        // メニューの eligibleStaffIds に対応するスタッフ情報
 
   user: null,             // Firebase Auth currentUser
   customerDocId: null,    // claim 後に確定
@@ -377,7 +379,7 @@ function updateAuthBar(){
 
 // ステップバーの更新
 function updateStepsBar(){
-  var order = ['menu','date','identity','confirm'];
+  var order = ['menu','nominate','date','identity','confirm'];
   var curIdx = order.indexOf(appState.step);
   // option は menu 扱い、complete は全部 done
   if (appState.step === 'option') curIdx = 0;
@@ -411,6 +413,7 @@ function render(){
     case 'accountCheck': renderAccountCheckStep(); break;
     case 'menu':     renderMenuStep(); break;
     case 'option':   renderOptionStep(); break;
+    case 'nominate': renderNominateStep(); break;
     case 'date':     renderDateStep(); break;
     case 'identity': renderIdentityStep(); break;
     case 'confirm':  renderConfirmStep(); break;
@@ -689,7 +692,11 @@ function renderMenuStep(){
         if (appState.menus[j] && appState.menus[j].type === 'option'){ hasOptions = true; break; }
       }
       if (hasOptions){ goStep('option'); }
-      else { appState.selectedOptions = []; goStep('date'); }
+      else {
+        appState.selectedOptions = [];
+        if (shouldShowNominate()){ goStep('nominate'); }
+        else { goStep('date'); }
+      }
     });
   }
   setFooter('');
@@ -736,7 +743,11 @@ function renderOptionStep(){
     '<button class="pbtn" id="optNextBtn">日時を選ぶ</button>' +
     '<button class="gbtn" id="optBackBtn">メニュー選択に戻る</button>'
   );
-  $('optNextBtn').addEventListener('click', function(){ goStep('date'); });
+  $('optNextBtn').addEventListener('click', function(){
+    // チームプランかつ指名可能スタッフが2人以上いる場合は指名ステップへ
+    if (shouldShowNominate()){ goStep('nominate'); }
+    else { goStep('date'); }
+  });
   $('optBackBtn').addEventListener('click', function(){ goStep('menu'); });
 }
 
@@ -781,6 +792,192 @@ function totalPrice(){
     p += (appState.selectedOptions[i].price || 0);
   }
   return p;
+}
+
+// ============================================================
+// I-step8: スタッフ指名（任意）
+// ============================================================
+function shouldShowNominate(){
+  // planId='team' かつ メニューの eligibleStaffIds に複数スタッフがいる場合のみ表示
+  if (!appState.selectedMenu) { return false; }
+  var ids = appState.selectedMenu.eligibleStaffIds || [];
+  // owner のみ or 0人 → ソロプランメニュー → スキップ
+  if (ids.length === 0) { return false; }
+  if (ids.length === 1 && ids[0] === 'owner') { return false; }
+  return true;
+}
+
+function renderNominateStep(){
+  if (!appState.selectedMenu) { goStep('menu'); return; }
+  var ids = appState.selectedMenu.eligibleStaffIds || [];
+  // staffList が未取得なら Firestore から取得
+  if (!appState.staffList){
+    showLoading('スタッフ情報を読み込んでいます...');
+    var sid = appState.salonId;
+    firebase.firestore()
+      .collection('salons').doc(sid)
+      .collection('staffs').orderBy('name','asc').get()
+      .then(function(snap){
+        var list = [];
+        snap.forEach(function(doc){
+          if (doc.id === 'owner') { return; }
+          var d = doc.data();
+          if (ids.indexOf(doc.id) >= 0) {
+            list.push({ id: doc.id, name: d.name || doc.id, color: d.color || '#ccc' });
+          }
+        });
+        appState.staffList = list;
+        renderNominateStep();
+      })
+      .catch(function(){
+        appState.staffList = [];
+        renderNominateStep();
+      });
+    return;
+  }
+
+  var html = '<div class="step-title">スタッフを選ぶ</div>' +
+             '<div class="step-desc">ご希望のスタッフを指名できます（任意）。</div>';
+
+  // 指名なしカード
+  var noSelClass = (!appState.nominatedStaffId) ? ' selected' : '';
+  html += '<div class="menu-card' + noSelClass + '" id="nominateNone">' +
+            '<div class="menu-name">指名なし</div>' +
+            '<div class="menu-desc" style="margin-top:4px;">サロンがスタッフを割り当てます</div>' +
+          '</div>';
+
+  // スタッフカード
+  var i;
+  for (i = 0; i < appState.staffList.length; i++){
+    var s = appState.staffList[i];
+    var selClass = (appState.nominatedStaffId === s.id) ? ' selected' : '';
+    html += '<div class="menu-card' + selClass + '" data-staffid="' + esc(s.id) + '">' +
+              '<div style="display:flex;align-items:center;gap:10px;">' +
+                '<div style="width:14px;height:14px;border-radius:50%;background:' + esc(s.color) + ';flex-shrink:0;"></div>' +
+                '<div class="menu-name">' + esc(s.name) + '</div>' +
+              '</div>' +
+            '</div>';
+  }
+
+  setBody(html);
+  setFooter(
+    '<button class="pbtn" id="nominateNextBtn">日時を選ぶ</button>' +
+    '<button class="gbtn" id="nominateBackBtn">戻る</button>'
+  );
+
+  // 指名なし
+  document.getElementById('nominateNone').addEventListener('click', function(){
+    appState.nominatedStaffId = null;
+    renderNominateStep();
+  });
+
+  // スタッフ選択
+  var cards = document.querySelectorAll('[data-staffid]');
+  for (i = 0; i < cards.length; i++){
+    cards[i].addEventListener('click', function(){
+      appState.nominatedStaffId = this.getAttribute('data-staffid');
+      renderNominateStep();
+    });
+  }
+
+  document.getElementById('nominateNextBtn').addEventListener('click', function(){
+    goStep('date');
+  });
+  document.getElementById('nominateBackBtn').addEventListener('click', function(){
+    var hasOptions = false;
+    var k;
+    if (appState.menus) {
+      for (k = 0; k < appState.menus.length; k++){
+        if (appState.menus[k] && appState.menus[k].type === 'option'){ hasOptions = true; break; }
+      }
+    }
+    goStep(hasOptions ? 'option' : 'menu');
+  });
+}
+
+// ============================================================
+// I-step8: スタッフ指名（任意）
+// ============================================================
+function shouldShowNominate(){
+  if (!appState.selectedMenu) { return false; }
+  var ids = appState.selectedMenu.eligibleStaffIds || [];
+  if (ids.length === 0) { return false; }
+  if (ids.length === 1 && ids[0] === 'owner') { return false; }
+  return true;
+}
+
+function renderNominateStep(){
+  if (!appState.selectedMenu) { goStep('menu'); return; }
+  var ids = appState.selectedMenu.eligibleStaffIds || [];
+  if (!appState.staffList){
+    showLoading('スタッフ情報を読み込んでいます...');
+    firebase.firestore()
+      .collection('salons').doc(appState.salonId)
+      .collection('staffs').orderBy('name','asc').get()
+      .then(function(snap){
+        var list = [];
+        snap.forEach(function(doc){
+          if (doc.id === 'owner') { return; }
+          var d = doc.data();
+          if (ids.indexOf(doc.id) >= 0) {
+            list.push({ id: doc.id, name: d.name || doc.id, color: d.color || '#ccc' });
+          }
+        });
+        appState.staffList = list;
+        renderNominateStep();
+      })
+      .catch(function(){
+        appState.staffList = [];
+        renderNominateStep();
+      });
+    return;
+  }
+
+  var html = '<div class="step-title">スタッフを選ぶ</div>' +
+             '<div class="step-desc">ご希望のスタッフを指名できます（任意）。</div>';
+  var noSelClass = (!appState.nominatedStaffId) ? ' selected' : '';
+  html += '<div class="menu-card' + noSelClass + '" id="nominateNone">' +
+            '<div class="menu-name">指名なし</div>' +
+            '<div class="menu-desc" style="margin-top:4px;">サロンがスタッフを割り当てます</div>' +
+          '</div>';
+  var i;
+  for (i = 0; i < appState.staffList.length; i++){
+    var s = appState.staffList[i];
+    var selClass = (appState.nominatedStaffId === s.id) ? ' selected' : '';
+    html += '<div class="menu-card' + selClass + '" data-staffid="' + esc(s.id) + '">' +
+              '<div style="display:flex;align-items:center;gap:10px;">' +
+                '<div style="width:14px;height:14px;border-radius:50%;background:' + esc(s.color) + ';flex-shrink:0;"></div>' +
+                '<div class="menu-name">' + esc(s.name) + '</div>' +
+              '</div>' +
+            '</div>';
+  }
+  setBody(html);
+  setFooter(
+    '<button class="pbtn" id="nominateNextBtn">日時を選ぶ</button>' +
+    '<button class="gbtn" id="nominateBackBtn">戻る</button>'
+  );
+  document.getElementById('nominateNone').addEventListener('click', function(){
+    appState.nominatedStaffId = null;
+    renderNominateStep();
+  });
+  var cards = document.querySelectorAll('[data-staffid]');
+  for (i = 0; i < cards.length; i++){
+    cards[i].addEventListener('click', function(){
+      appState.nominatedStaffId = this.getAttribute('data-staffid');
+      renderNominateStep();
+    });
+  }
+  document.getElementById('nominateNextBtn').addEventListener('click', function(){ goStep('date'); });
+  document.getElementById('nominateBackBtn').addEventListener('click', function(){
+    var hasOptions = false;
+    var k;
+    if (appState.menus) {
+      for (k = 0; k < appState.menus.length; k++){
+        if (appState.menus[k] && appState.menus[k].type === 'option'){ hasOptions = true; break; }
+      }
+    }
+    goStep(hasOptions ? 'option' : 'menu');
+  });
 }
 
 // ============================================================
@@ -1386,6 +1583,20 @@ function renderConfirmStep(){
     html += '<div class="sum-row"><div class="sum-label">オプション</div>' +
             '<div class="sum-value">' + esc(optNames) + '</div></div>';
   }
+  // I-step8: 指名スタッフ表示
+  if (appState.nominatedStaffId && appState.staffList){
+    var nominatedName = '';
+    var ni;
+    for (ni = 0; ni < appState.staffList.length; ni++){
+      if (appState.staffList[ni].id === appState.nominatedStaffId){
+        nominatedName = appState.staffList[ni].name; break;
+      }
+    }
+    if (nominatedName){
+      html += '<div class="sum-row"><div class="sum-label">指名スタッフ</div>' +
+              '<div class="sum-value">' + esc(nominatedName) + '</div></div>';
+    }
+  }
   html += '<div class="sum-row"><div class="sum-label">所要時間（目安）</div>' +
             '<div class="sum-value">約' + totalDuration() + '分</div></div>' +
           '<div class="sum-total"><div class="sum-label">合計料金</div>' +
@@ -1495,7 +1706,8 @@ function doBooking(){
         start: appState.selectedSlot,
         menuId: appState.selectedMenu._id,
         optionMenuIds: optionIds(),
-        customerEmail: notifyEmail   // 予約時点の最新メール（Auth正）
+        customerEmail: notifyEmail,   // 予約時点の最新メール（Auth正）
+        nominatedStaffId: appState.nominatedStaffId || null  // I-step8: 指名スタッフ
       };
 
       dbCustomerCreateAppointment(apptData, function(err2, addRes){
@@ -1572,6 +1784,8 @@ function renderCompleteStep(){
     appState.availableSlots = null;
     appState.calYear = null;
     appState.calMonth = null;
+    appState.nominatedStaffId = null;
+    appState.staffList = null;
     goStep('menu');
   });
 }

@@ -181,6 +181,8 @@
   /* ★ 定期クローズ由来（weeklyClose展開）。実クローズと区別するため破線＋淡色 */
   .appt.wcb{background:repeating-linear-gradient(45deg,var(--cbl),var(--cbl) 6px,rgba(255,255,255,.5) 6px,rgba(255,255,255,.5) 12px);
             border-color:var(--cb); color:var(--rt); border-left-style:dashed;}
+  /* I-step8: 未割当予約（staffId=null）*/
+  .appt.unassigned{border-left-style:dashed; opacity:.8;}
   .appt-name{
     font-weight:600; white-space:nowrap;
     overflow:hidden; text-overflow:ellipsis;
@@ -861,6 +863,8 @@
 
       var b = document.createElement('div');
       var srcCls = (a.source === 'online') ? 'online' : 'manual';
+      // I-step8: 未割当予約は視覚的に区別
+      if (!a.staffId || a.staffId === null) { srcCls += ' unassigned'; }
       b.className = 'appt ' + srcCls;
       var topPx = (sh - hRow) * SLOT_H;
       var heightPx = (dur / 60) * SLOT_H - 2;
@@ -1142,6 +1146,13 @@
     }
     html += '<div class="detail-row"><span class="detail-label">料金</span><span class="detail-value">' + price + '</span></div>';
     html += '<div class="detail-row"><span class="detail-label">区分</span><span class="detail-value">' + src + '</span></div>';
+    // I-step8: 担当スタッフ・指名情報
+    var staffLabel = appt.staffId ? _staffNameById(appt.staffId) : '未割当';
+    html += '<div class="detail-row"><span class="detail-label">担当スタッフ</span><span class="detail-value" id="detailStaffName">' + esc(staffLabel) + '</span></div>';
+    if (appt.nominatedStaffId) {
+      var nomName = _staffNameById(appt.nominatedStaffId);
+      html += '<div class="detail-row"><span class="detail-label">指名</span><span class="detail-value">' + esc(nomName) + '</span></div>';
+    }
     if (appt.memo) {
       html += '<div class="detail-row"><span class="detail-label">メモ</span><span class="detail-value">' + esc(appt.memo) + '</span></div>';
     }
@@ -1208,6 +1219,17 @@
       acts.appendChild(revBtn2);
     }
 
+    // I-step8: スタッフ割り当てボタン（チームプランのみ・未割当or変更時）
+    if (_planId === 'team' && _staffList.length > 0) {
+      var assignBtn = document.createElement('button');
+      assignBtn.className = 'btn btn-ghost';
+      assignBtn.textContent = appt.staffId ? 'スタッフを変更' : 'スタッフを割り当て';
+      (function(ap) {
+        assignBtn.onclick = function() { openAssignStaffModal(ap); };
+      })(appt);
+      acts.appendChild(assignBtn);
+    }
+
     var xBtn = document.createElement('button');
     xBtn.className = 'btn btn-ghost';
     xBtn.textContent = '閉じる';
@@ -1215,6 +1237,87 @@
     acts.appendChild(xBtn);
 
     document.getElementById('detailModalOv').className = 'modal-ov show';
+  }
+
+  // I-step8: スタッフ割り当てモーダル
+  function _staffNameById(staffId) {
+    if (!staffId) { return '未割当'; }
+    if (staffId === 'owner') { return 'オーナー'; }
+    for (var i = 0; i < _staffList.length; i++) {
+      if (_staffList[i].id === staffId) { return _staffList[i].name; }
+    }
+    return staffId;
+  }
+
+  function openAssignStaffModal(appt) {
+    closeDetailModal();
+    // シフトを取得してから表示
+    var dk = appt.dateKey;
+    firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('shifts').doc(dk).get()
+      .then(function(shiftDoc) {
+        var shiftIds = shiftDoc.exists ? (shiftDoc.data().staffIds || []) : [];
+        // モーダルを動的に作成
+        var ov = document.createElement('div');
+        ov.className = 'modal-ov show';
+        ov.id = 'assignModalOv';
+        var html = '<div class="modal"><div class="modal-head">' +
+          '<div class="modal-title">スタッフを割り当て</div>' +
+          '<button class="modal-close" id="assignModalClose">&times;</button></div>' +
+          '<div class="modal-body">';
+        // 未割当オプション
+        html += '<div class="detail-row" style="cursor:pointer;padding:12px 0;" data-assignid="">' +
+          '<span style="font-size:14px;">未割当（オーナーが後で割り当て）</span></div>';
+        // スタッフ一覧（出勤中は強調）
+        var i;
+        for (i = 0; i < _staffList.length; i++) {
+          var s = _staffList[i];
+          var isOn = shiftIds.indexOf(s.id) >= 0;
+          html += '<div class="detail-row" style="cursor:pointer;padding:12px 0;' +
+            (appt.staffId === s.id ? 'background:var(--al);' : '') + '" data-assignid="' + esc(s.id) + '">' +
+            '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + esc(s.color) + ';margin-right:8px;"></span>' +
+            '<span style="font-size:14px;font-weight:' + (appt.staffId === s.id ? '600' : '400') + ';">' + esc(s.name) + '</span>' +
+            (isOn ? '<span style="font-size:11px;color:var(--gn);margin-left:8px;">出勤中</span>' : '<span style="font-size:11px;color:var(--mu);margin-left:8px;">休み</span>') +
+            '</div>';
+        }
+        html += '</div><div class="modal-actions">' +
+          '<button class="btn btn-ghost" id="assignCancelBtn">キャンセル</button></div></div>';
+        ov.innerHTML = html;
+        document.body.appendChild(ov);
+
+        document.getElementById('assignModalClose').onclick = function() { ov.parentNode.removeChild(ov); };
+        document.getElementById('assignCancelBtn').onclick = function() { ov.parentNode.removeChild(ov); };
+
+        // スタッフ選択
+        var rows = ov.querySelectorAll('[data-assignid]');
+        for (i = 0; i < rows.length; i++) {
+          (function(row) {
+            row.addEventListener('click', function() {
+              var newStaffId = row.getAttribute('data-assignid') || null;
+              uiShowLoading('割り当て中...');
+              firebase.firestore()
+                .collection('salons').doc(_salonId)
+                .collection('appointments').doc(appt._id)
+                .update({ staffId: newStaffId || null, updatedAt: firebase.firestore.FieldValue.serverTimestamp() })
+                .then(function() {
+                  uiForceHideLoading();
+                  ov.parentNode.removeChild(ov);
+                  uiToast(newStaffId ? (_staffNameById(newStaffId) + ' に割り当てました') : '未割当に戻しました');
+                  // ビューを再描画
+                  if (_viewMode === 'day') { loadDay(); } else { loadWeek(); }
+                })
+                .catch(function(e) {
+                  uiForceHideLoading();
+                  uiToast('割り当てに失敗しました: ' + e.message);
+                });
+            });
+          })(rows[i]);
+        }
+      })
+      .catch(function() {
+        uiToast('シフト情報の取得に失敗しました');
+      });
   }
 
   function openCloseDetail(closeBlock) {
