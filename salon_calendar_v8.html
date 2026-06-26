@@ -345,6 +345,83 @@
     text-align:center; padding:20px 0;
     color:var(--mu); font-size:10px;
   }
+
+  /* ===== ビュー切り替えタブ（チームプランのみ表示） ===== */
+  .view-tabs{
+    display:flex; gap:0; margin-bottom:10px;
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    overflow:hidden;
+  }
+  .view-tab-btn{
+    flex:1; background:none; border:none; cursor:pointer;
+    padding:11px; font-family:inherit; font-size:13px;
+    color:var(--mu); font-weight:600;
+    border-bottom:2px solid transparent;
+    transition:background .12s, color .12s;
+  }
+  .view-tab-btn.active{
+    background:var(--al); color:var(--ad);
+    border-bottom-color:var(--ac);
+  }
+
+  /* ===== 日ビュー ===== */
+  .day-nav{
+    display:flex; align-items:center; justify-content:space-between;
+    background:#fff; border-radius:13px;
+    box-shadow:0 4px 16px rgba(0,0,0,.07);
+    padding:11px 14px; margin-bottom:10px; gap:8px;
+  }
+  .day-nav button{
+    background:var(--al); border:none; color:var(--ad);
+    width:38px; height:38px; border-radius:10px;
+    font-size:17px; cursor:pointer; font-family:inherit;
+    flex-shrink:0;
+  }
+  .day-nav button:hover{background:var(--ac); color:#fff;}
+  .day-nav button:disabled{opacity:.4; cursor:default;}
+  .day-label{
+    font-size:14px; font-weight:600; color:var(--ad);
+    flex:1; text-align:center;
+  }
+  .day-today-btn{
+    background:#fff !important; color:var(--ac) !important;
+    border:1.5px solid var(--ac) !important; width:auto !important;
+    padding:0 12px; font-size:12px;
+  }
+
+  /* スタッフ列ヘッダー */
+  .staff-dow-row{
+    display:grid;
+    background:var(--sf);
+    border-bottom:1px solid var(--bd);
+  }
+  .sdl{
+    text-align:center; padding:8px 4px; font-size:11px;
+    font-weight:600; color:var(--mu);
+    border-left:1px solid var(--bd);
+  }
+  .sdl .staff-color-bar{
+    display:block; height:3px; border-radius:2px;
+    margin:4px auto 0; width:60%;
+  }
+  .sdl.off-shift{
+    opacity:.45;
+    background:var(--s2);
+  }
+
+  /* 日ビューグリッド */
+  .day-time-grid{
+    display:grid;
+  }
+  .day-col{
+    border-left:1px solid var(--bd);
+    border-top:1px solid var(--bd);
+    min-height:48px; position:relative;
+  }
+  .day-col.off-shift{
+    background:var(--s2); opacity:.6;
+  }
 </style>
 </head>
 <body>
@@ -356,6 +433,12 @@
 </div>
 
 <div class="wrap">
+
+  <!-- ビュー切り替えタブ（チームプランのみJS側で表示） -->
+  <div class="view-tabs" id="viewTabs" style="display:none;">
+    <button class="view-tab-btn active" id="tabWeekBtn" onclick="switchView('week')">週ビュー</button>
+    <button class="view-tab-btn" id="tabDayBtn" onclick="switchView('day')">日ビュー（スタッフ別）</button>
+  </div>
 
   <div class="week-nav">
     <button id="prevBtn" onclick="changeWeek(-1)">&#8249;</button>
@@ -381,6 +464,20 @@
       <div></div>
     </div>
     <div class="time-grid" id="timeGrid"></div>
+  </div>
+
+  <!-- 日ビューコンテナ -->
+  <div id="dayView" style="display:none;">
+    <div class="day-nav">
+      <button id="prevDayBtn" onclick="changeDay(-1)">&#8249;</button>
+      <span class="day-label" id="dayLabel">----</span>
+      <button id="nextDayBtn" onclick="changeDay(1)">&#8250;</button>
+      <button class="day-today-btn day-nav button" onclick="goDayToday()" style="background:#fff;color:var(--ac);border:1.5px solid var(--ac);border-radius:10px;padding:0 12px;font-size:12px;cursor:pointer;font-family:inherit;height:38px;">今日</button>
+    </div>
+    <div class="week-card">
+      <div class="staff-dow-row" id="staffDowRow"></div>
+      <div class="day-time-grid" id="dayTimeGrid"></div>
+    </div>
   </div>
 
   <footer>&copy; TORITA</footer>
@@ -539,6 +636,13 @@
   var _pickedCust = null;
   var _allCust = [];
   var _optionSelects = [];
+  // Phase I-step7: 日ビュー
+  var _viewMode  = 'week';  // 'week' | 'day'
+  var _dayDate   = null;    // 日ビューの表示日
+  var _planId    = 'solo';  // 'solo' | 'team'
+  var _staffList = [];      // [{id, name, color}]
+  var _shiftMap  = {};      // { 'YYYY-MM-DD': [staffId,...] }
+  var _salonId   = null;
 
   function pad2(n) {
     n = String(n);
@@ -1966,6 +2070,7 @@
 
   // ===== 起動 =====
   _weekStart = getTodayStart();
+  _dayDate   = getTodayStart();
 
   onFbReady(function () {
     requireSalonStaff(function (isStaff) {
@@ -1973,9 +2078,258 @@
         window.location.href = 'salon_auth_v2_new.html';
         return;
       }
-      loadWeek();
+      var user = firebase.auth().currentUser;
+      _salonId = user ? user.uid : null;
+      // planId を取得してからカレンダーを初期化
+      firebase.firestore()
+        .collection('salons').doc(_salonId)
+        .collection('config').doc('settings').get()
+        .then(function (doc) {
+          var d = doc.exists ? doc.data() : {};
+          _planId = d.planId || 'solo';
+          if (_planId === 'team') {
+            // チームプランはスタッフ一覧も取得してからタブを表示
+            return firebase.firestore()
+              .collection('salons').doc(_salonId)
+              .collection('staffs').orderBy('name', 'asc').get()
+              .then(function (snap) {
+                _staffList = [];
+                snap.forEach(function (sdoc) {
+                  if (sdoc.id === 'owner') { return; }
+                  var sd = sdoc.data();
+                  _staffList.push({ id: sdoc.id, name: sd.name || sdoc.id, color: sd.color || '#ccc' });
+                });
+                document.getElementById('viewTabs').style.display = 'flex';
+                loadWeek();
+              });
+          } else {
+            loadWeek();
+          }
+        })
+        .catch(function () { loadWeek(); });
     });
   });
+
+  // ===== ビュー切り替え =====
+  function switchView(mode) {
+    _viewMode = mode;
+    document.getElementById('tabWeekBtn').className = mode === 'week' ? 'view-tab-btn active' : 'view-tab-btn';
+    document.getElementById('tabDayBtn').className  = mode === 'day'  ? 'view-tab-btn active' : 'view-tab-btn';
+    document.getElementById('weekViewArea').style.display  = mode === 'week' ? '' : 'none';
+    document.getElementById('weekCardArea').style.display   = mode === 'week' ? '' : 'none';
+    document.getElementById('dayView').style.display        = mode === 'day'  ? '' : 'none';
+    if (mode === 'day') { loadDay(); }
+  }
+  window.switchView = switchView;
+
+  // ===== 日ビューナビ =====
+  function changeDay(delta) {
+    _dayDate = new Date(_dayDate.getTime());
+    _dayDate.setDate(_dayDate.getDate() + delta);
+    loadDay();
+  }
+  window.changeDay = changeDay;
+
+  function goDayToday() {
+    _dayDate = getTodayStart();
+    loadDay();
+  }
+  window.goDayToday = goDayToday;
+
+  // ===== 日ビューデータ取得 =====
+  function loadDay() {
+    var dk = dateKeyOf(_dayDate);
+    var DOWS2 = ['日','月','火','水','木','金','土'];
+    var dow = _dayDate.getDay();
+    document.getElementById('dayLabel').textContent =
+      (_dayDate.getMonth() + 1) + '月' + _dayDate.getDate() + '日（' + DOWS2[dow] + '）';
+
+    uiShowLoading('読み込み中...');
+
+    // シフトと予約を並行取得
+    var p1 = firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('shifts').doc(dk).get();
+    var p2 = firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('appointments')
+      .where('dateKey', '==', dk).get();
+    var p3 = firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('config').doc('settings').get();
+
+    Promise.all([p1, p2, p3]).then(function (results) {
+      uiForceHideLoading();
+      var shiftDoc = results[0];
+      var apptSnap = results[1];
+      var settDoc  = results[2];
+
+      _shiftMap[dk] = shiftDoc.exists ? (shiftDoc.data().staffIds || []) : [];
+
+      var appts = [];
+      var CANCEL = { cancelled:1, cancelled_by_customer:1, cancelled_by_salon:1, no_show:1, time_conflict:1, failed:1 };
+      apptSnap.forEach(function (d) {
+        var a = d.data();
+        a._id = d.id;
+        if (CANCEL[a.status]) { return; }
+        appts.push(a);
+      });
+
+      var settings = settDoc.exists ? settDoc.data() : {};
+      renderDay(dk, appts, settings);
+    }).catch(function (e) {
+      uiForceHideLoading();
+      uiToast('読み込みに失敗しました: ' + e.message);
+    });
+  }
+
+  // ===== 日ビュー描画 =====
+  function renderDay(dk, appts, settings) {
+    var openTime  = settings.openTime  || DEFAULT_OPEN;
+    var closeTime = settings.closeTime || DEFAULT_CLOSE;
+    var oh = timeToHour(openTime);
+    var ch = timeToHour(closeTime);
+    if (oh == null) { oh = 9; }
+    if (ch == null) { ch = 21; }
+    var startHour = Math.floor(oh);
+    var endHour   = Math.ceil(ch);
+    if (endHour <= startHour) { endHour = startHour + 1; }
+    var rowCount = endHour - startHour;
+    var nStaff = _staffList.length;
+    if (nStaff === 0) {
+      document.getElementById('staffDowRow').innerHTML = '<div style="padding:12px;color:var(--mu);font-size:12px;">スタッフが登録されていません</div>';
+      document.getElementById('dayTimeGrid').innerHTML = '';
+      return;
+    }
+    var shiftIds = _shiftMap[dk] || [];
+
+    // グリッド列数: 時間ラベル列 + スタッフ数
+    var cols = '42px repeat(' + nStaff + ', 1fr)';
+
+    // スタッフヘッダー
+    var dowRow = document.getElementById('staffDowRow');
+    dowRow.style.gridTemplateColumns = cols;
+    dowRow.innerHTML = '<div></div>';
+    var si;
+    for (si = 0; si < _staffList.length; si++) {
+      var s = _staffList[si];
+      var isOn = shiftIds.indexOf(s.id) >= 0;
+      var sdl = document.createElement('div');
+      sdl.className = 'sdl' + (isOn ? '' : ' off-shift');
+      sdl.innerHTML = esc(s.name)
+        + '<span class="staff-color-bar" style="background:' + esc(s.color) + ';"></span>'
+        + (isOn ? '' : '<br><span style="font-size:9px;">休み</span>');
+      dowRow.appendChild(sdl);
+    }
+
+    // 時間グリッド
+    var grid = document.getElementById('dayTimeGrid');
+    grid.style.gridTemplateColumns = cols;
+    grid.innerHTML = '';
+
+    var daysCols = []; // { col, hour, si }
+    var hour, ci;
+    for (hour = startHour; hour < endHour; hour++) {
+      var tlabel = document.createElement('div');
+      tlabel.className = 'tlabel';
+      tlabel.textContent = hour + ':00';
+      grid.appendChild(tlabel);
+      for (ci = 0; ci < nStaff; ci++) {
+        var isOnShift = shiftIds.indexOf(_staffList[ci].id) >= 0;
+        var col = document.createElement('div');
+        col.className = 'day-col' + (isOnShift ? '' : ' off-shift');
+        grid.appendChild(col);
+        daysCols.push({ col: col, hour: hour, si: ci });
+      }
+    }
+
+    function dayColAt(hour, si) {
+      var rowIdx = hour - startHour;
+      if (rowIdx < 0 || rowIdx >= rowCount) { return null; }
+      return daysCols[rowIdx * nStaff + si].col;
+    }
+
+    var intervalMin = (settings.intervalMin != null) ? parseInt(settings.intervalMin, 10) : 0;
+    if (isNaN(intervalMin) || intervalMin < 0) { intervalMin = 0; }
+
+    // 予約ブロックをスタッフ列に配置
+    var i;
+    for (i = 0; i < appts.length; i++) {
+      var a = appts[i];
+      var sh2 = timeToHour(a.start);
+      if (sh2 == null) { continue; }
+      var dur = (typeof a.durationSnapshot === 'number') ? a.durationSnapshot
+              : (typeof a.durationMin === 'number') ? a.durationMin : 60;
+
+      // staffId に対応するスタッフ列インデックスを探す
+      var staffIdx = -1;
+      for (ci = 0; ci < _staffList.length; ci++) {
+        if (_staffList[ci].id === a.staffId) { staffIdx = ci; break; }
+      }
+      if (staffIdx < 0) { continue; } // staffIdが一致しない予約はスキップ
+
+      var hRow = Math.floor(sh2);
+      var anchor = dayColAt(hRow, staffIdx);
+      if (!anchor) { continue; }
+
+      var b = document.createElement('div');
+      var staffColor = _staffList[staffIdx].color || '#b5845a';
+      var srcCls = (a.source === 'online') ? 'online' : 'manual';
+      b.className = 'appt ' + srcCls;
+      // スタッフ色でボーダーを上書き
+      b.style.borderLeftColor = staffColor;
+      var topPx = (sh2 - hRow) * SLOT_H;
+      var heightPx = (dur / 60) * SLOT_H - 2;
+      if (heightPx < 16) { heightPx = 16; }
+      b.style.top = topPx + 'px';
+      b.style.height = heightPx + 'px';
+      var nm = _customerNameCache[a.customerDocId] || '読込中…';
+      var mn = a.menuNameSnapshot || '';
+      b.innerHTML = '<div class="appt-name">' + esc(nm) + '</div>'
+                  + '<div class="appt-sub">' + esc(mn) + '</div>';
+      (function (ap) {
+        b.addEventListener('click', function (e) {
+          e.stopPropagation();
+          openApptDetail(ap);
+        });
+      })(a);
+      anchor.appendChild(b);
+
+      // 顧客名キャッシュ
+      if (!_customerNameCache[a.customerDocId] && a.customerDocId) {
+        (function (docId, blockEl) {
+          dbSalonGetCustomer(docId, function (c) {
+            var nameEl = blockEl.querySelector('.appt-name');
+            if (c && c.name) {
+              _customerNameCache[docId] = c.name;
+              if (nameEl) { nameEl.textContent = c.name; }
+            } else {
+              _customerNameCache[docId] = '(顧客情報なし)';
+              if (nameEl) { nameEl.textContent = '(顧客情報なし)'; }
+            }
+          });
+        })(a.customerDocId, b);
+      }
+
+      // インターバル
+      if (intervalMin > 0) {
+        var eh2 = sh2 + dur / 60;
+        var ihRow = Math.floor(eh2);
+        var iAnchor = dayColAt(ihRow, staffIdx);
+        if (iAnchor) {
+          var ib = document.createElement('div');
+          ib.className = 'appt interval';
+          var iTop = (eh2 - ihRow) * SLOT_H;
+          var iHeight = (intervalMin / 60) * SLOT_H - 2;
+          if (iHeight < 12) { iHeight = 12; }
+          ib.style.top = iTop + 'px';
+          ib.style.height = iHeight + 'px';
+          ib.innerHTML = '<div class="appt-name" style="font-size:9px;font-weight:400;">準備 ' + intervalMin + '分</div>';
+          iAnchor.appendChild(ib);
+        }
+      }
+    }
+  }
 
 })();
 </script>
