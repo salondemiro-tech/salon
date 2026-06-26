@@ -308,7 +308,7 @@ exports.onAppointmentCreate = onDocumentCreated(
           return;
         }
         // I-step8: 顧客が指名した場合は優先。指名なし or 指名スタッフが埋まっている場合は未割当（null）
-        const nominatedStaffId = event.data.after.data().nominatedStaffId || null;
+        const nominatedStaffId = data.nominatedStaffId || null;
         if (nominatedStaffId && availableStaff.includes(nominatedStaffId)) {
           // 指名スタッフが空いている → そのスタッフに確定
           assignedStaffId = nominatedStaffId;
