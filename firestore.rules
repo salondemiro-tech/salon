@@ -333,7 +333,7 @@ service cloud.firestore {
            request.resource.data.keys().hasOnly([
              'dateKey', 'start', 'customerDocId', 'authUid',
              'menuId', 'optionMenuIds', 'pendingCreate',
-             'source', 'customerEmail'
+             'source', 'customerEmail', 'nominatedStaffId'
            ]) &&
            // ★ 2026/6/1 createdAt をA経路ホワイトリストから除外（⑥検証でFAIL）。
            //   createdAt は Functions が serverTimestamp で確定するフィールド。
@@ -355,7 +355,10 @@ service cloud.firestore {
            (!('optionMenuIds' in request.resource.data) ||
              request.resource.data.optionMenuIds is list) &&
            (!('customerEmail' in request.resource.data) ||
-             request.resource.data.customerEmail is string))
+             request.resource.data.customerEmail is string) &&
+           (!('nominatedStaffId' in request.resource.data) ||
+             request.resource.data.nominatedStaffId == null ||
+             request.resource.data.nominatedStaffId is string))
           ||
           // ── (B) サロン手動登録（電話・店頭予約、最初から確定）──
           //   対象がサロン仮登録カルテなら authUid=null。後でその

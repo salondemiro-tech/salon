@@ -1910,7 +1910,7 @@ function doBooking(){
       });
     });
   });
-  }); // dbLoadCustomerBooking（空き再チェック）の閉じ
+  }, appState.nominatedStaffId || null); // 確定直前チェック・nominatedStaffId追加
 }
 
 function optionIds(){
