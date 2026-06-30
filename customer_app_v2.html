@@ -235,7 +235,6 @@
 </style>
 </head>
 <body>
-<div id="debugBanner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#000;color:#0f0;font-size:11px;font-family:monospace;padding:4px 8px;white-space:pre-wrap;max-height:120px;overflow-y:auto;"></div>
 <div class="wrap">
   <div class="hdr">
     <div class="hdr-salon" id="hdrSalon">読み込み中...</div>
@@ -318,12 +317,6 @@ var auth = null;
 // ユーティリティ
 // ------------------------------------------------------------
 function $(id){ return document.getElementById(id); }
-
-// iPad用デバッグ表示
-function debugLog(msg){
-  var b = document.getElementById('debugBanner');
-  if (b){ b.textContent += msg + '\n'; }
-}
 
 function esc(s){
   if (s == null) return '';
@@ -692,13 +685,19 @@ function renderMenuStep(){
       for (j = 0; j < mains.length; j++){
         if (mains[j]._id === mid){ appState.selectedMenu = mains[j]; break; }
       }
+      // メニューを選び直したら関連選択をリセット（ループ・前回値の混入防止）
+      appState.selectedOptions = [];
+      appState.selectedDate = null;
+      appState.selectedSlot = null;
+      appState.nominatedStaffId = null;
+      appState.staffList = null;
       // オプションがあるか確認して遷移先を決める
       var hasOptions = false;
       for (j = 0; j < appState.menus.length; j++){
         if (appState.menus[j] && appState.menus[j].type === 'option'){ hasOptions = true; break; }
       }
       if (hasOptions){ goStep('option'); }
-      else { appState.selectedOptions = []; goStep('date'); }
+      else { goStep('date'); }
     });
   }
   setFooter('');
@@ -981,12 +980,14 @@ function drawCalendar(){
   setBody(html);
   setFooter('<button class="gbtn" id="dateBackBtn">メニュー選択に戻る</button>');
   $('dateBackBtn').addEventListener('click', function(){
-    var hasOptions = false;
-    var k;
-    for (k = 0; k < appState.menus.length; k++){
-      if (appState.menus[k] && appState.menus[k].type === 'option'){ hasOptions = true; break; }
-    }
-    goStep(hasOptions ? 'option' : 'menu');
+    // 常にメニュー選択へ戻る（ラベル通り）。ループ防止のため選択をクリア
+    appState.selectedMenu = null;
+    appState.selectedOptions = [];
+    appState.selectedDate = null;
+    appState.selectedSlot = null;
+    appState.nominatedStaffId = null;
+    appState.staffList = null;
+    goStep('menu');
   });
 
   if (!prevDisabled){
@@ -1122,7 +1123,6 @@ function drawStaffAndSlots(dateKey, availableStaff){
     (function(btn){
       btn.addEventListener('click', function(){
         appState.nominatedStaffId = btn.getAttribute('data-nomid') || null;
-        debugLog('[1.click] nom=' + appState.nominatedStaffId);
         appState.selectedSlot = null;
         // ボタンの選択状態を更新
         var allBtns = area.querySelectorAll('[data-nomid]');
@@ -1154,7 +1154,6 @@ function drawStaffAndSlots(dateKey, availableStaff){
 
 // 選択中スタッフの空きスロットを取得して表示
 function loadSlotsForStaff(dateKey){
-  debugLog('[2.slots] nom=' + appState.nominatedStaffId);
   var slotArea = $('staffSlotArea');
   if (!slotArea) return;
   slotArea.innerHTML = '<div class="loading" style="padding:16px;"><div class="spinner"></div>空きを確認中...</div>';
@@ -1642,7 +1641,6 @@ function authErrorMsg(err){
 //   ログイン（認証）と claim（カルテ紐付け）は別物。
 // ============================================================
 function renderConfirmStep(){
-  debugLog('[3.confirm] nom=' + appState.nominatedStaffId);
   if (!appState.user || !appState.user.emailVerified){
     identityMode = 'login';
     goStep('identity');
@@ -1791,8 +1789,6 @@ function doBooking(){
     reloadPromise.then(function(){
       var freshUser = firebase.auth().currentUser;
       var notifyEmail = (freshUser && freshUser.email) ? freshUser.email : '';
-
-      debugLog('[4.booking] nom=' + appState.nominatedStaffId);
       var apptData = {
         dateKey: appState.selectedDate,
         start: appState.selectedSlot,
