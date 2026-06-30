@@ -419,7 +419,8 @@ service cloud.firestore {
           ||
           (isSalonStaff(salonId) &&
            request.resource.data.customerDocId == resource.data.customerDocId &&
-           request.resource.data.source == resource.data.source)
+           (!('source' in resource.data) ||
+            request.resource.data.source == resource.data.source))
         );
 
         // 削除: オーナーのみ（通常は status=cancelled でソフト削除）
