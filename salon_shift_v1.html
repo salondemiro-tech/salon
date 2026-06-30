@@ -5,15 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>TORITA - シフト管理</title>
 <!--
-  salon_shift_v1.html  -  TORITA Phase I-step5 v2
+  salon_shift_v1.html  -  TORITA Phase I-step5 v2 / 出勤時間対応版
   作成: 2026/6/19
+  改訂: 2026/6/30 出勤時間（複数区間）対応
   設計:
     - 月カレンダー表示（前月・翌月ナビ）
     - 各日マスにスタッフのチェックボックス
+    - 日付をタップ → 出勤時間設定モーダル（スタッフごと・複数区間）
     - 「まとめて保存」ボタン1つで月全体を保存
     - 未チェックの日 = 全員オフ（予約不可）
   DB: salons/{salonId}/shifts/{YYYY-MM-DD}
-    フィールド: date, staffIds[], updatedAt
+    フィールド: date, staffIds[], staffTimes{staffId:[{start,end}]}, updatedAt
+    staffTimes に区間が無いスタッフ = 営業時間ずっと出勤
 -->
 <style>
   :root{
@@ -21,7 +24,7 @@
     --sf:#f8f7f4; --s2:#f0ede8;
     --bd:rgba(0,0,0,.10); --tx:#1a1a18; --mu:#73726c;
     --gn:#7b9e87; --gl:#eef3ef;
-    --rd:#c47b7b;
+    --rd:#c47b7b; --rl:#faeaea;
   }
   *{box-sizing:border-box;margin:0;padding:0;}
   html,body{height:100%;}
@@ -112,12 +115,21 @@
   .cell-date{
     font-size:12px; font-weight:600; color:var(--ad);
     margin-bottom:5px; line-height:1;
+    display:flex; align-items:center; justify-content:space-between;
   }
   .cell-date .today-dot{
     display:inline-block; width:5px; height:5px;
     background:var(--ac); border-radius:50%;
     margin-left:3px; vertical-align:middle;
   }
+  /* 日付タップで時間設定（過去日以外） */
+  .cell-date .time-gear{
+    font-size:10px; color:var(--ac); cursor:pointer;
+    border:1px solid var(--ac); border-radius:5px;
+    padding:1px 5px; font-weight:600; line-height:1.3;
+    background:#fff;
+  }
+  .cell-date .time-gear:hover{ background:var(--al); }
 
   /* 一括ON/OFFボタン */
   .cell-bulk{
@@ -155,6 +167,12 @@
   .cal-cell.past .cell-check input[type=checkbox]{
     cursor:default;
   }
+  /* 時間バッジ（スタッフ名の下に小さく表示） */
+  .cell-check-time{
+    font-size:8px; color:var(--ac); line-height:1.2;
+    white-space:nowrap; overflow:hidden; text-overflow:ellipsis;
+    margin-left:17px; margin-top:-1px;
+  }
 
   /* まとめて保存ボタン */
   .save-bar{
@@ -179,6 +197,86 @@
   }
   .save-all-btn:active{ opacity:.85; }
   .save-all-btn:disabled{ opacity:.5; cursor:default; }
+
+  /* ===== 出勤時間設定モーダル ===== */
+  .tmodal-ov{
+    display:none; position:fixed; inset:0;
+    background:rgba(0,0,0,.42); z-index:60;
+    overflow-y:auto; padding:24px 12px;
+  }
+  .tmodal-ov.show{ display:block; }
+  .tmodal{
+    max-width:520px; margin:0 auto;
+    background:#fff; border-radius:15px;
+    box-shadow:0 12px 40px rgba(0,0,0,.22);
+    overflow:hidden;
+  }
+  .tmodal-head{
+    background:var(--al); padding:14px 18px;
+    display:flex; align-items:center; justify-content:space-between;
+  }
+  .tmodal-title{ font-size:16px; color:var(--ad); font-weight:600; }
+  .tmodal-close{
+    background:none; border:none; cursor:pointer;
+    font-size:22px; color:var(--mu); line-height:1;
+  }
+  .tmodal-body{ padding:16px 18px; max-height:60vh; overflow-y:auto; }
+  .tmodal-note{
+    font-size:11px; color:var(--mu); line-height:1.5;
+    margin-bottom:14px;
+  }
+  /* スタッフごとの時間設定ブロック */
+  .tstaff{
+    border:1px solid var(--bd); border-radius:10px;
+    padding:11px 12px; margin-bottom:11px;
+  }
+  .tstaff.is-off{ opacity:.5; }
+  .tstaff-head{
+    display:flex; align-items:center; gap:7px; margin-bottom:8px;
+  }
+  .tstaff-dot{ width:9px; height:9px; border-radius:50%; flex-shrink:0; }
+  .tstaff-name{ font-size:14px; font-weight:600; color:var(--tx); flex:1; }
+  .tstaff-onoff{
+    font-size:11px; color:var(--mu);
+  }
+  .tstaff-onoff input{ accent-color:var(--ac); margin-right:3px; }
+  .trange-list{ display:flex; flex-direction:column; gap:6px; }
+  .trange-row{ display:flex; align-items:center; gap:6px; }
+  .trange-row input[type=time]{
+    flex:1; background:var(--sf); border:1px solid var(--bd);
+    border-radius:8px; padding:7px 8px;
+    font-family:inherit; font-size:13px; color:var(--tx);
+  }
+  .trange-row .tilde{ font-size:12px; color:var(--mu); }
+  .trange-del{
+    width:28px; height:28px; flex-shrink:0;
+    background:none; border:1px solid var(--bd); border-radius:6px;
+    cursor:pointer; color:var(--mu); font-size:13px; font-family:inherit;
+  }
+  .trange-del:hover{ border-color:var(--rd); color:var(--rd); }
+  .trange-add{
+    width:100%; padding:7px; margin-top:6px;
+    background:none; border:1px dashed var(--bd);
+    border-radius:8px; cursor:pointer;
+    font-family:inherit; font-size:12px; color:var(--mu);
+  }
+  .trange-add:hover{ border-color:var(--ac); color:var(--ac); }
+  .tdefault-note{
+    font-size:11px; color:var(--gn); margin-top:4px;
+  }
+  .tmodal-actions{
+    display:flex; gap:8px; padding:14px 18px;
+    border-top:1px solid var(--bd); background:var(--sf);
+  }
+  .tbtn{
+    flex:1; border:none; border-radius:10px;
+    padding:11px; cursor:pointer;
+    font-family:inherit; font-size:13px; font-weight:600;
+  }
+  .tbtn-primary{ background:var(--ac); color:#fff; }
+  .tbtn-primary:hover{ background:var(--ad); }
+  .tbtn-ghost{ background:var(--s2); color:var(--mu); }
+  .tbtn-ghost:hover{ background:var(--bd); }
 </style>
 </head>
 <body>
@@ -215,8 +313,23 @@
 
 <!-- まとめて保存バー -->
 <div class="save-bar">
-  <div class="save-bar-note">チェックを変更したらまとめて保存してください</div>
+  <div class="save-bar-note">チェックや時間を変更したらまとめて保存してください</div>
   <button class="save-all-btn" id="saveAllBtn" onclick="saveAll()">まとめて保存</button>
+</div>
+
+<!-- 出勤時間設定モーダル -->
+<div class="tmodal-ov" id="timeModalOv">
+  <div class="tmodal">
+    <div class="tmodal-head">
+      <div class="tmodal-title" id="timeModalTitle">出勤時間の設定</div>
+      <button class="tmodal-close" onclick="closeTimeModal()">&times;</button>
+    </div>
+    <div class="tmodal-body" id="timeModalBody"></div>
+    <div class="tmodal-actions">
+      <button class="tbtn tbtn-ghost" onclick="closeTimeModal()">キャンセル</button>
+      <button class="tbtn tbtn-primary" onclick="applyTimeModal()">この日に反映</button>
+    </div>
+  </div>
 </div>
 
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
@@ -233,7 +346,13 @@
   var _salonId   = null;
   var _staffList = []; // [{id, name, color}]
   var _shiftMap  = {}; // { 'YYYY-MM-DD': [staffId,...] }
+  var _shiftTimesMap = {}; // { 'YYYY-MM-DD': { staffId: [{start,end},...] } }
   var _today     = dateKey(new Date());
+  var _modalDateKey = null; // モーダルで編集中の日付
+
+  // 営業時間（デフォルト区間の表示用）。settingsから取得
+  var _openTime  = '10:00';
+  var _closeTime = '19:00';
 
   // 表示中の年月
   var _curYear  = new Date().getFullYear();
@@ -252,9 +371,27 @@
       var user = firebase.auth().currentUser;
       _salonId = user ? user.uid : null;
       if (!_salonId) { window.location.href = 'salon_auth_v2_new.html'; return; }
-      loadStaffThenRender();
+      loadSettingsThenStaff();
     });
   });
+
+  /* ===== 営業時間を取得 → スタッフ読み込み ===== */
+  function loadSettingsThenStaff() {
+    firebase.firestore()
+      .collection('salons').doc(_salonId)
+      .collection('config').doc('settings').get()
+      .then(function (doc) {
+        if (doc.exists) {
+          var d = doc.data();
+          if (typeof d.openTime === 'string')  { _openTime  = d.openTime; }
+          if (typeof d.closeTime === 'string') { _closeTime = d.closeTime; }
+        }
+        loadStaffThenRender();
+      })
+      .catch(function () {
+        loadStaffThenRender();
+      });
+  }
 
   /* ===== スタッフ読み込み ===== */
   function loadStaffThenRender() {
@@ -314,21 +451,46 @@
       .then(function (snap) {
         uiForceHideLoading();
         _shiftMap = {};
+        _shiftTimesMap = {};
         snap.forEach(function (doc) {
           var d = doc.data();
-          if (d.date) { _shiftMap[d.date] = d.staffIds || []; }
+          if (d.date) {
+            _shiftMap[d.date] = d.staffIds || [];
+            // staffTimes（任意）。{staffId:[{start,end}]} 形式
+            if (d.staffTimes && typeof d.staffTimes === 'object') {
+              _shiftTimesMap[d.date] = _cloneStaffTimes(d.staffTimes);
+            }
+          }
         });
         renderCalendar();
       });
   }
 
+  // staffTimes のディープコピー（保存前の編集が元データに影響しないように）
+  function _cloneStaffTimes(src) {
+    var out = {};
+    var k;
+    for (k in src) {
+      if (!Object.prototype.hasOwnProperty.call(src, k)) { continue; }
+      var arr = src[k];
+      if (!Array.isArray(arr)) { continue; }
+      var copy = [];
+      var i;
+      for (i = 0; i < arr.length; i++) {
+        if (arr[i] && arr[i].start && arr[i].end) {
+          copy.push({ start: String(arr[i].start), end: String(arr[i].end) });
+        }
+      }
+      if (copy.length > 0) { out[k] = copy; }
+    }
+    return out;
+  }
+
   /* ===== カレンダー描画 ===== */
   function renderCalendar() {
-    // 月ラベル
     document.getElementById('monthLabel').textContent =
       _curYear + '年' + (_curMonth + 1) + '月';
 
-    // ナビボタン制御
     var offset = (_curYear - _baseYear) * 12 + (_curMonth - _baseMonth);
     document.getElementById('prevBtn').disabled = (offset <= MIN_MONTH_OFFSET);
     document.getElementById('nextBtn').disabled = (offset >= MAX_MONTH_OFFSET);
@@ -336,19 +498,16 @@
     var grid = document.getElementById('calGrid');
     grid.innerHTML = '';
 
-    // 月の1日の曜日（月曜始まり: 月=0, 日=6）
     var firstDay = new Date(_curYear, _curMonth, 1).getDay();
     var blanks = (firstDay === 0) ? 6 : firstDay - 1;
     var daysInMonth = new Date(_curYear, _curMonth + 1, 0).getDate();
 
-    // 空白セル
     for (var b = 0; b < blanks; b++) {
       var empty = document.createElement('div');
       empty.className = 'cal-cell empty';
       grid.appendChild(empty);
     }
 
-    // 日付セル
     for (var d = 1; d <= daysInMonth; d++) {
       grid.appendChild(buildCell(d));
     }
@@ -357,7 +516,7 @@
   /* ===== 日付セル生成 ===== */
   function buildCell(day) {
     var dk = dateKey(new Date(_curYear, _curMonth, day));
-    var dow = new Date(_curYear, _curMonth, day).getDay(); // 0=日,6=土
+    var dow = new Date(_curYear, _curMonth, day).getDay();
     var isPast   = dk < _today;
     var isToday  = dk === _today;
     var staffIds = _shiftMap[dk] || [];
@@ -369,20 +528,34 @@
       (dow === 6 ? ' sat'   : '') +
       (dow === 0 ? ' sun'   : '');
 
-    // 日付
+    // 日付行（日付 + 時間設定ボタン）
     var dateEl = document.createElement('div');
     dateEl.className = 'cell-date';
-    dateEl.textContent = day;
+    var daySpan = document.createElement('span');
+    daySpan.textContent = day;
     if (isToday) {
       var dot = document.createElement('span');
       dot.className = 'today-dot';
-      dateEl.appendChild(dot);
+      daySpan.appendChild(dot);
+    }
+    dateEl.appendChild(daySpan);
+    // 時間設定ボタン（過去日以外・スタッフがいる場合）
+    if (!isPast && _staffList.length > 0) {
+      var gear = document.createElement('span');
+      gear.className = 'time-gear';
+      gear.textContent = '時間';
+      gear.onclick = (function (dk2) {
+        return function (e) {
+          e.preventDefault();
+          e.stopPropagation();
+          openTimeModal(dk2);
+        };
+      })(dk);
+      dateEl.appendChild(gear);
     }
     cell.appendChild(dateEl);
 
-    // スタッフチェック
     if (_staffList.length > 0) {
-      // 一括ON/OFFボタン
       if (!isPast) {
         var bulk = document.createElement('div');
         bulk.className = 'cell-bulk';
@@ -417,6 +590,7 @@
 
       var checks = document.createElement('div');
       checks.className = 'cell-checks';
+      var dayTimes = _shiftTimesMap[dk] || {};
       for (var i = 0; i < _staffList.length; i++) {
         (function (staff) {
           var lbl = document.createElement('label');
@@ -441,12 +615,258 @@
           lbl.appendChild(cname);
 
           checks.appendChild(lbl);
+
+          // 時間バッジ（このスタッフに区間設定があれば表示）
+          var ranges = dayTimes[staff.id];
+          if (ranges && ranges.length > 0) {
+            var tb = document.createElement('div');
+            tb.className = 'cell-check-time';
+            tb.textContent = _rangesToText(ranges);
+            checks.appendChild(tb);
+          }
         })(_staffList[i]);
       }
       cell.appendChild(checks);
     }
 
     return cell;
+  }
+
+  // 区間配列 → "10-13,14-18" のような短い文字列
+  function _rangesToText(ranges) {
+    var parts = [];
+    var i;
+    for (i = 0; i < ranges.length; i++) {
+      var s = (ranges[i].start || '').replace(':', '');
+      var e = (ranges[i].end || '').replace(':', '');
+      // 1030 → 10:30 のまま見せると長いので h のみ簡易表示。ただし分が00以外は残す
+      parts.push(_shortTime(ranges[i].start) + '-' + _shortTime(ranges[i].end));
+    }
+    return parts.join(',');
+  }
+  function _shortTime(hhmm) {
+    if (!hhmm) { return ''; }
+    var p = String(hhmm).split(':');
+    if (p.length !== 2) { return hhmm; }
+    if (p[1] === '00') { return String(parseInt(p[0], 10)); }
+    return parseInt(p[0], 10) + ':' + p[1];
+  }
+
+  /* ===== 出勤時間設定モーダル ===== */
+  function openTimeModal(dk) {
+    _modalDateKey = dk;
+    var body = document.getElementById('timeModalBody');
+    var title = document.getElementById('timeModalTitle');
+    title.textContent = _formatDateForModal(dk) + ' の出勤時間';
+
+    // 現在のチェック状態（マスのチェックボックス）を反映
+    var checkedNow = {};
+    var si;
+    for (si = 0; si < _staffList.length; si++) {
+      var cb = document.getElementById('chk_' + dk + '_' + _staffList[si].id);
+      if (cb && cb.checked) { checkedNow[_staffList[si].id] = true; }
+    }
+
+    var dayTimes = _shiftTimesMap[dk] || {};
+
+    var html = '';
+    html += '<div class="tmodal-note">出勤するスタッフごとに時間帯を設定できます。'
+          + '時間を追加しない場合は営業時間（' + esc(_openTime) + '〜' + esc(_closeTime) + '）'
+          + 'で出勤の扱いになります。中抜けがある場合は時間帯を複数追加してください。</div>';
+    body.innerHTML = html;
+
+    for (si = 0; si < _staffList.length; si++) {
+      var staff = _staffList[si];
+      var isOn = !!checkedNow[staff.id];
+      var ranges = dayTimes[staff.id] || [];
+      body.appendChild(_buildStaffTimeBlock(staff, isOn, ranges));
+    }
+
+    document.getElementById('timeModalOv').className = 'tmodal-ov show';
+  }
+  window.openTimeModal = openTimeModal;
+
+  function _buildStaffTimeBlock(staff, isOn, ranges) {
+    var block = document.createElement('div');
+    block.className = 'tstaff' + (isOn ? '' : ' is-off');
+    block.setAttribute('data-staffid', staff.id);
+
+    var head = document.createElement('div');
+    head.className = 'tstaff-head';
+    var dot = document.createElement('div');
+    dot.className = 'tstaff-dot';
+    dot.style.background = staff.color;
+    head.appendChild(dot);
+    var nm = document.createElement('div');
+    nm.className = 'tstaff-name';
+    nm.textContent = staff.name;
+    head.appendChild(nm);
+    // 出勤ON/OFFトグル
+    var onoffLbl = document.createElement('label');
+    onoffLbl.className = 'tstaff-onoff';
+    var onoffCb = document.createElement('input');
+    onoffCb.type = 'checkbox';
+    onoffCb.checked = isOn;
+    onoffCb.setAttribute('data-role', 'onoff');
+    onoffLbl.appendChild(onoffCb);
+    onoffLbl.appendChild(document.createTextNode('出勤'));
+    head.appendChild(onoffLbl);
+    block.appendChild(head);
+
+    // 区間リスト
+    var listWrap = document.createElement('div');
+    listWrap.className = 'trange-list';
+    listWrap.setAttribute('data-role', 'rangelist');
+    block.appendChild(listWrap);
+
+    var i;
+    if (ranges.length > 0) {
+      for (i = 0; i < ranges.length; i++) {
+        listWrap.appendChild(_buildRangeRow(ranges[i].start, ranges[i].end));
+      }
+    }
+
+    // デフォルト注記（区間が無いとき）
+    var defNote = document.createElement('div');
+    defNote.className = 'tdefault-note';
+    defNote.setAttribute('data-role', 'defnote');
+    defNote.textContent = '※時間帯なし＝営業時間どおり出勤';
+    defNote.style.display = (ranges.length === 0 && isOn) ? '' : 'none';
+    block.appendChild(defNote);
+
+    // 区間追加ボタン
+    var addBtn = document.createElement('button');
+    addBtn.className = 'trange-add';
+    addBtn.textContent = '＋ 時間帯を追加';
+    addBtn.onclick = function () {
+      var def = _defaultRange();
+      listWrap.appendChild(_buildRangeRow(def.start, def.end));
+      defNote.style.display = 'none';
+      // 追加したら出勤ONにする
+      onoffCb.checked = true;
+      block.className = 'tstaff';
+    };
+    block.appendChild(addBtn);
+
+    // ON/OFF切替時の見た目
+    onoffCb.addEventListener('change', function () {
+      if (onoffCb.checked) {
+        block.className = 'tstaff';
+        var rows = listWrap.querySelectorAll('.trange-row');
+        defNote.style.display = (rows.length === 0) ? '' : 'none';
+      } else {
+        block.className = 'tstaff is-off';
+        defNote.style.display = 'none';
+      }
+    });
+
+    return block;
+  }
+
+  function _buildRangeRow(start, end) {
+    var row = document.createElement('div');
+    row.className = 'trange-row';
+    var inS = document.createElement('input');
+    inS.type = 'time';
+    inS.value = start || _openTime;
+    inS.setAttribute('data-role', 'start');
+    row.appendChild(inS);
+    var tilde = document.createElement('span');
+    tilde.className = 'tilde';
+    tilde.textContent = '〜';
+    row.appendChild(tilde);
+    var inE = document.createElement('input');
+    inE.type = 'time';
+    inE.value = end || _closeTime;
+    inE.setAttribute('data-role', 'end');
+    row.appendChild(inE);
+    var del = document.createElement('button');
+    del.className = 'trange-del';
+    del.textContent = '\u2715';
+    del.onclick = function () {
+      var listWrap = row.parentNode;
+      row.parentNode.removeChild(row);
+      // 区間が0になったらデフォルト注記を出す（出勤ON時）
+      // closest を使わず親をたどる（古いSafari互換）
+      var block = listWrap;
+      while (block && block.className !== undefined &&
+             (' ' + block.className + ' ').indexOf(' tstaff ') < 0) {
+        block = block.parentNode;
+      }
+      if (block && block.querySelector) {
+        var onoff = block.querySelector('[data-role="onoff"]');
+        var defNote = block.querySelector('[data-role="defnote"]');
+        var rows = listWrap.querySelectorAll('.trange-row');
+        if (defNote && onoff) {
+          defNote.style.display = (rows.length === 0 && onoff.checked) ? '' : 'none';
+        }
+      }
+    };
+    row.appendChild(del);
+    return row;
+  }
+
+  function _defaultRange() {
+    return { start: _openTime, end: _closeTime };
+  }
+
+  // モーダルの内容を _shiftMap / _shiftTimesMap に反映（保存はまとめて保存で）
+  function applyTimeModal() {
+    var dk = _modalDateKey;
+    if (!dk) { closeTimeModal(); return; }
+    var body = document.getElementById('timeModalBody');
+    var blocks = body.querySelectorAll('.tstaff');
+    var newStaffIds = [];
+    var newTimes = {};
+    var i, j;
+    for (i = 0; i < blocks.length; i++) {
+      var block = blocks[i];
+      var staffId = block.getAttribute('data-staffid');
+      var onoff = block.querySelector('[data-role="onoff"]');
+      if (!onoff || !onoff.checked) { continue; } // 非出勤はスキップ
+      newStaffIds.push(staffId);
+
+      var rows = block.querySelectorAll('.trange-row');
+      var ranges = [];
+      for (j = 0; j < rows.length; j++) {
+        var s = rows[j].querySelector('[data-role="start"]').value;
+        var e = rows[j].querySelector('[data-role="end"]').value;
+        if (s && e && s < e) {
+          ranges.push({ start: s, end: e });
+        }
+      }
+      if (ranges.length > 0) {
+        newTimes[staffId] = ranges;
+      }
+      // 区間なし = 営業時間扱い。staffTimesには入れない
+    }
+
+    // バリデーション: 区間が start>=end のものは弾いた。空区間も無視。
+    _shiftMap[dk] = newStaffIds;
+    if (Object.keys(newTimes).length > 0) {
+      _shiftTimesMap[dk] = newTimes;
+    } else {
+      delete _shiftTimesMap[dk];
+    }
+
+    closeTimeModal();
+    renderCalendar();
+    uiToast('この日の設定を反映しました（まとめて保存を押すと確定）');
+  }
+  window.applyTimeModal = applyTimeModal;
+
+  function closeTimeModal() {
+    document.getElementById('timeModalOv').className = 'tmodal-ov';
+    _modalDateKey = null;
+  }
+  window.closeTimeModal = closeTimeModal;
+
+  function _formatDateForModal(dk) {
+    var p = String(dk).split('-');
+    if (p.length !== 3) { return dk; }
+    var DOWS = ['日','月','火','水','木','金','土'];
+    var dt = new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+    return parseInt(p[1], 10) + '月' + parseInt(p[2], 10) + '日（' + DOWS[dt.getDay()] + '）';
   }
 
   /* ===== まとめて保存 ===== */
@@ -459,7 +879,7 @@
 
     for (var d = 1; d <= daysInMonth; d++) {
       var dk = dateKey(new Date(_curYear, _curMonth, d));
-      if (dk < _today) { continue; } // 過去日はスキップ
+      if (dk < _today) { continue; }
 
       var checkedIds = [];
       for (var i = 0; i < _staffList.length; i++) {
@@ -467,15 +887,29 @@
         if (cb && cb.checked) { checkedIds.push(_staffList[i].id); }
       }
 
-      // チェックがある日 or 既存データがある日（解除も保存）
-      var hadData = !!_shiftMap[dk];
+      var hadData = !!_shiftMap[dk] || !!_shiftTimesMap[dk];
       if (checkedIds.length > 0 || hadData) {
-        batch.set(col.doc(dk), {
+        // staffTimes は出勤者のものだけ残す（チェック外れたスタッフの区間は破棄）
+        var times = _shiftTimesMap[dk] || {};
+        var cleanTimes = {};
+        var k;
+        for (k in times) {
+          if (!Object.prototype.hasOwnProperty.call(times, k)) { continue; }
+          if (checkedIds.indexOf(k) >= 0) { cleanTimes[k] = times[k]; }
+        }
+        var docData = {
           date: dk,
           staffIds: checkedIds,
+          staffTimes: cleanTimes,
           updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-        });
+        };
+        batch.set(col.doc(dk), docData);
         _shiftMap[dk] = checkedIds;
+        if (Object.keys(cleanTimes).length > 0) {
+          _shiftTimesMap[dk] = cleanTimes;
+        } else {
+          delete _shiftTimesMap[dk];
+        }
         count++;
       }
     }
@@ -494,6 +928,7 @@
         uiForceHideLoading();
         btn.disabled = false;
         uiToast('シフトを保存しました');
+        renderCalendar();
       })
       .catch(function (e) {
         uiForceHideLoading();
@@ -524,6 +959,12 @@
     var m  = ('0' + (d.getMonth() + 1)).slice(-2);
     var dd = ('0' + d.getDate()).slice(-2);
     return y + '-' + m + '-' + dd;
+  }
+
+  function esc(s) {
+    s = (s == null) ? '' : String(s);
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
   }
 
 })();
