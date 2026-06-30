@@ -235,7 +235,6 @@
 </style>
 </head>
 <body>
-<div id="debugBanner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:#000;color:#0f0;font-size:11px;font-family:monospace;padding:4px 8px;white-space:pre-wrap;max-height:120px;overflow-y:auto;"></div>
 <div class="wrap">
   <div class="hdr">
     <div class="hdr-salon" id="hdrSalon">読み込み中...</div>
@@ -319,10 +318,6 @@ var auth = null;
 // ------------------------------------------------------------
 function $(id){ return document.getElementById(id); }
 
-function debugLog(msg){
-  var b = document.getElementById('debugBanner');
-  if (b){ b.textContent += msg + '\n'; }
-}
 
 function esc(s){
   if (s == null) return '';
@@ -406,7 +401,6 @@ function updateStepsBar(){
 
 // 画面遷移の中心：step を変えて再描画
 function goStep(step){
-  if (typeof debugLog === 'function') { debugLog('[goStep] ' + appState.step + ' -> ' + step); }
   appState.step = step;
   appState.busy = false;
   window.scrollTo(0, 0);
