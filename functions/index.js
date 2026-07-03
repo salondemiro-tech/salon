@@ -794,6 +794,42 @@ exports.getAvailableSlots = onCall(
       : [];
     const shiftSet = new Set(shiftStaffIds);
 
+    // フェーズ2（出勤時間）: staffTimes { staffId: [{start,end}] }
+    //   区間が設定されているスタッフは、その区間内のスロットだけ受付可能。
+    //   区間が無い出勤スタッフは営業時間どおり（従来動作）。
+    const staffTimesRaw = (shiftDoc.exists && shiftDoc.data().staffTimes &&
+      typeof shiftDoc.data().staffTimes === 'object')
+      ? shiftDoc.data().staffTimes : {};
+    // staffId -> [{startMin, endMin}] に正規化
+    const staffTimeRanges = {};
+    for (const sid in staffTimesRaw) {
+      if (!Object.prototype.hasOwnProperty.call(staffTimesRaw, sid)) continue;
+      const arr = staffTimesRaw[sid];
+      if (!Array.isArray(arr)) continue;
+      const ranges = [];
+      for (const r of arr) {
+        if (!r || !r.start || !r.end) continue;
+        const s = hhmmToMin(r.start);
+        const e = hhmmToMin(r.end);
+        if (!isNaN(s) && !isNaN(e) && e > s) {
+          ranges.push({ startMin: s, endMin: e });
+        }
+      }
+      if (ranges.length > 0) staffTimeRanges[sid] = ranges;
+    }
+
+    // スタッフ sid が [slotStart, slotEnd) を出勤時間でカバーしているか
+    //   - 区間未設定 = 営業時間扱い（常にtrue。営業時間チェックは別途 latestStart 等で担保）
+    //   - 区間あり   = いずれかの区間が slot を完全に内包していればtrue
+    function staffCoversSlot(sid, slotStart, slotEnd) {
+      const ranges = staffTimeRanges[sid];
+      if (!ranges || ranges.length === 0) return true; // 営業時間どおり
+      for (const rg of ranges) {
+        if (slotStart >= rg.startMin && slotEnd <= rg.endMin) return true;
+      }
+      return false;
+    }
+
     // CANCEL_STATUSES
     const CANCEL_STATUSES = new Set([
       'cancelled', 'cancelled_by_customer', 'cancelled_by_salon',
@@ -908,7 +944,9 @@ exports.getAvailableSlots = onCall(
             ? [nominatedStaffId]
             : eligibleStaffIds;
           const availableStaff = targetStaffIds.filter(sid =>
-            shiftSet.has(sid) && !busyStaffIds.has(sid)
+            shiftSet.has(sid) &&
+            !busyStaffIds.has(sid) &&
+            staffCoversSlot(sid, slotStart, slotEnd)
           );
           if (availableStaff.length === 0) { available = false; }
 
