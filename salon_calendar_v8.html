@@ -646,6 +646,7 @@
   var _planId    = 'solo';  // 'solo' | 'team'
   var _staffList = [];      // [{id, name, color}]
   var _shiftMap  = {};      // { 'YYYY-MM-DD': [staffId,...] }
+  var _shiftTimesMap = {};  // { 'YYYY-MM-DD': {staffId:[{startMin,endMin}]} } 出勤時間区間
   var _salonId   = null;
 
   function pad2(n) {
@@ -678,6 +679,47 @@
     s = (s == null) ? '' : String(s);
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
             .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+  // "HH:MM" → 分。不正は NaN
+  function _hhmmToMin(hhmm) {
+    if (!hhmm) { return NaN; }
+    var p = String(hhmm).split(':');
+    if (p.length !== 2) { return NaN; }
+    var h = parseInt(p[0], 10), m = parseInt(p[1], 10);
+    if (isNaN(h) || isNaN(m)) { return NaN; }
+    return h * 60 + m;
+  }
+  // shiftDoc.staffTimes を {staffId:[{startMin,endMin}]} に正規化
+  function _normStaffTimes(staffTimes) {
+    var out = {};
+    if (!staffTimes || typeof staffTimes !== 'object') { return out; }
+    var sid;
+    for (sid in staffTimes) {
+      if (!Object.prototype.hasOwnProperty.call(staffTimes, sid)) { continue; }
+      var arr = staffTimes[sid];
+      if (!(arr instanceof Array)) { continue; }
+      var ranges = [];
+      var i;
+      for (i = 0; i < arr.length; i++) {
+        if (!arr[i] || !arr[i].start || !arr[i].end) { continue; }
+        var s = _hhmmToMin(arr[i].start);
+        var e = _hhmmToMin(arr[i].end);
+        if (!isNaN(s) && !isNaN(e) && e > s) { ranges.push({ startMin: s, endMin: e }); }
+      }
+      if (ranges.length > 0) { out[sid] = ranges; }
+    }
+    return out;
+  }
+  // スタッフ sid が [aStart, aEnd)（分）を出勤時間でカバーするか
+  //   区間未設定 = 営業時間扱い（true）。区間ありは完全内包で true。
+  function _staffCovers(normTimes, sid, aStart, aEnd) {
+    var ranges = normTimes[sid];
+    if (!ranges || ranges.length === 0) { return true; }
+    var i;
+    for (i = 0; i < ranges.length; i++) {
+      if (aStart >= ranges[i].startMin && aEnd <= ranges[i].endMin) { return true; }
+    }
+    return false;
   }
   function formatDateKey(dk) {
     if (!dk) { return ''; }
@@ -1258,6 +1300,16 @@
       .collection('shifts').doc(dk).get()
       .then(function(shiftDoc) {
         var shiftIds = shiftDoc.exists ? (shiftDoc.data().staffIds || []) : [];
+        // 出勤時間区間（あれば）。予約の時間帯にカバーされるかで「出勤中」を判定
+        var normTimes = _normStaffTimes(shiftDoc.exists ? shiftDoc.data().staffTimes : null);
+        // この予約の時間帯（分）
+        var apStart = _hhmmToMin(appt.start);
+        var apEnd = appt.end ? _hhmmToMin(appt.end) : NaN;
+        if (isNaN(apEnd)) {
+          var durA = (typeof appt.durationSnapshot === 'number') ? appt.durationSnapshot
+                   : (typeof appt.durationMin === 'number') ? appt.durationMin : 60;
+          apEnd = (isNaN(apStart) ? 0 : apStart) + durA;
+        }
         // モーダルを動的に作成
         var ov = document.createElement('div');
         ov.className = 'modal-ov show';
@@ -1269,16 +1321,28 @@
         // 未割当オプション
         html += '<div class="detail-row" style="cursor:pointer;padding:12px 0;" data-assignid="">' +
           '<span style="font-size:14px;">未割当（オーナーが後で割り当て）</span></div>';
-        // スタッフ一覧（出勤中は強調）
+        // スタッフ一覧（この予約の時間に出勤しているか）
         var i;
         for (i = 0; i < _staffList.length; i++) {
           var s = _staffList[i];
-          var isOn = shiftIds.indexOf(s.id) >= 0;
+          var onDay = shiftIds.indexOf(s.id) >= 0;
+          // その日出勤 かつ 予約時間帯をカバー = 対応可能
+          var covers = onDay && !isNaN(apStart) && !isNaN(apEnd)
+            ? _staffCovers(normTimes, s.id, apStart, apEnd)
+            : onDay;
+          var badge;
+          if (!onDay) {
+            badge = '<span style="font-size:11px;color:var(--mu);margin-left:8px;">休み</span>';
+          } else if (covers) {
+            badge = '<span style="font-size:11px;color:var(--gn);margin-left:8px;">出勤中</span>';
+          } else {
+            badge = '<span style="font-size:11px;color:var(--rd,#c47b7b);margin-left:8px;">時間外</span>';
+          }
           html += '<div class="detail-row" style="cursor:pointer;padding:12px 0;' +
             (appt.staffId === s.id ? 'background:var(--al);' : '') + '" data-assignid="' + esc(s.id) + '">' +
             '<span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:' + esc(s.color) + ';margin-right:8px;"></span>' +
             '<span style="font-size:14px;font-weight:' + (appt.staffId === s.id ? '600' : '400') + ';">' + esc(s.name) + '</span>' +
-            (isOn ? '<span style="font-size:11px;color:var(--gn);margin-left:8px;">出勤中</span>' : '<span style="font-size:11px;color:var(--mu);margin-left:8px;">休み</span>') +
+            badge +
             '</div>';
         }
         html += '</div><div class="modal-actions">' +
@@ -2270,6 +2334,7 @@
       var settDoc  = results[2];
 
       _shiftMap[dk] = shiftDoc.exists ? (shiftDoc.data().staffIds || []) : [];
+      _shiftTimesMap[dk] = _normStaffTimes(shiftDoc.exists ? shiftDoc.data().staffTimes : null);
 
       var appts = [];
       var CANCEL = { cancelled:1, cancelled_by_customer:1, cancelled_by_salon:1, no_show:1, time_conflict:1, failed:1 };
@@ -2307,6 +2372,23 @@
       return;
     }
     var shiftIds = _shiftMap[dk] || [];
+    var dayTimes = _shiftTimesMap[dk] || {};
+
+    // 出勤区間を短い文字列にする（ヘッダー表示用）
+    function _rangesLabel(sid) {
+      var ranges = dayTimes[sid];
+      if (!ranges || ranges.length === 0) { return ''; }
+      var parts = [];
+      var ri;
+      for (ri = 0; ri < ranges.length; ri++) {
+        parts.push(_minShort(ranges[ri].startMin) + '-' + _minShort(ranges[ri].endMin));
+      }
+      return parts.join(',');
+    }
+    function _minShort(min) {
+      var h = Math.floor(min / 60), m = min % 60;
+      return (m === 0) ? String(h) : (h + ':' + (m < 10 ? '0' + m : m));
+    }
 
     // グリッド列数: 時間ラベル列 + スタッフ数
     var cols = '42px repeat(' + nStaff + ', 1fr)';
@@ -2321,9 +2403,12 @@
       var isOn = shiftIds.indexOf(s.id) >= 0;
       var sdl = document.createElement('div');
       sdl.className = 'sdl' + (isOn ? '' : ' off-shift');
+      var timeLabel = isOn ? _rangesLabel(s.id) : '';
       sdl.innerHTML = esc(s.name)
         + '<span class="staff-color-bar" style="background:' + esc(s.color) + ';"></span>'
-        + (isOn ? '' : '<br><span style="font-size:9px;">休み</span>');
+        + (isOn
+            ? (timeLabel ? '<br><span style="font-size:8px;color:var(--ac);">' + esc(timeLabel) + '</span>' : '')
+            : '<br><span style="font-size:9px;">休み</span>');
       dowRow.appendChild(sdl);
     }
 
@@ -2331,6 +2416,22 @@
     var grid = document.getElementById('dayTimeGrid');
     grid.style.gridTemplateColumns = cols;
     grid.innerHTML = '';
+
+    // スタッフ sid が hour台（hour:00〜hour+1:00）に出勤しているか
+    //   区間未設定 = 営業時間扱いで出勤（true）。区間ありは重なりで判定。
+    function _staffOnAtHour(sid, hour) {
+      if (shiftIds.indexOf(sid) < 0) { return false; } // その日休み
+      var ranges = dayTimes[sid];
+      if (!ranges || ranges.length === 0) { return true; } // 営業時間どおり
+      var hStart = hour * 60;
+      var hEnd = (hour + 1) * 60;
+      var ri;
+      for (ri = 0; ri < ranges.length; ri++) {
+        // 少しでも重なっていればその時間帯は出勤色にする
+        if (hStart < ranges[ri].endMin && hEnd > ranges[ri].startMin) { return true; }
+      }
+      return false;
+    }
 
     var daysCols = []; // { col, hour, si }
     var hour, ci;
@@ -2340,7 +2441,7 @@
       tlabel.textContent = hour + ':00';
       grid.appendChild(tlabel);
       for (ci = 0; ci < nStaff; ci++) {
-        var isOnShift = shiftIds.indexOf(_staffList[ci].id) >= 0;
+        var isOnShift = _staffOnAtHour(_staffList[ci].id, hour);
         var col = document.createElement('div');
         col.className = 'day-col' + (isOnShift ? '' : ' off-shift');
         grid.appendChild(col);
