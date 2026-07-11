@@ -10,7 +10,8 @@
 //   5. resolveOrClaimCustomer (callable)
 //   6. executeMergeCustomers (callable) ← 2026/6/7 追加
 //
-// 最終改訂: 2026/6/7 顧客統合機能追加
+// 最終改訂: 2026/7/11 createSalonCheckoutSession に
+//           重複サブスクリプション防止チェックを追加
 // ========================================
 
 const { onRequest, onCall, HttpsError } = require('firebase-functions/v2/https');
@@ -1294,6 +1295,9 @@ async function backfillAuthUidOnPastAppointments(db, salonId, customerDocId, uid
 //     A. createSalonCheckoutSession (callable)
 //        - ログイン済みサロンオーナーが呼ぶ
 //        - 14日トライアル付きサブスクの Checkout ページURLを返す
+//        - ★ 2026/7/11 修正: 既に trial/active 中のサロンが
+//          再度このFunctionを呼んでも、2本目のサブスクを
+//          作成しないようにガードを追加（二重課金防止）
 //     B. stripeWebhook (onRequest)
 //        - Stripe からの通知を受けて config/settings の
 //          planStatus / stripeCustomerId / stripeSubscriptionId を更新
@@ -1361,6 +1365,17 @@ exports.createSalonCheckoutSession = onCall(
       const settingsSnap = await settingsRef.get();
       const settings = settingsSnap.exists ? settingsSnap.data() : {};
 
+      // ★ 2026/7/11 追加: 二重サブスク防止ガード
+      //   既に trial または active のプランに加入済みの場合、
+      //   新しい Checkout セッション（＝新しいサブスク）は作らせない。
+      //   past_due / canceled は再登録を許可する。
+      if (settings.planStatus === 'trial' || settings.planStatus === 'active') {
+        throw new HttpsError(
+          'failed-precondition',
+          'すでにプランにご登録済みです。プランの変更・解約は「プラン管理」からお願いします。'
+        );
+      }
+
       let customerId = settings.stripeCustomerId || null;
 
       if (!customerId) {
@@ -1392,6 +1407,10 @@ exports.createSalonCheckoutSession = onCall(
       logger.info('Checkout session created', { salonId, sessionId: session.id });
       return { url: session.url };
     } catch (err) {
+      // HttpsError（上のガードで投げたもの含む）はそのまま再スロー
+      if (err instanceof HttpsError) {
+        throw err;
+      }
       logger.error('createSalonCheckoutSession error', { error: err.message, salonId });
       throw new HttpsError('internal', '決済ページの作成に失敗しました: ' + err.message);
     }
