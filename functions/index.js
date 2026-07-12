@@ -1452,18 +1452,38 @@ exports.stripeWebhook = onRequest(
         }
 
         // サブスク解約
+        //   ★ 2026/7/12 修正: 過去の名残りで同じ salonId に紐づく
+        //   サブスクが複数存在していた場合、「今トラッキング中でない
+        //   古いサブスク」の削除イベントで Firestore を上書きしない
+        //   ようにガードする（過去に実際に発生した事故: 古い方を
+        //   Stripe側でキャンセルしたら、有効な新しい方の planStatus
+        //   まで 'canceled' に化けてしまった）。
         case 'customer.subscription.deleted': {
           const sub = event.data.object;
           const salonId = (sub.metadata && sub.metadata.salonId) || null;
           if (salonId) {
-            await db.collection('salons').doc(salonId)
-              .collection('config').doc('settings')
-              .set({
+            const settingsRef = db.collection('salons').doc(salonId)
+              .collection('config').doc('settings');
+            const settingsSnap = await settingsRef.get();
+            const currentSubId = settingsSnap.exists
+              ? (settingsSnap.data().stripeSubscriptionId || null)
+              : null;
+
+            // 今 Firestore がトラッキングしているサブスクIDと一致する
+            // 場合のみ canceled を反映する。一致しない（＝古い/別の
+            // サブスクの削除イベント）場合は無視する。
+            if (!currentSubId || currentSubId === sub.id) {
+              await settingsRef.set({
                 planStatus: 'canceled',
                 stripeSubscriptionId: sub.id,
                 planUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
               }, { merge: true });
-            logger.info('subscription canceled', { salonId });
+              logger.info('subscription canceled', { salonId, subId: sub.id });
+            } else {
+              logger.warn('Ignored deleted event for non-tracked subscription', {
+                salonId, deletedSubId: sub.id, trackedSubId: currentSubId
+              });
+            }
           }
           break;
         }
@@ -1498,7 +1518,31 @@ exports.stripeWebhook = onRequest(
 );
 
 // サブスクの status を planStatus に反映する
+//   ★ 2026/7/12 修正: 同じ salonId に複数のサブスクが紐づいている
+//   状態（本来はcreateSalonCheckoutSession側のガードで防止される
+//   が、念のための二重の安全策）で、古い方のサブスクの更新イベント
+//   が新しい方の状態を上書きしないようにする。
+//   反映するのは次のいずれかの場合のみ:
+//     - まだ何もトラッキングしていない（初回登録）
+//     - イベント対象が今トラッキング中のサブスクIDと同じ（通常の更新）
+//     - 今の状態が canceled（＝解約後の新規登録として置き換わる）
 async function applySubscriptionState(salonId, sub) {
+  const settingsRef = db.collection('salons').doc(salonId)
+    .collection('config').doc('settings');
+  const settingsSnap = await settingsRef.get();
+  const current = settingsSnap.exists ? settingsSnap.data() : {};
+  const currentSubId = current.stripeSubscriptionId || null;
+
+  const isSameSubscription = !currentSubId || currentSubId === sub.id;
+  const isReplacingCanceled = current.planStatus === 'canceled';
+
+  if (!isSameSubscription && !isReplacingCanceled) {
+    logger.warn('Ignored subscription event for non-tracked subscription', {
+      salonId, eventSubId: sub.id, trackedSubId: currentSubId, trackedStatus: current.planStatus
+    });
+    return;
+  }
+
   // Stripe status: trialing / active / past_due / canceled / unpaid / incomplete...
   let planStatus;
   if (sub.status === 'trialing') {
@@ -1524,9 +1568,7 @@ async function applySubscriptionState(salonId, sub) {
     update.trialEndsAt = admin.firestore.Timestamp.fromMillis(sub.trial_end * 1000);
   }
 
-  await db.collection('salons').doc(salonId)
-    .collection('config').doc('settings')
-    .set(update, { merge: true });
+  await settingsRef.set(update, { merge: true });
 
   logger.info('subscription state applied', { salonId, planStatus });
 }
