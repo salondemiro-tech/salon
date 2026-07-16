@@ -214,6 +214,9 @@ nav {
   background: var(--green-l); color: var(--green);
   border-radius: 50px; font-size: 11px; font-weight: 700;
 }
+.feature-tag.multi {
+  background: var(--beige2); color: var(--brown-d);
+}
 
 /* ===== STEPS ===== */
 .steps {
@@ -243,8 +246,17 @@ nav {
 
 /* ===== PRICE ===== */
 .price-section { background: var(--beige); }
+.price-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 28px;
+  max-width: 900px; margin: 52px auto 0;
+  align-items: start;
+}
+@media (max-width: 720px) {
+  .price-grid { grid-template-columns: 1fr; max-width: 480px; }
+}
 .price-card {
-  max-width: 480px; margin: 52px auto 0;
   background: var(--white);
   border: 2px solid var(--brown-l);
   border-radius: 26px;
@@ -382,7 +394,7 @@ footer a:hover { color: var(--brown); }
     <img src="torita_logo.png" alt="TORITA">
   </div>
 
-  <div class="hero-badge">✦ 個人サロン専用 予約管理アプリ</div>
+  <div class="hero-badge">✦ 1人〜10人の小規模サロン専用 予約管理アプリ</div>
 
   <h1>
     サロンオーナーが作ったからわかる！<br>
@@ -404,7 +416,8 @@ footer a:hover { color: var(--brown); }
   </div>
 
   <div class="hero-price-hint">
-    トライアル終了後は <strong>¥1,500</strong>/月（税別）で全機能をご利用いただけます
+    トライアル終了後は <strong>¥1,500</strong>/月（税別）で全機能をご利用いただけます<br>
+    スタッフ2〜10名のサロン向け <strong>Multi Staff Plan</strong>（¥3,000/月〜）もあります
   </div>
 </section>
 
@@ -464,6 +477,30 @@ footer a:hover { color: var(--brown); }
         <span class="feature-tag">標準装備</span>
       </div>
 
+      <div class="feature-card">
+        <div class="feature-card-accent"></div>
+        <div class="feature-icon">🗓️</div>
+        <h3>スタッフ別シフト管理</h3>
+        <p>スタッフごとに出勤日・出勤時間帯を個別設定。中抜け休憩がある日も、時間帯ごとに細かく分けて登録できます。</p>
+        <span class="feature-tag multi">複数人プラン</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card-accent"></div>
+        <div class="feature-icon">🙋</div>
+        <h3>スタッフ指名予約</h3>
+        <p>お客様が予約時にスタッフを指名可能。指名したスタッフの出勤状況に応じて予約可能時間が自動で絞り込まれます。</p>
+        <span class="feature-tag multi">複数人プラン</span>
+      </div>
+
+      <div class="feature-card">
+        <div class="feature-card-accent"></div>
+        <div class="feature-icon">🪑</div>
+        <h3>スタッフ・設備の紐付け</h3>
+        <p>ベッドや個室などの設備をスタッフや予約に紐付けて管理。人と設備、両方の空き状況を見ながら予約を受け付けられます。</p>
+        <span class="feature-tag multi">複数人プラン</span>
+      </div>
+
     </div>
   </div>
 </section>
@@ -502,27 +539,53 @@ footer a:hover { color: var(--brown); }
 <section class="section price-section">
   <div class="section-inner" style="text-align:center;">
     <div class="section-label">Pricing</div>
-    <h2 class="section-title">シンプルな料金体系。</h2>
-    <p class="section-desc" style="margin:0 auto;">プランは1つだけ。全機能が使えます。</p>
-    <div class="price-card">
-      <div class="price-card-ribbon">✦ 全機能込み</div>
-      <div class="plan-name">Standard Plan</div>
-      <div class="price-amount"><sup>¥</sup>1,500</div>
-      <div class="amount-note">/ 月（税別）· いつでも解約可能</div>
-      <hr class="price-divider">
-      <ul class="price-list">
-        <li>写真付き顧客カルテ（無制限）</li>
-        <li>オンライン予約受付・管理</li>
-        <li>インターバル自動設定</li>
-        <li>曜日・時間の一括ブロック</li>
-        <li>顧客統合機能</li>
-        <li>デジタルスタンプカード</li>
-        <li>キャンセル料自動計算・通知メール</li>
-        <li>お客様専用予約アプリ（ブラウザ）</li>
-      </ul>
-      <div class="price-trial">🎁 最初の14日間は完全無料でお試しいただけます</div>
-      <a class="btn-price" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">無料トライアルを始める</a>
-      <p class="price-cancel">いつでも解約できます · 違約金なし</p>
+    <h2 class="section-title">サロンの人数に合わせて選べます。</h2>
+    <p class="section-desc" style="margin:0 auto;">1人サロンでも、スタッフがいるサロンでも。</p>
+    <div class="price-grid">
+      <div class="price-card">
+        <div class="price-card-ribbon">✦ 1人サロン向け</div>
+        <div class="plan-name">Standard Plan</div>
+        <div class="price-amount"><sup>¥</sup>1,500</div>
+        <div class="amount-note">/ 月（税別）· いつでも解約可能</div>
+        <hr class="price-divider">
+        <ul class="price-list">
+          <li>写真付き顧客カルテ（無制限）</li>
+          <li>オンライン予約受付・管理</li>
+          <li>インターバル自動設定</li>
+          <li>曜日・時間の一括ブロック</li>
+          <li>顧客統合機能</li>
+          <li>デジタルスタンプカード</li>
+          <li>キャンセル料自動計算・通知メール</li>
+          <li>お客様専用予約アプリ（ブラウザ）</li>
+        </ul>
+        <div class="price-trial">🎁 最初の14日間は完全無料でお試しいただけます</div>
+        <a class="btn-price" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">無料トライアルを始める</a>
+        <p class="price-cancel">いつでも解約できます · 違約金なし</p>
+      </div>
+      <div class="price-card">
+        <div class="price-card-ribbon">✦ スタッフ2〜10名</div>
+        <div class="plan-name">Multi Staff Plan</div>
+        <div class="price-amount"><sup>¥</sup>3,000</div>
+        <div class="amount-note">/ 月（税別）· スタッフ10名まで</div>
+        <hr class="price-divider">
+        <ul class="price-list">
+          <li>写真付き顧客カルテ（無制限）</li>
+          <li>オンライン予約受付・管理</li>
+          <li>インターバル自動設定</li>
+          <li>曜日・時間の一括ブロック</li>
+          <li>顧客統合機能</li>
+          <li>デジタルスタンプカード</li>
+          <li>キャンセル料自動計算・通知メール</li>
+          <li>お客様専用予約アプリ（ブラウザ）</li>
+          <li>スタッフ最大10名まで登録</li>
+          <li>スタッフ別シフト・出勤時間管理</li>
+          <li>スタッフ指名での予約受付</li>
+          <li>スタッフ・設備の紐付け管理</li>
+        </ul>
+        <div class="price-trial">🎁 最初の14日間は完全無料でお試しいただけます</div>
+        <a class="btn-price" href="https://salondemiro-tech.github.io/salon/salon_auth_v2_new.html">無料トライアルを始める</a>
+        <p class="price-cancel">いつでも解約できます · 違約金なし</p>
+      </div>
     </div>
   </div>
 </section>
