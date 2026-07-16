@@ -64,8 +64,25 @@
     line-height:1.8; margin-bottom:20px;
   }
   .plan{
-    background:var(--sf); border:1px solid var(--bd);
-    border-radius:14px; padding:22px; margin-bottom:18px;
+    background:var(--sf); border:2px solid var(--bd);
+    border-radius:14px; padding:22px; margin-bottom:12px;
+    cursor:pointer; transition:border-color .15s, background .15s;
+  }
+  .plan.selected{
+    border-color:var(--ac); background:#fff;
+  }
+  .plan-radio{
+    display:flex; align-items:center; justify-content:center;
+    gap:6px; font-size:11px; font-weight:600; letter-spacing:.06em;
+    color:var(--ac); margin-bottom:8px;
+  }
+  .plan-radio .dot{
+    width:14px; height:14px; border-radius:50%;
+    border:2px solid var(--ac); flex:none; position:relative;
+  }
+  .plan.selected .plan-radio .dot::after{
+    content:''; position:absolute; inset:2px;
+    border-radius:50%; background:var(--ac);
   }
   .plan-name{
     font-size:12px; font-weight:600; letter-spacing:.08em;
@@ -148,8 +165,8 @@
       気に入らなければ、いつでも解約できます。
     </p>
 
-    <div class="plan">
-      <div class="plan-name">1人サロン向けプラン</div>
+    <div class="plan selected" id="planCard-solo" onclick="selectPlan('solo')">
+      <div class="plan-radio"><span class="dot"></span>1人サロン向けプラン</div>
       <div class="plan-price">
         <span class="amt"><sup>¥</sup>1,500</span>
         <span class="per">/ 月（税別）</span>
@@ -164,6 +181,23 @@
         <li>予約・キャンセル通知メール</li>
       </ul>
     </div>
+
+    <div class="plan" id="planCard-multi" onclick="selectPlan('multi')">
+      <div class="plan-radio"><span class="dot"></span>複数人スタッフ向けプラン</div>
+      <div class="plan-price">
+        <span class="amt"><sup>¥</sup>3,000</span>
+        <span class="per">/ 月（税別・スタッフ10名まで）</span>
+      </div>
+      <div class="plan-note">トライアル終了後・税込 ¥3,300</div>
+      <ul class="plan-list">
+        <li>1人サロン向けプランの全機能</li>
+        <li>スタッフ最大10名まで登録</li>
+        <li>スタッフ別シフト・出勤時間管理</li>
+        <li>スタッフ指名での予約受付</li>
+      </ul>
+    </div>
+
+    <div style="margin-bottom:6px;"></div>
 
     <div class="trial-banner">
       🎁 最初の14日間は一切費用がかかりません
@@ -203,6 +237,18 @@
 <!-- ===== 画面固有スクリプト ===== -->
 <script>
 (function () {
+
+  // ★ 2026/7/16 追加: 選択中のプラン種別（'solo' / 'multi'）
+  var _selectedPlan = 'solo';
+
+  function selectPlan(planType) {
+    _selectedPlan = (planType === 'multi') ? 'multi' : 'solo';
+    var solo = document.getElementById('planCard-solo');
+    var multi = document.getElementById('planCard-multi');
+    if (solo) { solo.classList.toggle('selected', _selectedPlan === 'solo'); }
+    if (multi) { multi.classList.toggle('selected', _selectedPlan === 'multi'); }
+  }
+  window.selectPlan = selectPlan;
 
   function show(id) {
     var el = document.getElementById(id);
@@ -245,7 +291,7 @@
     var fns = firebase.app().functions('asia-northeast1');
     var callable = fns.httpsCallable('createSalonCheckoutSession');
 
-    callable({}).then(function (res) {
+    callable({ planType: _selectedPlan }).then(function (res) {
       var url = res && res.data && res.data.url;
       if (url) {
         window.location.href = url;   // Stripe Checkout へ
