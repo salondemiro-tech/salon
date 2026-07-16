@@ -1579,6 +1579,11 @@ async function applySubscriptionState(salonId, sub) {
   // ★ 2026/7/16 追加: サブスクの metadata.planType を Firestore に反映
   //   （'solo' / 'multi'）。metadata が無い古いサブスクは 'solo' 扱い。
   update.planType = (sub.metadata && sub.metadata.planType) || 'solo';
+  // ★ 2026/7/16 追加: アプリのUI分岐が見ている planId も同時に同期する。
+  //   salon_calendar_v8 / salon_menus_v1 / salon_dashboard_v1 / customer_app_v2 は
+  //   すべて planId === 'team' でチーム機能表示を判定しているため、
+  //   planType だけ更新しても実際のUIは切り替わらない。ここで揃える。
+  update.planId = (update.planType === 'multi') ? 'team' : 'solo';
   // トライアル終了予定（参考表示用。判定には使わない）
   if (sub.trial_end) {
     update.trialEndsAt = admin.firestore.Timestamp.fromMillis(sub.trial_end * 1000);
