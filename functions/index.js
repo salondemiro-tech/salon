@@ -1328,8 +1328,17 @@ const Stripe = require('stripe');
 //   ★ 本番リリース時に TEST → LIVE の price_ID へ1行差し替える。
 //      テスト: price_1TeJD5L5ab685f4daJW8vvOh
 //      本番:   price_1TeJ3BL5ab685f4d1EkdnmuT
-const STRIPE_PRICE_ID = 'price_1TeJ3BL5ab685f4d1EkdnmuT'; // 本番用
+//   ★ 2026/7/16 追加: 複数人プラン（〜10名 / 月額3,000円）用の price_ID。
+//      Stripeダッシュボードで商品・価格を作成後、下記を実際の price_ID に置き換える。
+const STRIPE_PRICE_ID_SOLO = 'price_1TeJ3BL5ab685f4d1EkdnmuT'; // 本番用・1人サロン向け
+const STRIPE_PRICE_ID_MULTI = 'price_1TtiMxL5ab685f4dMSl72Oip'; // 本番用・複数人プラン（〜10名）
 const APP_BASE_URL = 'https://torita-app.com';
+
+// planType → price_ID の対応表
+const PLAN_PRICE_MAP = {
+  solo: STRIPE_PRICE_ID_SOLO,
+  multi: STRIPE_PRICE_ID_MULTI
+};
 
 function getStripe() {
   const key = process.env.STRIPE_SECRET_KEY;
@@ -1350,9 +1359,13 @@ exports.createSalonCheckoutSession = onCall(
     // salonId == Auth UID (Phase1)
     const salonId = uid;
 
-    const priceId = STRIPE_PRICE_ID;
+    // ★ 2026/7/16 追加: プラン種別（solo / multi）。未指定・不正値は solo 扱い。
+    const requestedPlanType = (request.data && request.data.planType) || 'solo';
+    const planType = (requestedPlanType === 'multi') ? 'multi' : 'solo';
+
+    const priceId = PLAN_PRICE_MAP[planType];
     if (!priceId) {
-      throw new HttpsError('failed-precondition', 'STRIPE_PRICE_ID が未設定です。');
+      throw new HttpsError('failed-precondition', 'price_ID が未設定です。');
     }
     const baseUrl = APP_BASE_URL;
 
@@ -1398,13 +1411,13 @@ exports.createSalonCheckoutSession = onCall(
         line_items: [{ price: priceId, quantity: 1 }],
         subscription_data: {
           trial_period_days: 14,
-          metadata: { salonId: salonId }
+          metadata: { salonId: salonId, planType: planType }
         },
         success_url: baseUrl + '/salon_dashboard_v1.html?checkout=success',
         cancel_url: baseUrl + '/salon_billing_v1.html?checkout=cancel'
       });
 
-      logger.info('Checkout session created', { salonId, sessionId: session.id });
+      logger.info('Checkout session created', { salonId, planType, sessionId: session.id });
       return { url: session.url };
     } catch (err) {
       // HttpsError（上のガードで投げたもの含む）はそのまま再スロー
@@ -1563,6 +1576,9 @@ async function applySubscriptionState(salonId, sub) {
     stripeCustomerId: sub.customer,
     planUpdatedAt: admin.firestore.FieldValue.serverTimestamp()
   };
+  // ★ 2026/7/16 追加: サブスクの metadata.planType を Firestore に反映
+  //   （'solo' / 'multi'）。metadata が無い古いサブスクは 'solo' 扱い。
+  update.planType = (sub.metadata && sub.metadata.planType) || 'solo';
   // トライアル終了予定（参考表示用。判定には使わない）
   if (sub.trial_end) {
     update.trialEndsAt = admin.firestore.Timestamp.fromMillis(sub.trial_end * 1000);
