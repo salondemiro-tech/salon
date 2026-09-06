@@ -1885,3 +1885,183 @@ exports.executeMergeCustomers = onCall(
     }
   }
 );
+
+// ============================================================
+// ★2026/9 画像からメニュー自動抽出 (callable)
+//   入力: request.data.images = [{ mediaType, data(base64) }, ...]（複数可）
+//         request.data.categories = ['フェイシャル', ...]（任意・マッピングのヒント）
+//   出力: { ok:true, items:[{name, price, duration, category, description, type}] }
+//         読み取れない項目は null。保存はせず、確認/編集は画面側で人間が行う。
+//   Secret: ANTHROPIC_API_KEY（Secret Manager に登録）
+//   ※ カルテマップ等で使用中の既存 Anthropic キーをそのまま登録可。
+// ============================================================
+const ANTHROPIC_MODEL = 'claude-haiku-4-5-20251001'; // 精度を上げたい場合は 'claude-sonnet-5' に変更
+const IMPORT_MAX_IMAGES = 4;
+const IMPORT_MAX_B64_LEN = 4500000; // 1枚あたり base64 長の上限（約3MB相当）
+const IMPORT_ALLOWED_MEDIA = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
+
+exports.extractMenusFromImage = onCall(
+  { secrets: ['ANTHROPIC_API_KEY'] },
+  async (request) => {
+    if (!request.auth) {
+      throw new HttpsError('unauthenticated', 'ログインが必要です。');
+    }
+
+    const data = request.data || {};
+    const images = Array.isArray(data.images) ? data.images : [];
+    if (images.length === 0) {
+      throw new HttpsError('invalid-argument', '画像が渡されていません。');
+    }
+    if (images.length > IMPORT_MAX_IMAGES) {
+      throw new HttpsError('invalid-argument', '画像は最大' + IMPORT_MAX_IMAGES + '枚までです。');
+    }
+
+    const imageBlocks = [];
+    for (let i = 0; i < images.length; i++) {
+      const img = images[i] || {};
+      const mt = String(img.mediaType || '');
+      const b64 = String(img.data || '');
+      if (IMPORT_ALLOWED_MEDIA.indexOf(mt) < 0) {
+        throw new HttpsError('invalid-argument', '対応していない画像形式です: ' + mt);
+      }
+      if (!b64 || b64.length > IMPORT_MAX_B64_LEN) {
+        throw new HttpsError('invalid-argument', '画像サイズが大きすぎます（' + (i + 1) + '枚目）。');
+      }
+      imageBlocks.push({
+        type: 'image',
+        source: { type: 'base64', media_type: mt, data: b64 }
+      });
+    }
+
+    let catHint = '';
+    if (Array.isArray(data.categories) && data.categories.length > 0) {
+      const names = [];
+      for (let i = 0; i < data.categories.length; i++) {
+        const n = String(data.categories[i] || '').trim();
+        if (n) { names.push(n); }
+      }
+      if (names.length > 0) {
+        catHint = '\nこのサロンの既存カテゴリ: ' + names.join(' / ')
+          + '\ncategory は可能な限り上記のいずれかに一致させ、該当しなければ最も近い日本語カテゴリ名を入れる（不明なら null）。';
+      }
+    }
+
+    const systemPrompt =
+      'あなたはエステサロンのメニュー表を読み取る抽出器です。'
+      + '画像内のメニューを、次のJSONだけで出力してください（前後の説明・コードブロックは禁止）。\n'
+      + '{"items":[{"name":string,"price":number|null,"duration":number|null,'
+      + '"category":string|null,"description":string|null,"type":"main"|"option"}]}\n'
+      + '規則:\n'
+      + '- price は税込の数値（円）。「¥5,500」→5500。読み取れなければ null。\n'
+      + '- duration は施術時間の「分」数の整数。「1時間30分」→90。読み取れなければ null。\n'
+      + '- name は必須（メニュー名）。\n'
+      + '- description は簡単な説明があれば入れる。なければ null。\n'
+      + '- type は基本 "main"。明らかに追加/オプションメニューなら "option"。\n'
+      + '- 推測で埋めない。読めない項目は必ず null。存在しないメニューを作らない。'
+      + catHint;
+
+    const userContent = imageBlocks.slice();
+    userContent.push({ type: 'text', text: '画像からメニューを抽出してJSONで返してください。' });
+
+    const apiKey = process.env.ANTHROPIC_API_KEY;
+    if (!apiKey) {
+      throw new HttpsError('failed-precondition', 'ANTHROPIC_API_KEY が未設定です。');
+    }
+
+    let resp;
+    try {
+      resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01'
+        },
+        body: JSON.stringify({
+          model: ANTHROPIC_MODEL,
+          max_tokens: 4000,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userContent }]
+        })
+      });
+    } catch (err) {
+      logger.error('extractMenusFromImage fetch error', { error: err.message });
+      return { ok: false, error: 'network', message: 'AIへの接続に失敗しました。' };
+    }
+
+    if (!resp.ok) {
+      let bodyText = '';
+      try { bodyText = await resp.text(); } catch (e) {}
+      logger.error('extractMenusFromImage API error', { status: resp.status, body: bodyText.slice(0, 500) });
+      return { ok: false, error: 'api', message: 'AIの応答でエラーが発生しました（' + resp.status + '）。' };
+    }
+
+    let payload;
+    try {
+      payload = await resp.json();
+    } catch (err) {
+      return { ok: false, error: 'parse', message: 'AI応答の解析に失敗しました。' };
+    }
+
+    let text = '';
+    if (payload && Array.isArray(payload.content)) {
+      for (let i = 0; i < payload.content.length; i++) {
+        const blk = payload.content[i];
+        if (blk && blk.type === 'text' && typeof blk.text === 'string') {
+          text += blk.text;
+        }
+      }
+    }
+    text = text.trim();
+    text = text.replace(/^```(?:json)?/i, '').replace(/```$/, '').trim();
+
+    let parsed = null;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      const s = text.indexOf('{');
+      const e = text.lastIndexOf('}');
+      if (s >= 0 && e > s) {
+        try { parsed = JSON.parse(text.slice(s, e + 1)); } catch (e2) { parsed = null; }
+      }
+    }
+    if (!parsed || !Array.isArray(parsed.items)) {
+      return { ok: false, error: 'parse', message: 'メニューを読み取れませんでした。別の画像でお試しください。' };
+    }
+
+    const items = [];
+    for (let i = 0; i < parsed.items.length && items.length < 100; i++) {
+      const it = parsed.items[i] || {};
+      const name = (typeof it.name === 'string') ? it.name.trim() : '';
+      if (!name) { continue; }
+      let price = null;
+      if (it.price != null && it.price !== '') {
+        const p = parseInt(it.price, 10);
+        if (!isNaN(p) && p >= 0) { price = p; }
+      }
+      let duration = null;
+      if (it.duration != null && it.duration !== '') {
+        const d = parseInt(it.duration, 10);
+        if (!isNaN(d) && d > 0) { duration = d; }
+      }
+      const category = (typeof it.category === 'string' && it.category.trim())
+        ? it.category.trim().slice(0, 40) : null;
+      const description = (typeof it.description === 'string' && it.description.trim())
+        ? it.description.trim() : null;
+      const type = (it.type === 'option') ? 'option' : 'main';
+      items.push({
+        name: name.slice(0, 100),
+        price: price,
+        duration: duration,
+        category: category,
+        description: description,
+        type: type
+      });
+    }
+
+    logger.info('extractMenusFromImage ok', {
+      salonId: request.auth.uid, images: images.length, extracted: items.length
+    });
+    return { ok: true, items: items };
+  }
+);
