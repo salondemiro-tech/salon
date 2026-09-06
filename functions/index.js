@@ -1900,6 +1900,34 @@ const IMPORT_MAX_IMAGES = 4;
 const IMPORT_MAX_B64_LEN = 4500000; // 1枚あたり base64 長の上限（約3MB相当）
 const IMPORT_ALLOWED_MEDIA = ['image/png', 'image/jpeg', 'image/webp', 'image/gif'];
 
+// Anthropic Messages API 呼び出し（Node標準 https を使用。fetch非依存で確実）
+function anthropicRequest(apiKey, bodyObj) {
+  return new Promise(function (resolve, reject) {
+    const https = require('https');
+    const payload = JSON.stringify(bodyObj);
+    const req = https.request({
+      hostname: 'api.anthropic.com',
+      path: '/v1/messages',
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-length': Buffer.byteLength(payload)
+      }
+    }, function (res) {
+      let chunks = '';
+      res.setEncoding('utf8');
+      res.on('data', function (c) { chunks += c; });
+      res.on('end', function () { resolve({ status: res.statusCode, text: chunks }); });
+    });
+    req.on('error', function (e) { reject(e); });
+    req.setTimeout(55000, function () { req.destroy(new Error('timeout(55s)')); });
+    req.write(payload);
+    req.end();
+  });
+}
+
 exports.extractMenusFromImage = onCall(
   { secrets: ['ANTHROPIC_API_KEY'] },
   async (request) => {
@@ -1968,37 +1996,36 @@ exports.extractMenusFromImage = onCall(
       throw new HttpsError('failed-precondition', 'ANTHROPIC_API_KEY が未設定です。');
     }
 
-    let resp;
+    let apiResult;
     try {
-      resp = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01'
-        },
-        body: JSON.stringify({
-          model: ANTHROPIC_MODEL,
-          max_tokens: 4000,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userContent }]
-        })
+      apiResult = await anthropicRequest(apiKey, {
+        model: ANTHROPIC_MODEL,
+        max_tokens: 4000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userContent }]
       });
     } catch (err) {
-      logger.error('extractMenusFromImage fetch error', { error: err.message });
-      return { ok: false, error: 'network', message: 'AIへの接続に失敗しました。' };
+      logger.error('extractMenusFromImage request error', { error: err.message });
+      return {
+        ok: false, error: 'network',
+        message: 'AIへの接続に失敗しました。',
+        detail: (err && err.message) ? String(err.message) : ''
+      };
     }
 
-    if (!resp.ok) {
-      let bodyText = '';
-      try { bodyText = await resp.text(); } catch (e) {}
-      logger.error('extractMenusFromImage API error', { status: resp.status, body: bodyText.slice(0, 500) });
-      return { ok: false, error: 'api', message: 'AIの応答でエラーが発生しました（' + resp.status + '）。' };
+    if (apiResult.status < 200 || apiResult.status >= 300) {
+      const bodyText = String(apiResult.text || '');
+      logger.error('extractMenusFromImage API error', { status: apiResult.status, body: bodyText.slice(0, 500) });
+      return {
+        ok: false, error: 'api',
+        message: 'AIの応答でエラーが発生しました（' + apiResult.status + '）。',
+        detail: bodyText.slice(0, 300)
+      };
     }
 
     let payload;
     try {
-      payload = await resp.json();
+      payload = JSON.parse(apiResult.text);
     } catch (err) {
       return { ok: false, error: 'parse', message: 'AI応答の解析に失敗しました。' };
     }
