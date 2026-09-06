@@ -1556,7 +1556,9 @@
       uiForceHideLoading();
       var d = (res && res.data) ? res.data : null;
       if (!d || !d.ok) {
-        uiToast((d && d.message) ? d.message : '読み取りに失敗しました');
+        var emsg = (d && d.message) ? d.message : '読み取りに失敗しました';
+        if (d && d.detail) { emsg += '（詳細: ' + d.detail + '）'; }
+        uiToast(emsg);
         return;
       }
       if (!d.items || d.items.length === 0) {
