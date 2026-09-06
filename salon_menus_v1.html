@@ -111,6 +111,30 @@
   }
   .cat-add-row button:hover{background:var(--ad);}
 
+  /* ★ 画像取り込み 確認モーダル */
+  .imp-bulk{
+    background:#fff; border:1px solid var(--bd);
+    border-radius:10px; padding:12px 14px; margin-bottom:14px;
+  }
+  .imp-grid{display:flex; gap:8px; flex-wrap:wrap;}
+  .imp-grid .field{flex:1; min-width:120px; margin-bottom:8px;}
+  .imp-item{
+    border:1px solid var(--bd); border-radius:10px;
+    padding:12px 14px; margin-bottom:12px; background:var(--sf);
+  }
+  .imp-item.off{opacity:.45;}
+  .imp-item-head{display:flex; align-items:center; gap:9px; margin-bottom:9px;}
+  .imp-item-head input[type=checkbox]{
+    width:18px; height:18px; accent-color:var(--ac); flex-shrink:0; cursor:pointer;
+  }
+  .imp-name{
+    flex:1; min-width:0; background:#fff;
+    border:1px solid var(--bd); border-radius:8px;
+    padding:9px 10px; font-family:inherit; font-size:14px;
+    font-weight:600; color:var(--tx);
+  }
+  .imp-name:focus{outline:none; border-color:var(--ac);}
+
   /* セクション見出し */
   .sec-head{
     font-size:13px; color:var(--ad); margin:18px 4px 8px;
@@ -291,9 +315,11 @@
 
 <div class="wrap">
   <div class="toolbar">
+    <button class="btn-cat" onclick="openImportPicker()">画像から取り込み</button>
     <button class="btn-cat" onclick="openCatEditor()">カテゴリ編集</button>
     <button class="btn-add" onclick="openCreate()">＋ メニューを追加</button>
   </div>
+  <input type="file" id="importFileIn" accept="image/*" multiple style="display:none">
 
   <div class="sec-head">メインメニュー</div>
   <div id="mainList">
@@ -332,9 +358,25 @@
   </div>
 </div>
 
+<!-- ★2026/9 画像から取り込み 確認モーダル -->
+<div class="panel-ov" id="importPanelOv">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>画像から取り込み</h2>
+      <button class="panel-close" onclick="closeImport()">&#215;</button>
+    </div>
+    <div class="panel-body" id="importBody"></div>
+    <div class="panel-actions">
+      <button class="btn btn-primary" onclick="doImport()">取り込む</button>
+      <button class="btn btn-ghost" onclick="closeImport()">キャンセル</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-functions-compat.js"></script>
 
 <script src="firebase-init.js"></script>
 <script src="shared_db.js"></script>
@@ -1444,6 +1486,314 @@
 
   document.getElementById('catPanelOv').onclick = function (e) {
     if (e.target === this) { closeCatEditor(); }
+  };
+
+  // ============================================================
+  // ★2026/9 画像からメニュー取り込み
+  //   ボタン→画像選択→callable(extractMenusFromImage)→確認/編集→まとめて作成
+  // ============================================================
+  var _impItems = []; // [{name,price,duration,categoryId,description,type,include}]
+
+  function openImportPicker() {
+    var el = document.getElementById('importFileIn');
+    if (el) { el.value = ''; el.click(); }
+  }
+  window.openImportPicker = openImportPicker;
+
+  (function () {
+    var fin = document.getElementById('importFileIn');
+    if (!fin) { return; }
+    fin.onchange = function () {
+      var files = fin.files;
+      if (!files || files.length === 0) { return; }
+      if (files.length > 4) { uiToast('画像は最大4枚までです'); return; }
+      _readImagesThenExtract(files);
+    };
+  })();
+
+  function _readImagesThenExtract(files) {
+    uiShowLoading('画像を読み込み中...');
+    var out = [];
+    var total = files.length;
+    var done = 0;
+    var failed = false;
+    function onOne() {
+      done++;
+      if (done >= total) {
+        if (failed) { uiForceHideLoading(); uiToast('画像の読み込みに失敗しました'); return; }
+        _callExtract(out);
+      }
+    }
+    var i;
+    for (i = 0; i < total; i++) {
+      (function (file) {
+        var reader = new FileReader();
+        reader.onload = function () {
+          var res = String(reader.result || '');
+          var comma = res.indexOf(',');
+          var meta = (comma >= 0) ? res.slice(0, comma) : '';
+          var b64 = (comma >= 0) ? res.slice(comma + 1) : res;
+          var mt = 'image/png';
+          var m = meta.match(/data:([^;]+);/);
+          if (m) { mt = m[1]; }
+          out.push({ mediaType: mt, data: b64 });
+          onOne();
+        };
+        reader.onerror = function () { failed = true; onOne(); };
+        reader.readAsDataURL(file);
+      })(files[i]);
+    }
+  }
+
+  function _callExtract(images) {
+    uiShowLoading('AIがメニューを読み取っています...');
+    var catNames = [];
+    var i;
+    for (i = 0; i < _cats.length; i++) { catNames.push(_cats[i].name); }
+    var fn = firebase.app().functions('asia-northeast1')
+      .httpsCallable('extractMenusFromImage');
+    fn({ images: images, categories: catNames }).then(function (res) {
+      uiForceHideLoading();
+      var d = (res && res.data) ? res.data : null;
+      if (!d || !d.ok) {
+        uiToast((d && d.message) ? d.message : '読み取りに失敗しました');
+        return;
+      }
+      if (!d.items || d.items.length === 0) {
+        uiToast('メニューを検出できませんでした');
+        return;
+      }
+      _prepImportItems(d.items);
+      renderImport();
+      document.getElementById('importPanelOv').className = 'panel-ov show';
+    }).catch(function (e) {
+      uiForceHideLoading();
+      uiToast('読み取りに失敗しました: ' + (e && e.message ? e.message : ''));
+    });
+  }
+
+  // カテゴリ名 → 既存カテゴリID（一致しなければ 'other'）
+  function _resolveCatId(name) {
+    if (!name) { return 'other'; }
+    var t = String(name).trim().toLowerCase();
+    var i;
+    for (i = 0; i < _cats.length; i++) {
+      if (String(_cats[i].name).trim().toLowerCase() === t) { return _cats[i].id; }
+    }
+    return 'other';
+  }
+
+  function _prepImportItems(items) {
+    _impItems = [];
+    var i;
+    for (i = 0; i < items.length; i++) {
+      var it = items[i] || {};
+      _impItems.push({
+        name: it.name || '',
+        price: (typeof it.price === 'number') ? it.price : null,
+        duration: (typeof it.duration === 'number') ? it.duration : null,
+        categoryId: it.category ? _resolveCatId(it.category) : 'other',
+        description: it.description || '',
+        type: (it.type === 'option') ? 'option' : 'main',
+        include: true
+      });
+    }
+  }
+
+  function _impCatOptionsHtml(selId) {
+    var h = '';
+    var i;
+    for (i = 0; i < _cats.length; i++) {
+      h += '<option value="' + esc(_cats[i].id) + '"'
+        + (selId === _cats[i].id ? ' selected' : '') + '>'
+        + esc(_cats[i].name) + '</option>';
+    }
+    h += '<option value="other"'
+      + ((selId === 'other' || !selId) ? ' selected' : '') + '>'
+      + esc(OTHER_CAT.label) + '</option>';
+    return h;
+  }
+
+  function renderImport() {
+    var body = document.getElementById('importBody');
+    var h = '';
+    h += '<div class="form-note">AIが読み取った内容です。<b>必ず確認・修正してから</b>取り込んでください。'
+       + '取り込んだメニューは<b>最初は非公開</b>で登録されます（内容を確認してから公開に切り替えてください）。'
+       + '所要時間が空欄の行は取り込めません（下の一括設定でまとめて埋められます）。</div>';
+
+    h += '<div class="imp-bulk">'
+       + '<div class="team-section-title">空欄の一括設定</div>'
+       + '<div class="imp-grid">'
+       +   '<div class="field"><label>所要時間（分）</label>'
+       +     '<input type="number" id="impDefDur" value="60" inputmode="numeric"></div>'
+       +   '<div class="field"><label>料金（円）</label>'
+       +     '<input type="number" id="impDefPrice" value="0" inputmode="numeric"></div>'
+       +   '<div class="field"><label>カテゴリ</label>'
+       +     '<select id="impDefCat">' + _impCatOptionsHtml('other') + '</select></div>'
+       + '</div>'
+       + '<button class="btn-cat" onclick="applyImportBulk()">空欄に一括適用</button>'
+       + '</div>';
+
+    var i;
+    for (i = 0; i < _impItems.length; i++) {
+      var it = _impItems[i];
+      h += '<div class="imp-item' + (it.include ? '' : ' off') + '" id="impItem_' + i + '">';
+      h += '<div class="imp-item-head">'
+         + '<input type="checkbox" id="impInc_' + i + '"' + (it.include ? ' checked' : '')
+         +   ' onchange="toggleImportInc(' + i + ')">'
+         + '<input class="imp-name" id="impName_' + i + '" type="text" value="' + esc(it.name)
+         +   '" placeholder="メニュー名（必須）">'
+         + '</div>';
+      h += '<div class="imp-grid">'
+         + '<div class="field"><label>種別</label><select id="impType_' + i + '">'
+         +   '<option value="main"' + (it.type === 'main' ? ' selected' : '') + '>メイン</option>'
+         +   '<option value="option"' + (it.type === 'option' ? ' selected' : '') + '>オプション</option>'
+         + '</select></div>'
+         + '<div class="field"><label>カテゴリ</label><select id="impCat_' + i + '">'
+         +   _impCatOptionsHtml(it.categoryId) + '</select></div>'
+         + '<div class="field"><label>所要時間（分）</label>'
+         +   '<input type="number" id="impDur_' + i + '" value="'
+         +   (it.duration != null ? it.duration : '') + '" inputmode="numeric"></div>'
+         + '<div class="field"><label>料金（円）</label>'
+         +   '<input type="number" id="impPrice_' + i + '" value="'
+         +   (it.price != null ? it.price : '') + '" inputmode="numeric"></div>'
+         + '</div>';
+      h += '<div class="field"><label>説明（任意）</label><textarea id="impDesc_' + i + '">'
+         + esc(it.description) + '</textarea></div>';
+      h += '</div>';
+    }
+    body.innerHTML = h;
+  }
+
+  function _syncImportFromDom() {
+    var i;
+    for (i = 0; i < _impItems.length; i++) {
+      var nEl = document.getElementById('impName_' + i);
+      if (nEl) { _impItems[i].name = String(nEl.value || '').trim(); }
+      var tEl = document.getElementById('impType_' + i);
+      if (tEl) { _impItems[i].type = (tEl.value === 'option') ? 'option' : 'main'; }
+      var cEl = document.getElementById('impCat_' + i);
+      if (cEl) { _impItems[i].categoryId = cEl.value; }
+      var dEl = document.getElementById('impDur_' + i);
+      if (dEl) {
+        var dv = String(dEl.value || '').trim();
+        var dn = (dv === '') ? null : parseInt(dv, 10);
+        _impItems[i].duration = (dn != null && !isNaN(dn) && dn > 0) ? dn : null;
+      }
+      var pEl = document.getElementById('impPrice_' + i);
+      if (pEl) {
+        var pv = String(pEl.value || '').trim();
+        var pn = (pv === '') ? null : parseInt(pv, 10);
+        _impItems[i].price = (pn != null && !isNaN(pn) && pn >= 0) ? pn : null;
+      }
+      var descEl = document.getElementById('impDesc_' + i);
+      if (descEl) { _impItems[i].description = String(descEl.value || ''); }
+      var incEl = document.getElementById('impInc_' + i);
+      if (incEl) { _impItems[i].include = !!incEl.checked; }
+    }
+  }
+
+  function toggleImportInc(i) {
+    _syncImportFromDom();
+    renderImport();
+  }
+  window.toggleImportInc = toggleImportInc;
+
+  function applyImportBulk() {
+    _syncImportFromDom();
+    var dd = document.getElementById('impDefDur');
+    var dp = document.getElementById('impDefPrice');
+    var dc = document.getElementById('impDefCat');
+    var defDur = dd ? parseInt(dd.value, 10) : NaN;
+    var defPrice = dp ? parseInt(dp.value, 10) : NaN;
+    var defCat = dc ? dc.value : 'other';
+    var i;
+    for (i = 0; i < _impItems.length; i++) {
+      if (_impItems[i].duration == null && !isNaN(defDur) && defDur > 0) {
+        _impItems[i].duration = defDur;
+      }
+      if (_impItems[i].price == null && !isNaN(defPrice) && defPrice >= 0) {
+        _impItems[i].price = defPrice;
+      }
+      if (_impItems[i].categoryId === 'other' || !_impItems[i].categoryId) {
+        _impItems[i].categoryId = defCat;
+      }
+    }
+    renderImport();
+    uiToast('空欄にデフォルトを適用しました');
+  }
+  window.applyImportBulk = applyImportBulk;
+
+  function doImport() {
+    _syncImportFromDom();
+    var selected = [];
+    var skipped = 0;
+    var i;
+    for (i = 0; i < _impItems.length; i++) {
+      var it = _impItems[i];
+      if (!it.include) { continue; }
+      if (!it.name || it.duration == null || it.duration <= 0) { skipped++; continue; }
+      selected.push(it);
+    }
+    if (selected.length === 0) {
+      uiToast('取り込める行がありません（メニュー名と所要時間が必要です）');
+      return;
+    }
+    // sortOrder の起点（type別に現在の最大値）
+    var maxMain = -1, maxOpt = -1;
+    for (i = 0; i < _all.length; i++) {
+      var so = (typeof _all[i].sortOrder === 'number') ? _all[i].sortOrder : -1;
+      if (_all[i].type === 'option') { if (so > maxOpt) { maxOpt = so; } }
+      else { if (so > maxMain) { maxMain = so; } }
+    }
+
+    uiShowLoading('取り込み中...');
+    var total = selected.length;
+    var err = 0;
+
+    function next(idx) {
+      if (idx >= total) {
+        uiForceHideLoading();
+        var okCount = total - err;
+        var msg = (okCount > 0) ? (okCount + '件を取り込みました（非公開）') : '取り込みに失敗しました';
+        if (err > 0) { msg += ' / ' + err + '件失敗'; }
+        if (skipped > 0) { msg += ' / ' + skipped + '件スキップ'; }
+        uiToast(msg);
+        closeImport();
+        loadList();
+        return;
+      }
+      var it = selected[idx];
+      var so;
+      if (it.type === 'option') { maxOpt += 1; so = maxOpt; }
+      else { maxMain += 1; so = maxMain; }
+      var d = {
+        name: it.name,
+        duration: it.duration,
+        price: (it.price == null ? 0 : it.price),
+        type: it.type,
+        public: false,
+        description: it.description || '',
+        sortOrder: so
+      };
+      if (it.type === 'main') { d.category = it.categoryId || 'other'; }
+      dbSalonCreateMenu(d, function (res) {
+        if (!res || !res._id) { err++; }
+        next(idx + 1);
+      });
+    }
+    next(0);
+  }
+  window.doImport = doImport;
+
+  function closeImport() {
+    document.getElementById('importPanelOv').className = 'panel-ov';
+    _impItems = [];
+  }
+  window.closeImport = closeImport;
+
+  document.getElementById('importPanelOv').onclick = function (e) {
+    if (e.target === this) { closeImport(); }
   };
 
   onFbReady(function () {
