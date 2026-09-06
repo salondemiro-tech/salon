@@ -67,6 +67,49 @@
     font-family:inherit; font-size:14px; font-weight:600;
   }
   .btn-add:hover{background:var(--ad);}
+  /* ★ カテゴリ編集ボタン（副次アクション） */
+  .btn-cat{
+    background:#fff; color:var(--ad);
+    border:1px solid var(--ac); border-radius:11px;
+    padding:10px 16px; cursor:pointer;
+    font-family:inherit; font-size:14px; font-weight:600;
+  }
+  .btn-cat:hover{background:var(--al);}
+  /* ★ カテゴリ編集モーダルの行 */
+  .cat-edit-row{
+    display:flex; align-items:center; gap:8px;
+    padding:8px 0; border-bottom:1px solid var(--bd);
+  }
+  .cat-edit-row:last-child{border-bottom:none;}
+  .cat-edit-row .cat-name-in{
+    flex:1; min-width:0; background:var(--sf);
+    border:1px solid var(--bd); border-radius:8px;
+    padding:9px 10px; font-family:inherit; font-size:14px; color:var(--tx);
+  }
+  .cat-edit-row .cat-name-in:focus{outline:none; border-color:var(--ac); background:#fff;}
+  .cat-mini{
+    width:30px; height:30px; border-radius:7px;
+    border:1px solid var(--bd); background:var(--sf);
+    cursor:pointer; font-family:inherit; line-height:1;
+    color:var(--ad); font-size:13px; flex-shrink:0;
+  }
+  .cat-mini:hover:not(:disabled){background:var(--al); border-color:var(--ac);}
+  .cat-mini:disabled{opacity:.35; cursor:not-allowed;}
+  .cat-mini.del{color:var(--rt); border-color:var(--rl);}
+  .cat-mini.del:hover{background:var(--rl);}
+  .cat-add-row{display:flex; gap:8px; margin-top:14px;}
+  .cat-add-row input{
+    flex:1; background:var(--sf); border:1px solid var(--bd);
+    border-radius:8px; padding:10px 12px;
+    font-family:inherit; font-size:14px; color:var(--tx);
+  }
+  .cat-add-row input:focus{outline:none; border-color:var(--ac); background:#fff;}
+  .cat-add-row button{
+    flex:0 0 auto; background:var(--ac); color:#fff; border:none;
+    border-radius:8px; padding:10px 16px; cursor:pointer;
+    font-family:inherit; font-size:14px; font-weight:600;
+  }
+  .cat-add-row button:hover{background:var(--ad);}
 
   /* セクション見出し */
   .sec-head{
@@ -248,6 +291,7 @@
 
 <div class="wrap">
   <div class="toolbar">
+    <button class="btn-cat" onclick="openCatEditor()">カテゴリ編集</button>
     <button class="btn-add" onclick="openCreate()">＋ メニューを追加</button>
   </div>
 
@@ -273,6 +317,21 @@
   </div>
 </div>
 
+<!-- ★2026/9 カテゴリ編集モーダル -->
+<div class="panel-ov" id="catPanelOv">
+  <div class="panel">
+    <div class="panel-head">
+      <h2>カテゴリ編集</h2>
+      <button class="panel-close" onclick="closeCatEditor()">&#215;</button>
+    </div>
+    <div class="panel-body" id="catPanelBody"></div>
+    <div class="panel-actions">
+      <button class="btn btn-primary" onclick="saveCatEditor()">保存</button>
+      <button class="btn btn-ghost" onclick="closeCatEditor()">キャンセル</button>
+    </div>
+  </div>
+</div>
+
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
@@ -295,6 +354,23 @@
   var _spaceList = [];    // Phase2: 場所一覧
   var _equipList = [];    // Phase2: 機器一覧
 
+  // ★2026/9 サロン定義カテゴリ
+  var _cats = [];         // 編集可能カテゴリ [{id,name}]（'other' は含めない）
+  var _catsEdit = [];     // カテゴリ編集モーダルの作業コピー
+  var _catsOrigIds = [];  // モーダルを開いた時点のID一覧（削除検出用）
+  var OTHER_CAT = { id: 'other', label: 'その他 / 未分類' };
+
+  function _catExists(id) {
+    var i;
+    for (i = 0; i < _cats.length; i++) {
+      if (_cats[i].id === id) { return true; }
+    }
+    return false;
+  }
+  function _genCatId() {
+    return 'c' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  }
+
   function esc(s) {
     s = (s == null) ? '' : String(s);
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;')
@@ -316,8 +392,16 @@
   window.goDashboard = goDashboard;
 
   // ----- 一覧 -----
+  // ★2026/9: カテゴリ定義を先に取得してから本体をロード
   function loadList() {
     uiShowLoading('読み込み中...');
+    dbSalonGetMenuCategories(function (cats) {
+      _cats = cats || [];
+      _loadListInner();
+    });
+  }
+
+  function _loadListInner() {
     var db = firebase.firestore();
     db.collection('salons').doc(_salonId)
       .collection('config').doc('settings').get()
@@ -368,9 +452,9 @@
     });
   }
 
-  // ★ カテゴリ判定（未設定は 'other' 扱い。顧客アプリと同じルール）
+  // ★ カテゴリ判定（現存カテゴリに一致しない/未設定は 'other' 扱い）
   function _catKey(m) {
-    return (m && (m.category === 'facial' || m.category === 'body'))
+    return (m && typeof m.category === 'string' && _catExists(m.category))
       ? m.category : 'other';
   }
 
@@ -404,11 +488,12 @@
       box.appendChild(card0);
       return;
     }
-    var defs = [
-      { key: 'facial', label: 'フェイシャル' },
-      { key: 'body',   label: 'ボディ' },
-      { key: 'other',  label: 'その他' }
-    ];
+    var defs = [];
+    var d;
+    for (d = 0; d < _cats.length; d++) {
+      defs.push({ key: _cats[d].id, label: _cats[d].name });
+    }
+    defs.push({ key: 'other', label: OTHER_CAT.label });
     var g, i;
     for (g = 0; g < defs.length; g++) {
       var glist = [];
@@ -446,11 +531,13 @@
     }
   }
 
-  // ★ カテゴリ表示名（facial/body/other → 日本語）
+  // ★ カテゴリ表示名（id → 名前。現存しない/未設定は その他）
   function _catLabel(c) {
-    if (c === 'facial') { return 'フェイシャル'; }
-    if (c === 'body') { return 'ボディ'; }
-    return 'その他';
+    var i;
+    for (i = 0; i < _cats.length; i++) {
+      if (_cats[i].id === c) { return _cats[i].name; }
+    }
+    return OTHER_CAT.label;
   }
 
   function buildRow(m, sectionList, idxInSection, kind) {
@@ -693,7 +780,7 @@
     // ★ カテゴリ（mainのみ。optionのときは送らない＝既存値はそのまま）
     var catSel = document.getElementById('fCat');
     var cat = (typ === 'main' && catSel) ? catSel.value : null;
-    if (cat !== 'facial' && cat !== 'body' && cat !== 'other') { cat = null; }
+    if (cat !== 'other' && !_catExists(cat)) { cat = null; }
 
     var patch = {
       name: name,
@@ -836,7 +923,7 @@
     // ★ カテゴリ（mainのみ）
     var catSel = document.getElementById('fCat');
     var cat = (typ === 'main' && catSel) ? catSel.value : null;
-    if (cat !== 'facial' && cat !== 'body' && cat !== 'other') { cat = null; }
+    if (cat !== 'other' && !_catExists(cat)) { cat = null; }
     // 新規は同種別の末尾に配置（既存の最大 sortOrder + 1）
     var maxSo = -1;
     var i;
@@ -943,14 +1030,19 @@
     fc.appendChild(fcl);
     var csel = document.createElement('select');
     csel.id = 'fCat';
-    var c1 = document.createElement('option');
-    c1.value = 'facial'; c1.textContent = 'フェイシャル';
-    var c2 = document.createElement('option');
-    c2.value = 'body'; c2.textContent = 'ボディ';
-    var c3 = document.createElement('option');
-    c3.value = 'other'; c3.textContent = 'その他';
-    csel.appendChild(c1); csel.appendChild(c2); csel.appendChild(c3);
-    if (m && (m.category === 'facial' || m.category === 'body')) {
+    var ci;
+    for (ci = 0; ci < _cats.length; ci++) {
+      var co = document.createElement('option');
+      co.value = _cats[ci].id;
+      co.textContent = _cats[ci].name;
+      csel.appendChild(co);
+    }
+    var coOther = document.createElement('option');
+    coOther.value = 'other';
+    coOther.textContent = OTHER_CAT.label;
+    csel.appendChild(coOther);
+    // 選択値: 現存カテゴリなら それ、なければ その他
+    if (m && typeof m.category === 'string' && _catExists(m.category)) {
       csel.value = m.category;
     } else {
       csel.value = 'other';
@@ -1120,6 +1212,238 @@
 
   document.getElementById('panelOv').onclick = function (e) {
     if (e.target === this) { closePanel(); }
+  };
+
+  // ============================================================
+  // ★2026/9 カテゴリ編集モーダル
+  // ============================================================
+  function openCatEditor() {
+    // 作業コピーを作成（保存するまで実体には反映しない）
+    _catsEdit = [];
+    _catsOrigIds = [];
+    var i;
+    for (i = 0; i < _cats.length; i++) {
+      _catsEdit.push({ id: _cats[i].id, name: _cats[i].name });
+      _catsOrigIds.push(_cats[i].id);
+    }
+    renderCatEditor();
+    document.getElementById('catPanelOv').className = 'panel-ov show';
+  }
+  window.openCatEditor = openCatEditor;
+
+  function closeCatEditor() {
+    document.getElementById('catPanelOv').className = 'panel-ov';
+  }
+  window.closeCatEditor = closeCatEditor;
+
+  // 現在の入力欄の名前を作業コピーへ取り込む（再描画・構造変更の前に呼ぶ）
+  function _syncCatNamesFromDom() {
+    var i;
+    for (i = 0; i < _catsEdit.length; i++) {
+      var el = document.getElementById('catNameIn_' + i);
+      if (el) { _catsEdit[i].name = String(el.value || ''); }
+    }
+  }
+
+  // このカテゴリに属するメイン メニュー数（実体 _all から数える）
+  function _countMenusInCat(catId) {
+    var n = 0, i;
+    for (i = 0; i < _all.length; i++) {
+      var m = _all[i];
+      if (m && m.type !== 'option' && m.category === catId) { n++; }
+    }
+    return n;
+  }
+
+  function renderCatEditor() {
+    var body = document.getElementById('catPanelBody');
+    body.innerHTML = '';
+
+    var note = document.createElement('div');
+    note.className = 'form-note';
+    note.textContent =
+      'メインメニューを分類するカテゴリです（顧客の予約画面の見出しにも使われます）。'
+      + '「その他 / 未分類」は常に用意されるため、ここには表示されません。'
+      + 'カテゴリを削除すると、そのメニューは「その他 / 未分類」へ移動します。';
+    body.appendChild(note);
+
+    if (_catsEdit.length === 0) {
+      var em = document.createElement('div');
+      em.className = 'empty';
+      em.textContent = 'カテゴリがありません。下から追加してください。';
+      body.appendChild(em);
+    }
+
+    var i;
+    for (i = 0; i < _catsEdit.length; i++) {
+      (function (idx) {
+        var row = document.createElement('div');
+        row.className = 'cat-edit-row';
+
+        var up = document.createElement('button');
+        up.className = 'cat-mini';
+        up.textContent = '\u25B2';
+        if (idx === 0) { up.disabled = true; }
+        up.onclick = function () { _moveCatRow(idx, -1); };
+        row.appendChild(up);
+
+        var dn = document.createElement('button');
+        dn.className = 'cat-mini';
+        dn.textContent = '\u25BC';
+        if (idx === _catsEdit.length - 1) { dn.disabled = true; }
+        dn.onclick = function () { _moveCatRow(idx, +1); };
+        row.appendChild(dn);
+
+        var inp = document.createElement('input');
+        inp.className = 'cat-name-in';
+        inp.id = 'catNameIn_' + idx;
+        inp.type = 'text';
+        inp.value = _catsEdit[idx].name;
+        inp.maxLength = 30;
+        row.appendChild(inp);
+
+        var del = document.createElement('button');
+        del.className = 'cat-mini del';
+        del.textContent = '\u2715';
+        del.onclick = function () { _delCatRow(idx); };
+        row.appendChild(del);
+
+        body.appendChild(row);
+      })(i);
+    }
+
+    var addRow = document.createElement('div');
+    addRow.className = 'cat-add-row';
+    var addIn = document.createElement('input');
+    addIn.type = 'text';
+    addIn.id = 'catAddIn';
+    addIn.placeholder = '新しいカテゴリ名';
+    addIn.maxLength = 30;
+    addRow.appendChild(addIn);
+    var addBtn = document.createElement('button');
+    addBtn.textContent = '＋ 追加';
+    addBtn.onclick = _addCatRow;
+    addRow.appendChild(addBtn);
+    body.appendChild(addRow);
+  }
+
+  function _moveCatRow(idx, dir) {
+    _syncCatNamesFromDom();
+    var newIdx = idx + dir;
+    if (newIdx < 0 || newIdx >= _catsEdit.length) { return; }
+    var tmp = _catsEdit[idx];
+    _catsEdit[idx] = _catsEdit[newIdx];
+    _catsEdit[newIdx] = tmp;
+    renderCatEditor();
+  }
+
+  function _delCatRow(idx) {
+    _syncCatNamesFromDom();
+    _catsEdit.splice(idx, 1);
+    renderCatEditor();
+  }
+
+  function _addCatRow() {
+    _syncCatNamesFromDom();
+    var el = document.getElementById('catAddIn');
+    var name = el ? String(el.value || '').trim() : '';
+    if (!name) { uiToast('カテゴリ名を入力してください'); return; }
+    _catsEdit.push({ id: _genCatId(), name: name });
+    renderCatEditor();
+  }
+
+  function saveCatEditor() {
+    _syncCatNamesFromDom();
+
+    // 名前を整形し、空欄を除外
+    var cleaned = [];
+    var i;
+    for (i = 0; i < _catsEdit.length; i++) {
+      var nm = String(_catsEdit[i].name || '').trim();
+      if (nm) { cleaned.push({ id: _catsEdit[i].id, name: nm }); }
+    }
+    if (cleaned.length === 0) {
+      uiToast('カテゴリは1つ以上必要です（すべて削除はできません）');
+      return;
+    }
+
+    // 削除されたカテゴリID（開いた時点にあり、今はない）を検出
+    var editedIds = {};
+    for (i = 0; i < cleaned.length; i++) { editedIds[cleaned[i].id] = true; }
+    var removedIds = [];
+    for (i = 0; i < _catsOrigIds.length; i++) {
+      if (!editedIds[_catsOrigIds[i]]) { removedIds.push(_catsOrigIds[i]); }
+    }
+
+    // 削除カテゴリに属するメニュー総数
+    var affected = 0;
+    for (i = 0; i < removedIds.length; i++) {
+      affected += _countMenusInCat(removedIds[i]);
+    }
+
+    if (affected > 0) {
+      uiConfirmDelete(
+        affected + '件のメニューが「その他 / 未分類」へ移動します。'
+        + '\nこのまま保存しますか？',
+        function () { _doSaveCats(cleaned, removedIds); },
+        null
+      );
+    } else {
+      _doSaveCats(cleaned, removedIds);
+    }
+  }
+  window.saveCatEditor = saveCatEditor;
+
+  function _doSaveCats(cleaned, removedIds) {
+    uiShowLoading('保存中...');
+    dbSalonSaveMenuCategories(cleaned, function (ok) {
+      if (!ok) {
+        uiForceHideLoading();
+        uiToast('カテゴリの保存に失敗しました');
+        return;
+      }
+      // 削除カテゴリのメニューを 'other' へ付け替え
+      var targets = [];
+      var i;
+      for (i = 0; i < removedIds.length; i++) {
+        var rid = removedIds[i];
+        var j;
+        for (j = 0; j < _all.length; j++) {
+          var m = _all[j];
+          if (m && m.type !== 'option' && m.category === rid) {
+            targets.push(m._id);
+          }
+        }
+      }
+      if (targets.length === 0) {
+        uiForceHideLoading();
+        uiToast('カテゴリを保存しました');
+        closeCatEditor();
+        loadList();
+        return;
+      }
+      var done = 0, err = 0;
+      for (i = 0; i < targets.length; i++) {
+        dbSalonUpdateMenu(targets[i], { category: 'other' }, function (r) {
+          if (!r) { err++; }
+          done++;
+          if (done >= targets.length) {
+            uiForceHideLoading();
+            if (err > 0) {
+              uiToast('一部のメニューの移動に失敗しました。画面を更新してください');
+            } else {
+              uiToast('カテゴリを保存しました');
+            }
+            closeCatEditor();
+            loadList();
+          }
+        });
+      }
+    });
+  }
+
+  document.getElementById('catPanelOv').onclick = function (e) {
+    if (e.target === this) { closeCatEditor(); }
   };
 
   onFbReady(function () {

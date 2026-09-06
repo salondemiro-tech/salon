@@ -561,13 +561,12 @@
       requiredResourceIds: ['default'],
       createdAt: _serverTimestamp()
     };
-    // ★ 2026/6/12: category（facial/body/other、省略可）。main のみ意味を持つ。
-    //   rules の hasOnly/in 検証と1対1（DESIGN.md 0-2 参照）
-    if (typ === 'main' &&
-        (data.category === 'facial' ||
-         data.category === 'body' ||
-         data.category === 'other')) {
-      doc.category = data.category;
+    // ★ 2026/9: category はサロン定義の自由文字列に変更（main のみ意味を持つ）。
+    //   値の実体（config/menuCategories に存在するか）は UI 側で担保。
+    //   rules は「string であること」だけ検証（DESIGN_NOTES 項目2 の方針）。
+    if (typ === 'main' && typeof data.category === 'string') {
+      var _catCr = data.category.trim();
+      if (_catCr) { doc.category = _catCr.slice(0, 40); }
     }
     if (data.description) { doc.description = String(data.description); }
     if (data.contraindications) { doc.contraindications = String(data.contraindications); }
@@ -612,12 +611,13 @@
           patch.type !== 'main' && patch.type !== 'option') {
         delete patch.type;
       }
-      // ★ 2026/6/12: category は facial/body/other のみ許可。不正値は落とす
-      if (patch.hasOwnProperty('category') &&
-          patch.category !== 'facial' &&
-          patch.category !== 'body' &&
-          patch.category !== 'other') {
-        delete patch.category;
+      // ★ 2026/9: category はサロン定義の自由文字列。string 以外/空は落とす。
+      if (patch.hasOwnProperty('category')) {
+        if (typeof patch.category === 'string' && patch.category.trim()) {
+          patch.category = patch.category.trim().slice(0, 40);
+        } else {
+          delete patch.category;
+        }
       }
       if (patch.hasOwnProperty('public')) {
         patch.public = (patch.public === true);
@@ -668,6 +668,81 @@
     }
   }
   window.dbSalonReorderMenus = dbSalonReorderMenus;
+
+  // ============================================================
+  // メニューカテゴリ（config/menuCategories）  ★2026/9 追加
+  //   doc: { categories:[{id,name},...], updatedAt, createdAt? }
+  //   ・並び順 = 配列の順序
+  //   ・'other'（その他/未分類）は常設バケットのため categories には含めない
+  //   ・doc 未作成のサロンは既定（フェイシャル/ボディ）で動作＝書き込み不要
+  //   ・id は英数字_のみ。'other'/'option' は予約語で使用不可
+  // ============================================================
+
+  var _DEFAULT_MENU_CATS = [
+    { id: 'facial', name: 'フェイシャル' },
+    { id: 'body',   name: 'ボディ' }
+  ];
+
+  function dbSalonDefaultMenuCategories() {
+    var out = [];
+    var i;
+    for (i = 0; i < _DEFAULT_MENU_CATS.length; i++) {
+      out.push({ id: _DEFAULT_MENU_CATS[i].id, name: _DEFAULT_MENU_CATS[i].name });
+    }
+    return out;
+  }
+  window.dbSalonDefaultMenuCategories = dbSalonDefaultMenuCategories;
+
+  function _sanitizeMenuCats(list) {
+    var out = [];
+    if (!list || !list.length) { return out; }
+    var seen = {};
+    var i;
+    for (i = 0; i < list.length; i++) {
+      var c = list[i];
+      if (!c) { continue; }
+      var id = (typeof c.id === 'string') ? c.id.trim() : '';
+      var name = (typeof c.name === 'string') ? c.name.trim() : '';
+      if (!id || !name) { continue; }
+      if (id === 'other' || id === 'option') { continue; }
+      if (!/^[A-Za-z0-9_]+$/.test(id)) { continue; }
+      if (seen[id]) { continue; }
+      seen[id] = true;
+      out.push({ id: id, name: name.slice(0, 30) });
+      if (out.length >= 30) { break; }
+    }
+    return out;
+  }
+
+  // 取得: doc がなければ/空なら既定カテゴリを返す（呼び出し側は常に配列を得る）
+  function dbSalonGetMenuCategories(cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, dbSalonDefaultMenuCategories()); return; }
+    dbReadDoc('salons/' + sid + '/config/menuCategories', function (doc) {
+      if (!doc || !Array.isArray(doc.categories)) {
+        _safeCb(cb, dbSalonDefaultMenuCategories());
+        return;
+      }
+      var clean = _sanitizeMenuCats(doc.categories);
+      if (clean.length === 0) { _safeCb(cb, dbSalonDefaultMenuCategories()); return; }
+      _safeCb(cb, clean);
+    });
+  }
+  window.dbSalonGetMenuCategories = dbSalonGetMenuCategories;
+
+  // 保存: categories を丸ごと置き換え（merge:true で createdAt 等は保持）
+  //   有効カテゴリが0件になる保存は拒否（false を返す）
+  function dbSalonSaveMenuCategories(list, cb) {
+    var sid = getCurrentSalonId();
+    if (!sid) { _safeCb(cb, false); return; }
+    var clean = _sanitizeMenuCats(list);
+    if (clean.length === 0) { _safeCb(cb, false); return; }
+    var doc = { categories: clean, updatedAt: _serverTimestamp() };
+    dbWriteDoc('salons/' + sid + '/config/menuCategories', doc, true, function (ok) {
+      _safeCb(cb, ok === true);
+    });
+  }
+  window.dbSalonSaveMenuCategories = dbSalonSaveMenuCategories;
 
   function dbGetSettings(cb) {
     var sid = getCurrentSalonId();

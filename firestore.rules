@@ -227,7 +227,7 @@ service cloud.firestore {
                         request.resource.data.public is bool &&
                         request.resource.data.eligibleStaffIds is list &&
                         (!('category' in request.resource.data) ||
-                          request.resource.data.category in ['facial', 'body', 'other']) &&
+                          request.resource.data.category is string) &&
                         (!('sortOrder' in request.resource.data) ||
                           (request.resource.data.sortOrder is int &&
                            request.resource.data.sortOrder >= 0));
@@ -621,6 +621,26 @@ service cloud.firestore {
             request.resource.data.expiry in ['3m', '6m', '12m', 'none']) &&
           (!('bonusStamps' in request.resource.data) ||
             request.resource.data.bonusStamps is list) &&
+          (!('updatedAt' in request.resource.data) ||
+            request.resource.data.updatedAt is timestamp);
+      }
+
+      // ── config/menuCategories ────────────────────────────────
+      // ★2026/9 追加: サロン定義のメニューカテゴリ。
+      //   shared_db.js dbSalonSaveMenuCategories が送るフィールド:
+      //     categories(list) / updatedAt(timestamp) / createdAt(任意)
+      //   categories の要素形状（{id,name}）は UI/DB層で担保（Rulesは list 型のみ）。
+      //   読み取りは顧客の予約画面も使うため isSignedIn() で許可。
+      // ─────────────────────────────────────────────────────────
+      match /config/menuCategories {
+        allow read: if isSignedIn();
+        allow write: if isSalonStaff(salonId) &&
+          request.resource.data.keys().hasOnly([
+            'categories', 'createdAt', 'updatedAt'
+          ]) &&
+          request.resource.data.categories is list &&
+          (!('createdAt' in request.resource.data) ||
+            request.resource.data.createdAt is timestamp) &&
           (!('updatedAt' in request.resource.data) ||
             request.resource.data.updatedAt is timestamp);
       }

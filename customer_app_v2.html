@@ -289,6 +289,7 @@ var appState = {
   settings: null,         // 営業時間など
 
   menus: null,            // 公開メニュー一覧
+  menuCategories: null,   // ★2026/9 サロン定義カテゴリ [{id,name}]
   selectedMenu: null,     // 選択したメニュー（オブジェクト）
   selectedOptions: [],    // 選択したオプションメニュー（配列）
 
@@ -603,7 +604,15 @@ function renderMenuStep(){
     }
     dbCustomerGetPublicMenus(function(list){
       appState.menus = list || [];
-      renderMenuStep();
+      // ★2026/9: サロン定義カテゴリを取得してから描画（未取得時のみ）
+      if (appState.menuCategories == null && typeof dbSalonGetMenuCategories === 'function'){
+        dbSalonGetMenuCategories(function(cats){
+          appState.menuCategories = cats || [];
+          renderMenuStep();
+        });
+      } else {
+        renderMenuStep();
+      }
     });
     return;
   }
@@ -630,18 +639,30 @@ function renderMenuStep(){
     return;
   }
 
-  // ★ 2026/6/12: カテゴリ別グループ表示（facial / body / other）
-  //   category 未設定の既存メニューは 'other' 扱い（マイグレーション不要）。
+  // ★ 2026/9: サロン定義カテゴリでグループ表示（config/menuCategories）。
+  //   現存カテゴリに一致しない/未設定メニューは 'other'（その他）扱い。
   //   存在するカテゴリが1種類のみの場合は見出しを出さない（従来通りの見た目）。
-  var catDefs = [
-    { key: 'facial', label: 'フェイシャル' },
-    { key: 'body',   label: 'ボディ' },
-    { key: 'other',  label: 'その他' }
-  ];
-  var groups = { facial: [], body: [], other: [] };
+  var srcCats = (appState.menuCategories && appState.menuCategories.length)
+    ? appState.menuCategories
+    : ((typeof dbSalonDefaultMenuCategories === 'function')
+        ? dbSalonDefaultMenuCategories()
+        : [{ id: 'facial', name: 'フェイシャル' }, { id: 'body', name: 'ボディ' }]);
+  function _isKnownCat(id){
+    var q;
+    for (q = 0; q < srcCats.length; q++){ if (srcCats[q].id === id){ return true; } }
+    return false;
+  }
+  var catDefs = [];
+  var __ci;
+  for (__ci = 0; __ci < srcCats.length; __ci++){
+    catDefs.push({ key: srcCats[__ci].id, label: srcCats[__ci].name });
+  }
+  catDefs.push({ key: 'other', label: 'その他' });
+  var groups = {};
+  for (__ci = 0; __ci < catDefs.length; __ci++){ groups[catDefs[__ci].key] = []; }
   for (i = 0; i < mains.length; i++){
     var cm = mains[i];
-    var ck = (cm.category === 'facial' || cm.category === 'body') ? cm.category : 'other';
+    var ck = (typeof cm.category === 'string' && _isKnownCat(cm.category)) ? cm.category : 'other';
     groups[ck].push(cm);
   }
   var usedCats = 0;
