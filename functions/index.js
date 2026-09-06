@@ -1905,13 +1905,15 @@ function anthropicRequest(apiKey, bodyObj) {
   return new Promise(function (resolve, reject) {
     const https = require('https');
     const payload = JSON.stringify(bodyObj);
+    // ★キーの前後の空白・改行を除去（Secret貼り付け時に混入する末尾改行対策）
+    const cleanKey = String(apiKey || '').replace(/[\r\n\t]/g, '').trim();
     const req = https.request({
       hostname: 'api.anthropic.com',
       path: '/v1/messages',
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-api-key': apiKey,
+        'x-api-key': cleanKey,
         'anthropic-version': '2023-06-01',
         'content-length': Buffer.byteLength(payload)
       }
