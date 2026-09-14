@@ -1351,7 +1351,8 @@
     }
     var payload = {
       salonId: sid, dateKey: dateKey, menuId: menuId,
-      optionMenuIds: optionMenuIds || []
+      optionMenuIds: optionMenuIds || [],
+      channel: 'customer'
     };
     if (nominatedStaffId) { payload.nominatedStaffId = nominatedStaffId; }
     callable(payload).then(function (res) {
