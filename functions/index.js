@@ -733,7 +733,7 @@ exports.getAvailableSlots = onCall(
       throw new HttpsError('unauthenticated', 'ログインが必要です。');
     }
 
-    const { salonId, dateKey, menuId, optionMenuIds, nominatedStaffId } = request.data || {};
+    const { salonId, dateKey, menuId, optionMenuIds, nominatedStaffId, channel } = request.data || {};
 
     if (!salonId || typeof salonId !== 'string') {
       throw new HttpsError('invalid-argument', 'salonId が不正です。');
@@ -779,6 +779,28 @@ exports.getAvailableSlots = onCall(
     const intervalMin = (typeof settings.intervalMin === 'number') ? settings.intervalMin : 0;
     const needMin  = totalDuration > 0 ? totalDuration : slotMin;
     const latestStart = closeMin - needMin;
+
+    // ===== オンライン予約の受付締切（settings.lastMin） =====
+    //   顧客アプリ（channel === 'customer'）からの予約にのみ適用。
+    //   サロン側の手動予約（channel 未指定）は締切の対象外。
+    //   日ベース（1week/3days/1day）: 予約日の「-(offset)日 の 0:00(JST)」を過ぎたら
+    //     その日は全て締切（= その予約日の(N-1)日前の24時が締切時刻）。
+    //   時間ベース（12h/same3h/same1h/same30m）: 各枠の開始 - X(ms) を過ぎた枠を締切。
+    //   none / 未設定 / 未知の値: 締切なし。
+    const bookingCutoff = (typeof settings.lastMin === 'string') ? settings.lastMin : 'none';
+    const CUTOFF_DAY_OFFSET = { '1week': 6, '3days': 2, '1day': 0 };
+    const CUTOFF_TIME_MS = {
+      '12h': 43200000, 'same3h': 10800000, 'same1h': 3600000, 'same30m': 1800000
+    };
+    const applyCutoff  = (channel === 'customer') && bookingCutoff !== 'none';
+    const isDayCutoff  = applyCutoff &&
+      Object.prototype.hasOwnProperty.call(CUTOFF_DAY_OFFSET, bookingCutoff);
+    const isTimeCutoff = applyCutoff &&
+      Object.prototype.hasOwnProperty.call(CUTOFF_TIME_MS, bookingCutoff);
+    const cutoffTimeMs = isTimeCutoff ? CUTOFF_TIME_MS[bookingCutoff] : 0;
+    // JST基準の絶対ミリ秒で判定（サーバーTZに依存しない）
+    const cutoffDayBaseMs = new Date(dateKey + 'T00:00:00+09:00').getTime();
+    const cutoffNowMs = Date.now();
 
     // ===== フェーズ2: スタッフ・場所・機器の設定を取得 =====
     const eligibleStaffIds     = Array.isArray(menu.eligibleStaffIds)     ? menu.eligibleStaffIds     : [];
@@ -900,6 +922,14 @@ exports.getAvailableSlots = onCall(
       return { dateKey, slots: [] };
     }
 
+    // 日ベースの受付締切: 締切時刻を過ぎていればこの日は空きなし
+    if (isDayCutoff) {
+      const cutoffMomentMs = cutoffDayBaseMs - CUTOFF_DAY_OFFSET[bookingCutoff] * 86400000;
+      if (cutoffNowMs >= cutoffMomentMs) {
+        return { dateKey, slots: [] };
+      }
+    }
+
     const now = new Date();
     const todayKey = [
       now.getFullYear(),
@@ -917,6 +947,12 @@ exports.getAvailableSlots = onCall(
 
       // 過去スロットはスキップ
       if (nowMin >= 0 && slotStart <= nowMin) { available = false; }
+
+      // 時間ベースの受付締切: 各枠開始の cutoffTimeMs 前を過ぎたら受付不可
+      if (available && isTimeCutoff) {
+        const slotStartMs = cutoffDayBaseMs + slotStart * 60000;
+        if (cutoffNowMs >= slotStartMs - cutoffTimeMs) { available = false; }
+      }
 
       // グローバルブロック（closeBlocks / weeklyClose）チェック
       if (available) {
