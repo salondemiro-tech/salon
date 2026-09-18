@@ -277,8 +277,17 @@
         var a = arr[i];
         // pendingCreate を除外
         if (!calendarShouldDisplay(a)) { continue; }
-        // cancelled / no_show を除外 (表示しないステータス)
-        if (a.status === 'cancelled' || a.status === 'no_show') { continue; }
+        // ★ 2026/9/18 修正: キャンセル系ステータスを全て除外。
+        //   顧客アプリからのキャンセルは status = 'cancelled_by_customer' を立てるため、
+        //   'cancelled' / 'no_show' だけの判定では週バンドルから消えず、
+        //   キャンセル済み予約がカレンダー週表示に残っていた。
+        //   Functions 側 getAvailableSlots / 日表示 loadDay と同じ 6 種を統一除外する。
+        if (a.status === 'cancelled'
+            || a.status === 'cancelled_by_customer'
+            || a.status === 'cancelled_by_salon'
+            || a.status === 'no_show'
+            || a.status === 'time_conflict'
+            || a.status === 'failed') { continue; }
         filtered.push(a);
       }
       // start 昇順でソート

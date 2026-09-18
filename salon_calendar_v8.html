@@ -259,6 +259,12 @@
   .row-2{display:flex; gap:10px;}
   .row-2 .field{flex:1; margin-bottom:0;}
 
+  /* ★ 2026/9/18: 日付は年/月/日セレクトで確実に選べるようにする（iPadのネイティブ
+     type=date ピッカーが確定しない不具合の回避）。値は隠しinputに書き戻す。 */
+  .date-selects{display:flex; align-items:center; gap:5px;}
+  .date-selects select{flex:1; min-width:0;}
+  .date-selects .ds-u{font-size:12px; color:var(--mu); flex:0 0 auto;}
+
   /* 顧客選択 */
   .cust-mode{display:flex; gap:8px; margin-bottom:10px;}
   .cust-mode-btn{
@@ -555,15 +561,18 @@
 
       <div style="height:14px;"></div>
 
-      <div class="row-2" style="margin-bottom:14px;">
-        <div class="field" style="margin-bottom:0;">
-          <label>日付</label>
-          <input type="date" id="bDate">
+      <div class="field" style="margin-bottom:14px;">
+        <label>日付</label>
+        <div class="date-selects">
+          <select id="bDateY" onchange="onDateSelectChange('bDate')"></select><span class="ds-u">年</span>
+          <select id="bDateM" onchange="onDateSelectChange('bDate')"></select><span class="ds-u">月</span>
+          <select id="bDateD" onchange="onDateSelectChange('bDate')"></select><span class="ds-u">日</span>
         </div>
-        <div class="field" style="margin-bottom:0;">
-          <label>開始時間</label>
-          <input type="time" id="bTime" value="10:00">
-        </div>
+        <input type="hidden" id="bDate">
+      </div>
+      <div class="field" style="margin-bottom:14px;">
+        <label>開始時間</label>
+        <input type="time" id="bTime" value="10:00">
       </div>
 
       <div class="field">
@@ -586,7 +595,12 @@
     <div class="modal-body hidden" id="closeBody">
       <div class="field">
         <label>日付</label>
-        <input type="date" id="cDate">
+        <div class="date-selects">
+          <select id="cDateY" onchange="onDateSelectChange('cDate')"></select><span class="ds-u">年</span>
+          <select id="cDateM" onchange="onDateSelectChange('cDate')"></select><span class="ds-u">月</span>
+          <select id="cDateD" onchange="onDateSelectChange('cDate')"></select><span class="ds-u">日</span>
+        </div>
+        <input type="hidden" id="cDate">
       </div>
       <div class="row-2">
         <div class="field">
@@ -1706,7 +1720,7 @@
     document.getElementById('newEmail').value = '';
 
     var dateKey = todayKey();
-    document.getElementById('bDate').value = dateKey;
+    setDateSelects('bDate', dateKey);
     document.getElementById('bTime').value = '10:00';
 
     var sel = document.getElementById('bMenu');
@@ -1775,8 +1789,74 @@
     document.getElementById('bMemo').value = '';
   }
 
+  // ★ 2026/9/18: 年/月/日セレクト式 日付入力ヘルパー
+  //   iPad のネイティブ type=date ピッカーで日付が確定しない不具合の回避策。
+  //   prefix = 'bDate' / 'cDate'。<select id=prefix+'Y'/'M'/'D'> を操作し、
+  //   隠しinput(id=prefix)に 'YYYY-MM-DD' を書き戻す（保存側は従来どおり .value を読むだけ）。
+  function _ds_fillSelect(sel, from, to, cur) {
+    sel.innerHTML = '';
+    var i, op;
+    for (i = from; i <= to; i++) {
+      op = document.createElement('option');
+      op.value = String(i);
+      op.textContent = String(i);
+      if (i === cur) { op.selected = true; }
+      sel.appendChild(op);
+    }
+  }
+  function _ds_daysInMonth(y, m) {
+    // m: 1-12。翌月0日 = 当月末日
+    return new Date(y, m, 0).getDate();
+  }
+  function _ds_rebuildDays(prefix) {
+    var y = parseInt(document.getElementById(prefix + 'Y').value, 10);
+    var m = parseInt(document.getElementById(prefix + 'M').value, 10);
+    var dSel = document.getElementById(prefix + 'D');
+    var cur = parseInt(dSel.value, 10);
+    if (isNaN(cur)) { cur = 1; }
+    if (isNaN(y) || isNaN(m)) { return; }
+    var dim = _ds_daysInMonth(y, m);
+    if (cur > dim) { cur = dim; }
+    _ds_fillSelect(dSel, 1, dim, cur);
+  }
+  function _ds_syncHidden(prefix) {
+    var y = parseInt(document.getElementById(prefix + 'Y').value, 10);
+    var m = parseInt(document.getElementById(prefix + 'M').value, 10);
+    var d = parseInt(document.getElementById(prefix + 'D').value, 10);
+    if (isNaN(y) || isNaN(m) || isNaN(d)) { return; }
+    document.getElementById(prefix).value =
+      y + '-' + pad2(m) + '-' + pad2(d);
+  }
+  function onDateSelectChange(prefix) {
+    _ds_rebuildDays(prefix);
+    _ds_syncHidden(prefix);
+  }
+  window.onDateSelectChange = onDateSelectChange;
+
+  // 'YYYY-MM-DD' で年/月/日セレクトを初期化（不正・空なら今日）
+  function setDateSelects(prefix, ymd) {
+    var now = new Date();
+    var y = now.getFullYear(), m = now.getMonth() + 1, d = now.getDate();
+    if (ymd && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(ymd)) {
+      var p = ymd.split('-');
+      y = parseInt(p[0], 10);
+      m = parseInt(p[1], 10);
+      d = parseInt(p[2], 10);
+    }
+    var nowY = now.getFullYear();
+    var yFrom = (y < nowY) ? y : nowY;
+    var yTo = (y > nowY + 1) ? y : (nowY + 1);
+    _ds_fillSelect(document.getElementById(prefix + 'Y'), yFrom, yTo, y);
+    _ds_fillSelect(document.getElementById(prefix + 'M'), 1, 12, m);
+    _ds_rebuildDays(prefix);
+    var dim = _ds_daysInMonth(y, m);
+    if (d > dim) { d = dim; }
+    document.getElementById(prefix + 'D').value = String(d);
+    _ds_syncHidden(prefix);
+  }
+
   function initCloseForm() {
-    document.getElementById('cDate').value = todayKey();
+    setDateSelects('cDate', todayKey());
     document.getElementById('cStart').value = '12:00';
     document.getElementById('cEnd').value = '13:00';
     document.getElementById('cReason').value = '';
