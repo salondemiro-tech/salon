@@ -1434,6 +1434,7 @@ function renderIdentityStep(){
 
   if (identityMode === 'verify'){ renderVerifyView(); return; }
   if (identityMode === 'signup'){ renderSignupView(); return; }
+  if (identityMode === 'reset'){ renderResetView(); return; }
   renderLoginView();
 }
 
@@ -1450,11 +1451,22 @@ function renderLoginView(){
     '<div class="field">' +
       '<label class="label">パスワード</label>' +
       '<input type="password" id="passInput" class="input" autocomplete="current-password" placeholder="パスワード">' +
+      '<label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:13px;color:var(--mu);">' +
+        '<input type="checkbox" id="showPassChk"> パスワードを表示する' +
+      '</label>' +
     '</div>' +
     '<button class="pbtn" id="loginBtn">ログイン</button>' +
-    '<button class="sbtn" id="toSignupBtn">はじめての方（新規登録）</button>'
+    '<button class="sbtn" id="toSignupBtn">はじめての方（新規登録）</button>' +
+    '<button class="gbtn" id="toResetBtn">パスワードを忘れた方はこちら</button>'
   );
   $('loginBtn').addEventListener('click', doLogin);
+  $('showPassChk').addEventListener('change', function(){
+    $('passInput').type = this.checked ? 'text' : 'password';
+  });
+  $('toResetBtn').addEventListener('click', function(){
+    appState.resetEmail = ($('emailInput').value || '').trim();
+    identityMode = 'reset'; render();
+  });
   $('toSignupBtn').addEventListener('click', function(){
     identityMode = 'signup'; render();
   });
@@ -1489,6 +1501,69 @@ function renderSignupView(){
   $('signupBtn').addEventListener('click', doSignup);
   $('toLoginBtn').addEventListener('click', function(){
     identityMode = 'login'; render();
+  });
+}
+
+// パスワード再設定（Firebase 標準の再設定メール）
+function renderResetView(){
+  setFooter('');
+  setBody(
+    '<div class="step-title">パスワードの再設定</div>' +
+    '<div class="step-desc">ご登録のメールアドレスを入力してください。<br>' +
+      'パスワード再設定用のリンクをお送りします。</div>' +
+    '<div id="identityErr"></div>' +
+    '<div class="field">' +
+      '<label class="label">メールアドレス</label>' +
+      '<input type="email" id="emailInput" class="input" autocomplete="email" inputmode="email" placeholder="you@example.com">' +
+    '</div>' +
+    '<button class="pbtn" id="resetBtn">再設定メールを送る</button>' +
+    '<button class="gbtn" id="toLoginBtn">ログイン画面に戻る</button>'
+  );
+  $('emailInput').value = appState.resetEmail || '';
+  $('resetBtn').addEventListener('click', doPasswordReset);
+  $('toLoginBtn').addEventListener('click', function(){
+    identityMode = 'login'; render();
+  });
+}
+
+function doPasswordReset(){
+  if (appState.busy) return;
+  var email = ($('emailInput').value || '').trim();
+  if (!email){ identityErr('メールアドレスを入力してください。'); return; }
+
+  appState.busy = true;
+  $('resetBtn').disabled = true;
+  $('resetBtn').textContent = '送信中...';
+
+  // 再設定完了後にこの予約ページへ戻れるようにする
+  var actionCodeSettings = {
+    url: location.origin + location.pathname + '?salon=' + encodeURIComponent(appState.salonId || ''),
+    handleCodeInApp: false
+  };
+  var done = function(){
+    appState.busy = false;
+    if ($('resetBtn')){ $('resetBtn').disabled = false; $('resetBtn').textContent = '再設定メールを送る'; }
+    var el = $('identityErr');
+    // アカウント有無を推測されないよう、未登録でも同じ文言を表示する
+    if (el) el.innerHTML = '<div class="info-box">' + esc(email) + ' 宛にパスワード再設定メールを送信しました（ご登録がある場合）。<br>' +
+      'メール内のリンクから新しいパスワードを設定し、ログイン画面からログインしてください。<br>' +
+      '届かない場合は迷惑メールフォルダもご確認ください。</div>';
+  };
+  auth.sendPasswordResetEmail(email, actionCodeSettings).then(done).catch(function(err){
+    var code = (err && err.code) ? err.code : '';
+    if (code === 'auth/user-not-found'){ done(); return; }
+    if (code === 'auth/unauthorized-continue-uri' || code === 'auth/invalid-continue-uri'){
+      // 戻り先URLが許可ドメインにない場合は戻り先なしで再送
+      auth.sendPasswordResetEmail(email).then(done).catch(function(e2){
+        appState.busy = false;
+        if ($('resetBtn')){ $('resetBtn').disabled = false; $('resetBtn').textContent = '再設定メールを送る'; }
+        identityErr(authErrorMsg(e2));
+      });
+      return;
+    }
+    appState.busy = false;
+    if ($('resetBtn')){ $('resetBtn').disabled = false; $('resetBtn').textContent = '再設定メールを送る'; }
+    identityErr(authErrorMsg(err));
   });
 }
 
@@ -1646,9 +1721,17 @@ function authErrorMsg(err){
   var code = (err && err.code) ? err.code : '';
   switch (code){
     case 'auth/invalid-email': return 'メールアドレスの形式が正しくありません。';
-    case 'auth/user-not-found': return 'このメールアドレスは登録されていません。新規登録をお試しください。';
-    case 'auth/wrong-password': return 'パスワードが正しくありません。';
-    case 'auth/invalid-credential': return 'メールアドレスまたはパスワードが正しくありません。';
+    case 'auth/user-not-found':
+    case 'auth/wrong-password':
+    case 'auth/invalid-credential':
+    case 'auth/invalid-login-credentials':
+      // メールアドレス列挙保護が有効な Firebase プロジェクトでは、未登録・パスワード違いの
+      // どちらも invalid-credential / invalid-login-credentials として返るため区別できない
+      return 'メールアドレスまたはパスワードが正しくありません。' +
+             'パスワードがわからない場合は「パスワードを忘れた方はこちら」から再設定してください。';
+    case 'auth/missing-password': return 'パスワードを入力してください。';
+    case 'auth/user-disabled': return 'このアカウントは現在ご利用いただけません。サロンへお問い合わせください。';
+    case 'auth/missing-email': return 'メールアドレスを入力してください。';
     case 'auth/email-already-in-use': return 'このメールアドレスは既に登録されています。ログインをお試しください。';
     case 'auth/weak-password': return 'パスワードは6文字以上で設定してください。';
     case 'auth/too-many-requests': return '試行回数が多すぎます。しばらく待ってからお試しください。';
@@ -2131,7 +2214,7 @@ function renderMypageStep(){
         btn.textContent = 'メールアドレスを変更';
       }).catch(function(e){
         var msg = 'メールアドレスの変更に失敗しました。';
-        if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') msg = 'パスワードが正しくありません。';
+        if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') msg = 'パスワードが正しくありません。';
         if (e.code === 'auth/email-already-in-use') msg = 'そのメールアドレスはすでに使用されています。';
         if (e.code === 'auth/invalid-email') msg = 'メールアドレスの形式が正しくありません。';
         if (e.code === 'auth/requires-recent-login') msg = 'セキュリティのため再ログインが必要です。一度ログアウトして再度ログインしてください。';
@@ -2170,7 +2253,7 @@ function renderMypageStep(){
         btn.textContent = 'パスワードを変更';
       }).catch(function(e){
         var msg = 'パスワードの変更に失敗しました。';
-        if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential') msg = '現在のパスワードが正しくありません。';
+        if (e.code === 'auth/wrong-password' || e.code === 'auth/invalid-credential' || e.code === 'auth/invalid-login-credentials') msg = '現在のパスワードが正しくありません。';
         if (e.code === 'auth/requires-recent-login') msg = 'セキュリティのため再ログインが必要です。一度ログアウトして再度ログインしてください。';
         showMypageMsg(msgEl, 'err', msg);
         btn.disabled = false;
